@@ -71,19 +71,22 @@ def continuation_tags(items):
                 field = "arguments" if kind == "function_call" else "input"
                 if type(item.get("name")) is not str or type(item.get(field)) is not str:
                     raise ValueError("native_call_invalid")
-                tags.append(("tool", [kind, call, item["name"], item[field], execution]))
+                tags.append(("tool", [kind, call, item["name"], item[field], execution, item.get("id")]))
                 tags.extend((field, [call_kind, call, value]) for field, value in context)
             else:
                 if (type(item.get("output")) not in {str, list} or execution[2] is not None
                         or item.get("name") is not None and type(item["name"]) is not str):
                     raise ValueError("native_tool_result_invalid")
                 tags.extend((field, [call_kind, call, value]) for field, value in context if value is not None)
-        if "encrypted_content" in item and not (kind == "reasoning" and item["encrypted_content"] is None):
-            opaque = item["encrypted_content"]
-            if type(opaque) is not str or not 1 <= len(opaque) <= 1024 * 1024:
-                raise ValueError("native_opaque_invalid")
-            opaque.encode("utf-8")
-            tags.append(("opaque", opaque))
+        if kind in {"reasoning", "compaction"}:
+            opaque = item.get("encrypted_content")
+            if opaque is not None or kind == "compaction":
+                if type(opaque) is not str or not 1 <= len(opaque) <= 1024 * 1024:
+                    raise ValueError("native_opaque_invalid")
+                opaque.encode("utf-8")
+            tags.append(("state", [kind, item["id"], opaque]))
+        elif "encrypted_content" in item:
+            raise ValueError("native_opaque_invalid")
         if ("id" in item and kind not in {"function_call_output", "custom_tool_call_output"}
                 and not (kind in {"function_call", "custom_tool_call"} and item["id"] is None)
                 and not (message and item.get("role") in {"user", "developer", "system"})):

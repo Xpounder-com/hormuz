@@ -606,6 +606,45 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                         self.assertEqual(len(native_requests), 3)
             self.assertEqual((local_requests, cloud_requests), ([], []))
 
+    def test_opaque_values_and_tool_item_ids_cannot_be_recombined_or_stripped(self):
+        reasoning = {"id": "reasoning-a", "type": "reasoning", "summary": [], "encrypted_content": "OPAQUE_A"}
+        compaction = {"id": "compaction-b", "type": "compaction", "encrypted_content": "OPAQUE_B"}
+        nullable = {"id": "reasoning-null", "type": "reasoning", "summary": [], "encrypted_content": None}
+        call_a = {"id": "item-a", "type": "function_call", "call_id": "call-a", "name": "tool", "arguments": '{"value":"a"}'}
+        call_b = {"id": "item-b", "type": "function_call", "call_id": "call-b", "name": "tool", "arguments": '{"value":"b"}'}
+        call_null = {**call_a, "id": None, "call_id": "call-null"}
+        output = [reasoning, compaction, nullable, call_a, call_b, call_null]
+        data = ("data: " + json.dumps(completed(output=output)) + "\n\n").encode()
+        def reply(handler, value, number):
+            if number != 1:
+                return stream_reply(handler, value, number)
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                self.assertEqual(self.native(submit)["body"], data.decode())
+                invalid = [{**reasoning, "encrypted_content": "OPAQUE_B"}, {**compaction, "encrypted_content": "OPAQUE_A"},
+                    {**call_a, "id": "item-b"}, {k: v for k, v in call_a.items() if k != "id"},
+                    {**reasoning, "encrypted_content": None}, {k: v for k, v in reasoning.items() if k != "encrypted_content"}]
+                for item in invalid:
+                    with self.subTest(item=item):
+                        denied = self.native(submit, request={"input": [item]})
+                        self.assertEqual(denied["status"], 403, denied)
+                        self.assertEqual(len(native_requests), 1)
+                results = [{"type": "function_call_output", "call_id": call["call_id"], "output": "result"}
+                           for call in (call_a, call_b, call_null)]
+                normalized = [reasoning, compaction, {k: v for k, v in nullable.items() if k != "encrypted_content"},
+                              call_a, call_b, {k: v for k, v in call_null.items() if k != "id"}]
+                for replay in (output, normalized):
+                    result = self.native(submit, request={"input": replay + results})
+                    self.assertEqual(result["status"], 200, result)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 3))
+
     def test_unsupported_or_ambiguous_native_request_envelopes_never_reach_a_provider(self):
         cases = [
             {"request": {"stream": False}}, {"request": {"store": True}}, {"request": {"background": True}},

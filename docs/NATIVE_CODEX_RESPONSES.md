@@ -79,6 +79,9 @@ model/destination generation, body thread/session/cache identity and any
 async execution mode retain their validated issued values. Absent/null optional
 values are equivalent. Supplied result names/namespaces/callers must match the
 issued call; results and provider item IDs cannot change their item type.
+Opaque values stay paired with their issued item kind/ID, and tool item IDs stay
+paired with their complete issued call. Individually known IDs and blobs cannot
+be recombined, and non-null issued state cannot be stripped on replay.
 Those session headers constrain affinity and
 are consumed locally. Changed arguments or opaque bytes, unknown provider IDs,
 failed turns, restart, expiry or another owner block before egress. Native
