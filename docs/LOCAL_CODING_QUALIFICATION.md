@@ -32,6 +32,10 @@ holder forging a version or cryptographic attestation of an executable.
 Evidence must name an explicitly supported client wire version. Changing the
 adapter's default does not invalidate an unchanged older version that remains
 supported; each version still needs its own matching receipt and request header.
+The evidence subject can declare the supported `codex_http_0160` wire capability,
+including its bounded explicit no-reasoning envelope. It must exactly match the
+configured route and request controls. Transport support alone grants no coding
+readiness; missing evidence remains unknown, and version/control drift blocks.
 
 The minimum battery is four development cases (at least one per family) and
 12 distinct held-out cases (at least three per family): arithmetic/boundaries,

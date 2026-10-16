@@ -92,6 +92,8 @@ try:
                "input": "Fix the arithmetic function in this Python code." if "code-change" in sys.argv else
                         "Review this code diff." if "code-review" in sys.argv else
                         "Consider this fixture." if "unknown-task" in sys.argv else "Summarize this fixture."}
+    if "request-file" in sys.argv:
+        request = json.loads(pathlib.Path(sys.argv[sys.argv.index("request-file") + 1]).read_text())
     version_file = pathlib.Path(__file__).with_name("client-version.txt")
     version = version_file.read_text().strip() if version_file.exists() else "0.147.0"
     headers = {"Content-Type": "application/json", "Authorization": "Bearer " + credential,
@@ -716,6 +718,63 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 self.assertEqual(requests, [])
             finally:
                 self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+
+    def test_codex_0160_setup_admits_only_matching_reviewed_native_wire_evidence(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            route = value["model_routes"]["local-code"]
+            route.update(upstream_model="local-code",
+                         capabilities=["responses", "text", "tools", "codex_http_0160"])
+            evidence = self.coding_evidence(value)
+            request = json.loads((Path(__file__).parent / "fixtures/codex-http-request-0.160.json").read_text())
+            request["input"][0]["content"][0]["text"] = "Fix the arithmetic in this Python function."
+            request.update(instructions="Fix the supplied arithmetic function.", stream=False,
+                           reasoning={"effort": "none"}, max_output_tokens=8)
+            # This explicit control mapping follows the documented receipt
+            # contract; ordinary task text and client identifiers vary.
+            controls = {"instructions": "Fix the supplied arithmetic function.", "tools": request["tools"],
+                        "tool_choice": "auto", "reasoning": {"effort": "none"},
+                        "include": ["reasoning.encrypted_content"], "parallel_tool_calls": False,
+                        "store": False, "service_tier": "default", "stream": False}
+            subject = evidence["plan"]["subject"]
+            subject.update(client_version="0.160.0", request_profile_sha256=hashlib.sha256(json.dumps(
+                controls, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+            evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+            options = self.local_setup_options(value)
+            profile_path = Path(options[1])
+            profile = json.loads(profile_path.read_text())
+            profile.update(schema_version=2, client_version="0.160.0", capabilities=route["capabilities"],
+                           task_types=["code_change"])
+            request_path = self.root / "native-request.json"
+            request_path.write_text(json.dumps(request))
+            version_file = self.root / "client-version.txt"
+            version_file.write_text("0.160.0")
+            for receipt, readiness in ((None, "unknown"), (evidence, "qualified")):
+                with self.subTest(coding_readiness=readiness):
+                    self.path.unlink(missing_ok=True)
+                    profile_path.write_text(json.dumps({**profile, "coding_evidence": receipt}))
+                    try:
+                        self.command("setup", *options)
+                        status = json.loads(self.command("status", "--routing").stdout)
+                        self.assertEqual(status["routes"][0]["coding_readiness"], readiness)
+                        result = self.client("request-file", str(request_path))
+                        self.assertEqual(result["status"], 200 if receipt else 503, result)
+                        if receipt:
+                            self.assertEqual(result["headers"]["x-hormuz-destination-locality"], "local")
+                            version_file.write_text("0.147.0")
+                            self.assertEqual(self.client("request-file", str(request_path))["status"], 503)
+                            version_file.write_text("0.160.0")
+                            self.assertEqual(self.client("request-file", str(request_path), "instruction-drift")["status"], 503)
+                        else:
+                            self.assertFalse((engine / "inference-count").exists())
+                        self.assertEqual(requests, [])
+                    finally:
+                        self.command("disconnect")
+            self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"])
             self.assertTrue((engine / "stopped").is_file())
             self.assertEqual(self.client("inspect")["model"], "original-model")
 

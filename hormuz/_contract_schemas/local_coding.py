@@ -53,7 +53,7 @@ def validate_evidence(value):
         raise ContractValidationError("invalid coding model revision")
     caps = subject["capabilities"]
     if (type(caps) is not list
-            or any(type(cap) is not str or cap not in {"responses", "text", "streaming", "tools", "codex_http", "structured_output"} for cap in caps)
+            or any(type(cap) is not str or cap not in {"responses", "text", "streaming", "tools", "codex_http", "codex_http_0160", "structured_output"} for cap in caps)
             or not {"responses", "text"}.issubset(caps) or len(caps) != len(set(caps))):
         raise ContractValidationError("invalid coding capabilities")
     for key, maximum in (("max_request_bytes", 65536), ("max_output_tokens", 512), ("upstream_timeout_seconds", 90)):
