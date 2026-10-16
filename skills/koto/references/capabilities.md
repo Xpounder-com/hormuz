@@ -6,7 +6,7 @@ development package version strings alone do not establish these commands.
 
 ## Diagnose and explain
 
-`hormuz --config CONFIG client diagnose codex --client-home HOME` inspects
+`koto --config CONFIG client diagnose codex --client-home HOME` inspects
 configuration and connected-client status without probing models or changing
 routing. An optional `--executable PATH` performs the existing bounded version
 check. Compatibility without that check and model/task readiness are explicitly
@@ -16,7 +16,7 @@ Select the project with `--project DIRECTORY` (default current directory). For
 known launch settings, supply each argument separately, for example:
 
 ```sh
-hormuz --config CONFIG client diagnose codex --client-home HOME \
+koto --config CONFIG client diagnose codex --client-home HOME \
   --project PROJECT --launch-arg=--profile --launch-arg=review \
   --launch-arg=--model --launch-arg=ALIAS
 ```
@@ -32,7 +32,7 @@ actual running-session routing remains unobserved. Diagnosis preserves settings
 and project trust.
 
 Use `history list` to identify a retained opted-in attempt, then
-`hormuz --config CONFIG request explain ENTRY_ID`. New entries expose policy,
+`koto --config CONFIG request explain ENTRY_ID`. New entries expose policy,
 fallback and routing evidence, destination/locality, latency and available usage.
 Legacy entries report absent evidence as unobserved. Optimization evidence is
 unobserved; do not infer token savings. Missing history is not consent to enable it.
@@ -42,7 +42,7 @@ unobserved; do not infer token savings. Missing history is not consent to enable
 For a selected existing local OpenAI Responses route, run:
 
 ```sh
-hormuz --config CONFIG model qualify --model ALIAS \
+koto --config CONFIG model qualify --model ALIAS \
   --client-executable CLIENT --runtime-executable RUNTIME --model-file MODEL \
   --output NEW_PRIVATE_REPORT
 ```
@@ -80,7 +80,7 @@ provider results fail. Seven-day expiry is a conservative default for this tiny
 suite; setup fingerprints must also match.
 
 ```sh
-hormuz --config CONFIG model recommend --model ALIAS \
+koto --config CONFIG model recommend --model ALIAS \
   --client-executable CLIENT --runtime-executable RUNTIME --model-file MODEL \
   --qualification PRIVATE_REPORT
 ```
@@ -97,7 +97,7 @@ fixed error rather than a recommendation.
 ## Policy preview and activation
 
 ```sh
-hormuz --config CURRENT policy configure --local-only \
+koto --config CURRENT policy configure --local-only \
   --monthly-budget-usd 2.50 --output NEW_CONFIG --dry-run
 ```
 
@@ -121,7 +121,7 @@ In-flight work retains its existing owner and settlement semantics.
 
 ## Usage and maintenance
 
-`hormuz --config CONFIG usage insights` reports one retained-history snapshot:
+`koto --config CONFIG usage insights` reports one retained-history snapshot:
 counts, known estimates, unknown costs, token coverage, observed period and
 content-free observations. It never enables capture. No before-and-after savings
 claim is generated. Use shared history commands for consent, deletion and local
@@ -129,4 +129,4 @@ exports, keeping decrypted content out of agent results.
 
 Maintenance reuses diagnosis, version checks and conditional restoration. It
 does not install client/runtime updates. Disconnect before removal, preserving
-newer user settings and processes that Hormuz does not own.
+newer user settings and processes that Koto does not own.

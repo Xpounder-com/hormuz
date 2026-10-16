@@ -1,4 +1,4 @@
-"""Client versions qualified for the Hormuz launcher contract."""
+"""Client versions qualified for the Koto launcher contract."""
 
 SUPPORTED_CODEX_VERSION = "0.160.0"
 SUPPORTED_CODEX_VERSIONS = ("0.147.0", SUPPORTED_CODEX_VERSION)

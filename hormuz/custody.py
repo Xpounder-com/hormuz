@@ -8,7 +8,7 @@ small interfaces here.
 
 The module never serializes plaintext credentials.  Encrypted envelope files
 contain an encrypted data key, nonce, and AES-GCM ciphertext only.  Audit
-artifacts contain already metadata-only Hormuz audit events only.
+artifacts contain already metadata-only Koto audit events only.
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ class CustodyError(RuntimeError):
 class GeneratedDataKey:
     """One plaintext data key and its provider-encrypted representation.
 
-    ``plaintext`` is intentionally never serialized or exposed by a Hormuz
+    ``plaintext`` is intentionally never serialized or exposed by a Koto
     CLI command.  The caller drops it after the local AES-GCM operation.
     """
 
@@ -342,7 +342,7 @@ class AuditAnchorReceipt:
 
 @dataclass(frozen=True)
 class ImmutableAnchorArtifactSummary:
-    """Safe common metadata for any externally retainable Hormuz artifact."""
+    """Safe common metadata for any externally retainable Koto artifact."""
 
     schema_id: str
     schema_version: int

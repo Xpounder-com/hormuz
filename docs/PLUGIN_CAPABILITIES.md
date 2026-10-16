@@ -6,7 +6,7 @@ call the same CLI; the persistent routing adapter supports exact Codex CLI
 0.147.0 and [the 0.160.0 single-agent HTTP profile](CODEX_0160.md). Installing
 the plugin does not connect a client or install assets.
 
-The [capability workflow](../skills/hormuz/references/capabilities.md) documents
+The [capability workflow](../skills/koto/references/capabilities.md) documents
 commands, bounds, activation, output privacy and unsupported scope.
 
 ## Public receipts

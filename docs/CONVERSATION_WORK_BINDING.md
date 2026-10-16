@@ -1,6 +1,6 @@
 # Automatic conversation work binding
 
-With `ai_work.enabled: true`, Hormuz can associate native Codex HTTP requests
+With `ai_work.enabled: true`, Koto can associate native Codex HTTP requests
 with one owned work item without requiring the caller to retain
 `X-Hormuz-Work-ID`. The existing connection commands and skills-only setup path
 use this router behavior. There is no additional setup flag, CLI command or
@@ -228,7 +228,7 @@ the original driver and evidence were not overwritten or relabeled as passing.
 
 This qualifies one native tool round trip through the protocol fixture. There
 was no model inference. New turns, resume, fork, other releases and desktop
-clients remain unqualified. Body identities were observed after Hormuz; raw
+clients remain unqualified. Body identities were observed after Koto; raw
 incoming identity headers were not retained. Zero cloud-trap calls are not an
 operating-system egress audit. The earlier real-model quality limitations remain
 in the historical qualification record.

@@ -487,7 +487,7 @@ class RouterClient:
         try:
             connection.request(method, path, None if payload is None else json.dumps(payload), headers={
                 "Authorization": "Bearer " + self.token, "Content-Type": "application/json",
-                "User-Agent": "Hormuz codex-benchmark", "X-Hormuz-Routing-Mode": "local_only",
+                "User-Agent": "Koto codex-benchmark", "X-Hormuz-Routing-Mode": "local_only",
                 "X-Hormuz-Benchmark": "1"})
             response = connection.getresponse()
             headers_ms = (time.monotonic() - started) * 1000

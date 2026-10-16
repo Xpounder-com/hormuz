@@ -5,6 +5,7 @@ import argparse
 import json
 import logging
 import os
+from pathlib import Path
 import signal
 import sqlite3
 import sys
@@ -23,10 +24,15 @@ from .store import StorageSchemaError
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="hormuz", description="Local routing for existing coding clients.")
+    parser = argparse.ArgumentParser(prog="koto", description="Koto: local routing for existing coding clients.")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("--config", default=os.environ.get("HORMUZ_CONFIG", "hormuz.json"),
-                        help="Router JSON configuration path (or HORMUZ_CONFIG)")
+    koto_config = Path("koto.json")
+    default_config = (os.environ.get("KOTO_CONFIG") or os.environ.get("HORMUZ_CONFIG")
+                      or ("hormuz.json" if not (koto_config.exists() or koto_config.is_symlink())
+                          and Path("hormuz.json").exists()
+                          else "koto.json"))
+    parser.add_argument("--config", default=default_config,
+                        help="Router JSON configuration path (default: koto.json or KOTO_CONFIG)")
     parser.add_argument("--verbose", action="store_true", help="Enable content-free request logs")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("serve", help="Run the customer-local router")
@@ -96,7 +102,7 @@ def _serve(config: GatewayConfig) -> int:
     previous_term = signal.signal(signal.SIGTERM, stop)
     previous_int = signal.signal(signal.SIGINT, stop)
     try:
-        print(f"Hormuz router listening on http://{config.listen.host}:{config.listen.port}", flush=True)
+        print(f"Koto router listening on http://{config.listen.host}:{config.listen.port}", flush=True)
         server.serve_forever()
     finally:
         signal.signal(signal.SIGTERM, previous_term)

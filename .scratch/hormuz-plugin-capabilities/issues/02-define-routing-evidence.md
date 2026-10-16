@@ -1,7 +1,7 @@
 # Define trustworthy routing explanations
 
 Id: 02
-Parent: [Find the way to Hormuz’s next plugin release](../map.md)
+Parent: [Find the way to Koto’s next plugin release](../map.md)
 Type: grilling
 Labels: wayfinder:grilling
 Status: open

@@ -2,7 +2,7 @@
 
 This implements the admission slice of [router spec #523](https://github.com/Xpounder-com/hormuz/issues/523)
 on top of [execution destinations](EXECUTION_DESTINATIONS.md). Existing coding
-apps submit requests to one router. No additional Hormuz UI is introduced.
+apps submit requests to one router. No additional Koto UI is introduced.
 Runtime/model acquisition, subscription adapters and plugin publication
 remain separate work. [Persistent CLI setup](CONNECTED_CLIENT_LIFETIME.md) now owns
 connection and restoration.
@@ -40,7 +40,7 @@ this slice does not invent a paid provider fallback.
 
 `X-Hormuz-Routing-Mode: local_only` tightens an individual request, including a
 helper request. Other values and duplicate headers are rejected. A caller cannot
-relax an operator's local-only mode. This header is consumed by Hormuz.
+relax an operator's local-only mode. This header is consumed by Koto.
 
 A fresh request that explicitly names an eligible local alias retains that
 model and destination. Only that alias reaches optional AI Work ranking. In
@@ -120,7 +120,7 @@ headers and body writes also use the remaining absolute deadline. A disconnect
 is observed by the existing relay when it next reads/writes, not by a separate
 background cancellation worker.
 
-Immediately before cache delivery and provider open, Hormuz rechecks admission,
+Immediately before cache delivery and provider open, Koto rechecks admission,
 the actual final body, current policy digest, destination custody and readiness.
 A policy change blocks the in-flight request and requires a fresh request. A
 known rejection before provider open settles its reservation at zero. Existing
@@ -135,7 +135,7 @@ blocks with HTTP 409. A known cloud continuation is blocked when local-only is
 requested; it is never translated into a local session. Helpers without this
 retained accounting path conservatively block opaque continuation state.
 
-Locality enforcement concerns Hormuz's configured transport destinations: local
+Locality enforcement concerns Koto's configured transport destinations: local
 origins are literal loopback addresses and bypass proxies/redirects. The operator
 must separately establish that the process listening there performs inference
 locally and does not forward it elsewhere. No subscription entitlement or model
@@ -151,7 +151,7 @@ generation, declared feature/bounds and readiness (`unchecked`, `ready`,
 Version 2 additionally separates `coding_readiness`, content-free `coding_evidence`
 and the actually admissible `automatic_task_types`. Version-1 status fixtures
 remain readable. CLI and plugin callers can inspect the same live owner through
-`hormuz client status codex --client-home /path/to/codex-home --routing`, without
+`koto client status codex --client-home /path/to/codex-home --routing`, without
 exporting a token or making an inference call.
 
 Admitted responses and exact-answer hits declare `hormuz.relay-metadata;v=3`.

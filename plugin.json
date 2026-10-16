@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
-  "name": "hormuz",
-  "version": "0.2.1",
+  "name": "koto",
+  "version": "0.3.0",
   "description": "Diagnose, explain and qualify local model routing with explicit privacy, budget and history controls.",
   "author": {
     "name": "mehrdadxzaker"
@@ -10,15 +10,18 @@
   "license": "Apache-2.0",
   "extensions": {
     "com.openai": {
-      "onboardingSkill": "./skills/hormuz/SKILL.md",
+      "onboardingSkill": "./skills/koto/SKILL.md",
       "interface": {
-        "displayName": "Hormuz",
+        "displayName": "Koto",
         "shortDescription": "Manage your local model router",
         "developerName": "mehrdadxzaker",
         "category": "Developer Tools",
         "defaultPrompt": [
-          "Use Hormuz to set up local-only routing for Codex."
-        ]
+          "Use Koto to set up local-only routing for Codex."
+        ],
+        "logo": "./assets/koto-icon-512.png",
+        "logoDark": "./assets/koto-icon-512.png",
+        "composerIcon": "./assets/koto-icon-64.png"
       }
     }
   }

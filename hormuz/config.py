@@ -62,7 +62,7 @@ class IngressConfig:
     """The gateway-side boundary for customer-controlled TLS termination.
 
     ``local`` is intentionally the simple development default.  The external
-    proxy mode never makes Hormuz a TLS terminator: it only accepts an already
+    proxy mode never makes Koto a TLS terminator: it only accepts an already
     network-restricted and authenticated proxy hop.
     """
 
@@ -103,7 +103,7 @@ class UsageStorageConfig:
 
     SQLite remains the default local adapter. PostgreSQL is deliberately
     opt-in and reads its DSNs from process environment variables so a
-    connection credential never needs to appear in the Hormuz JSON file.
+    connection credential never needs to appear in the Koto JSON file.
     """
 
     backend: str = "sqlite"
@@ -137,7 +137,7 @@ class KeyCustodyConfig:
 
     Key references are identifiers only. Backends resolve credentials only at
     runtime: AWS uses its ambient workload chain and OpenBao uses a named
-    process-environment source. No credential value is allowed in Hormuz JSON.
+    process-environment source. No credential value is allowed in Koto JSON.
     """
 
     backend: str

@@ -1,7 +1,7 @@
-"""Stable, content-free contracts for Hormuz policy and evidence surfaces.
+"""Stable, content-free contracts for Koto policy and evidence surfaces.
 
-The provider response bodies relayed by Hormuz remain provider-owned so that
-Codex and Claude Code retain protocol compatibility. Hormuz-owned JSON and
+The provider response bodies relayed by Koto remain provider-owned so that
+Codex and Claude Code retain protocol compatibility. Koto-owned JSON and
 audit evidence use the schema identifiers and validators in this module.
 """
 
@@ -116,12 +116,12 @@ def relay_contract_header(*, destination_metadata: bool = False) -> str:
 
 
 def contract_envelope(schema_id: str, value: Mapping[str, Any]) -> dict[str, Any]:
-    """Add and validate an explicit version for a Hormuz-owned JSON object."""
+    """Add and validate an explicit version for a Koto-owned JSON object."""
 
     try:
         schema_version = _CURRENT_SCHEMA_VERSIONS[schema_id]
     except KeyError as error:
-        raise ContractValidationError(f"unsupported Hormuz schema_id: {schema_id}") from error
+        raise ContractValidationError(f"unsupported Koto schema_id: {schema_id}") from error
     result = dict(value)
     result["schema_id"] = schema_id
     result["schema_version"] = schema_version
@@ -140,7 +140,7 @@ def contract_manifest() -> dict[str, object]:
             "addition_rule": "New optional fields require a new documented schema version before release.",
             "breaking_change_rule": "Removed fields, changed types, changed semantics, or new required fields require a new schema version and migration guidance.",
             "legacy_audit_read": "Audit chain entry version 1 remains readable for historical gateway evidence. Version 2 is limited to the documented custody source union; verifiers fail closed for unsupported entry or source versions.",
-            "provider_protocol_rule": "OpenAI and Anthropic response bodies remain provider-owned. Hormuz metadata is versioned through X-Hormuz-Contract.",
+            "provider_protocol_rule": "OpenAI and Anthropic response bodies remain provider-owned. Koto metadata is versioned through X-Hormuz-Contract.",
         },
         "schemas": [
             _manifest_schema(
@@ -562,15 +562,15 @@ def contract_manifest() -> dict[str, object]:
             "capped": "The policy lowered the maximum output-token bound.",
             "redacted": "A supported request shape had protected material replaced before provider serialization.",
             "denied": "Policy denied the request before provider egress.",
-            "provider_policy_denied": "Hormuz denied a provider-storage or background-mode policy conflict before provider egress.",
-            "secret_denied": "Hormuz denied protected material before provider egress.",
+            "provider_policy_denied": "Koto denied a provider-storage or background-mode policy conflict before provider egress.",
+            "secret_denied": "Koto denied protected material before provider egress.",
             "budget_reservation_denied": "Actual usage plus the active reservation would exceed a configured limit.",
         },
         "request_status_semantics": {
             "succeeded": "A provider response completed with a 2xx status and the downstream relay remained connected.",
             "failed": "The provider or relay failed without a provider rate-limit response.",
-            "denied": "Hormuz denied the request before provider egress.",
-            "rate_limited": "The provider returned HTTP 429 after Hormuz allowed and forwarded the request.",
+            "denied": "Koto denied the request before provider egress.",
+            "rate_limited": "The provider returned HTTP 429 after Koto allowed and forwarded the request.",
         },
         "error_codes": sorted(PUBLIC_ERROR_CODES),
         "content_boundary": "Routing and audit schemas exclude prompts, responses, secret values, matched detector values, filenames and source content. Local operational receipts may identify installation paths and public pinned artifact sources; they exclude credentials and retained user content.",
@@ -586,7 +586,7 @@ def validate_contract_manifest(value: Mapping[str, Any]) -> None:
 
 
 def validate_contract(value: Mapping[str, Any]) -> None:
-    """Strictly validate a Hormuz-owned JSON response or CLI output."""
+    """Strictly validate a Koto-owned JSON response or CLI output."""
 
     schema_id = _value_string(value, "schema_id")
     schema_version = _value_integer(value, "schema_version")
@@ -638,7 +638,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID, CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION): _validate_custody_evidence_export_contract,
     }.get((schema_id, schema_version))
     if validator is None:
-        raise ContractValidationError(f"unsupported Hormuz contract: {schema_id} v{schema_version}")
+        raise ContractValidationError(f"unsupported Koto contract: {schema_id} v{schema_version}")
     validator(value)
 
 

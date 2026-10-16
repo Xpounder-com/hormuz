@@ -85,7 +85,7 @@ class AssetDownloader:
                 connection.timeout = min(10, self._remaining(deadline))
                 if connection.sock is not None:
                     connection.sock.settimeout(min(15, self._remaining(deadline)))
-                headers = {"Accept-Encoding": "identity", "User-Agent": "Hormuz-local-acquisition/1"}
+                headers = {"Accept-Encoding": "identity", "User-Agent": "Koto-local-acquisition/1"}
                 if offset:
                     headers["Range"] = f"bytes={offset}-"
                 target = parsed.path or "/"

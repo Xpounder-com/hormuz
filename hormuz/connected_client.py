@@ -66,8 +66,9 @@ def _control_directory():
     return Path("/tmp").resolve() / ("hormuz-connected-" + str(os.getuid()))
 
 
-def _provider_block(provider, origin, credential_env=None, *, helper=None, generation=None, client_version="0.147.0"):
-    block = ('\n[model_providers.' + provider + ']\nname = "Hormuz"\n'
+def _provider_block(provider, origin, credential_env=None, *, helper=None, generation=None,
+                    client_version="0.147.0", display_name="Koto"):
+    block = ('\n[model_providers.' + provider + ']\nname = ' + json.dumps(display_name) + '\n'
             + 'base_url = ' + json.dumps(origin + '/v1') + '\n'
             + 'wire_api = "responses"\n')
     if client_version == "0.160.0":
@@ -129,9 +130,11 @@ def _parse_record(text):
                 or not 1 <= endpoint.port <= 65535 or endpoint.path != "/v1" or endpoint.query or endpoint.fragment
                 or endpoint.username is not None
                 or (helper is None and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table["env_key"]))
+                or table.get("name") not in {"Koto", "Hormuz"}
                 or record["provider_block"] != _provider_block(record["installed"]["model_provider"],
                     f"http://127.0.0.1:{endpoint.port}", table.get("env_key"), helper=helper,
-                    generation=record["generation"], client_version=record["client_version"])):
+                    generation=record["generation"], client_version=record["client_version"],
+                    display_name=table["name"])):
             raise ValueError()
         retained = record.get("retained_settings", [])
         if (not isinstance(retained, list) or len(retained) > 4 or len(set(retained)) != len(retained)

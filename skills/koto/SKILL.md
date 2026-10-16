@@ -1,11 +1,11 @@
 ---
-name: hormuz
-description: Manage Hormuz local routing, cloud-readiness preflight, connection status, troubleshooting, disconnect, or opt-in device-local history review, spending insights, deletion and export through the shared CLI.
+name: koto
+description: Manage Koto local routing, cloud-readiness preflight, connection status, troubleshooting, disconnect, or opt-in device-local history review, spending insights, deletion and export through the shared CLI.
 ---
 
-# Hormuz
+# Koto
 
-Use the installed Hormuz CLI as the owner of router setup and configuration
+Use the installed Koto CLI as the owner of router setup and configuration
 restoration. Read [the shared workflow](references/workflow.md) before running
 commands. These instructions travel with this skill across agent hosts.
 
@@ -16,7 +16,7 @@ commands. These instructions travel with this skill across agent hosts.
    Cursor and OpenCode can load these instructions and manage that Codex
    connection; their own routing adapters remain unimplemented. For another
    target, report that limit before changing configuration.
-2. Check `hormuz --version` and the target executable's version. If Hormuz is
+2. Check `koto --version` and the target executable's version. If Koto is
    missing, use the source-install reference in the workflow; the plugin does
    not install Python, the router or models on activation.
 3. Follow the shared `client setup` branch to generate a new local-only
