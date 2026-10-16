@@ -24,7 +24,8 @@ def _configuration(path, actor_id):
         identity = (config.identities_by_actor.get(actor_id) if actor_id is not None
                     else next(iter(config.identities_by_actor.values())))
         cloud = {alias for alias, route in config.model_routes.items()
-                 if route.protocol == "openai" and config.upstreams[route.destination_id].locality == "cloud"}
+                 if route.protocol == "openai" and config.upstreams[route.destination_id].locality == "cloud"
+                 and config.upstreams[route.destination_id].authentication == "api_key"}
         facts["cloud_routes"] = len(cloud)
         if identity is None:
             return facts, [*blockers, "actor_unavailable"]

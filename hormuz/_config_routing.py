@@ -20,6 +20,7 @@ from ._config_values import (
 from .config import ConfigError, KeyCustodyConfig, ModelRoute, UpstreamConfig
 from .custody import KEY_PURPOSE_PROVIDER_CREDENTIAL
 from .finance_account_binding import UnavailableFinance, parse_finance_identity
+from .native_codex_catalog import NATIVE_ORIGIN
 
 
 def build_upstream_domain(
@@ -71,7 +72,7 @@ def build_upstream_domain(
             raise ConfigError(f"upstreams.{name}.base_url must be an HTTP(S) URL")
         locality = _string(item.get("locality", "cloud"), f"upstreams.{name}.locality")
         authentication = _string(item.get("authentication", "api_key"), f"upstreams.{name}.authentication")
-        if locality not in {"local", "cloud"} or authentication not in {"none", "api_key"}:
+        if locality not in {"local", "cloud"} or authentication not in {"none", "api_key", "codex_chatgpt"}:
             raise ConfigError(f"upstreams.{name} has invalid locality or authentication")
         if locality == "local":
             try:
@@ -84,6 +85,12 @@ def build_upstream_domain(
             raise ConfigError(f"upstreams.{name} unauthenticated destination must be local")
         api_key_env_value = item.get("api_key_env")
         api_key_envelope_value = item.get("api_key_envelope")
+        if authentication == "codex_chatgpt" and (
+                protocol != "openai" or locality != "cloud" or base_url != NATIVE_ORIGIN
+                or api_key_env_value is not None or api_key_envelope_value is not None
+                or item.get("allow_response_storage", False) is not False
+                or item.get("allow_background", False) is not False):
+            raise ConfigError(f"upstreams.{name} native Codex authentication requires its fixed cloud backend and no API credential")
         if authentication == "none" and (api_key_env_value is not None or api_key_envelope_value is not None):
             raise ConfigError(f"upstreams.{name} unauthenticated destination cannot configure a credential")
         if authentication == "api_key" and (api_key_env_value is None) == (api_key_envelope_value is None):

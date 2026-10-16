@@ -1,0 +1,274 @@
+"""Native catalog behavior through the approved connected-client workflow."""
+from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+import os
+from pathlib import Path
+import socket
+import ssl
+import subprocess
+import sys
+import tempfile
+import threading
+import unittest
+from unittest.mock import patch
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+from tests import test_execution_destination_workflow as workflow
+
+
+@contextmanager
+def native_backend(body, *, status=200, headers=None):
+    """A real TLS service standing in for the fixed native backend authority."""
+    received = []
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "chatgpt.com")])
+        now = datetime.now(timezone.utc)
+        certificate = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
+            .public_key(key.public_key()).serial_number(42)
+            .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=1))
+            .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName("chatgpt.com")]), critical=False)
+            .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False,
+                key_encipherment=True, data_encipherment=False, key_agreement=False,
+                key_cert_sign=True, crl_sign=True, encipher_only=False, decipher_only=False), critical=True)
+            .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(key.public_key()), critical=False)
+            .sign(key, hashes.SHA256()))
+        cert_path, key_path = root / "certificate.pem", root / "key.pem"
+        cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+        key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        key_path.chmod(0o600)
+
+        class Handler(BaseHTTPRequestHandler):
+            timeout = 3
+            def log_message(self, *_args):
+                pass
+            def do_GET(self):
+                received.append({"path": self.path, "headers": {key.lower(): value for key, value in self.headers.items()}})
+                data = body if isinstance(body, bytes) else json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                for name, value in (headers or {}).items():
+                    self.send_header(name, value)
+                self.end_headers()
+                self.wfile.write(data)
+
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(cert_path, key_path)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        original = socket.getaddrinfo
+        def resolve(host, port, *args, **kwargs):
+            if host == "chatgpt.com":
+                return original("127.0.0.1", server.server_port, *args, **kwargs)
+            return original(host, port, *args, **kwargs)
+        try:
+            # DNS and the trust store are external system boundaries. The real
+            # router still connects with TLS to its fixed chatgpt.com authority.
+            with patch("socket.getaddrinfo", side_effect=resolve), \
+                 patch.dict(os.environ, {"SSL_CERT_FILE": str(cert_path)}):
+                yield received
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+
+
+class NativeCodexCatalogWorkflowTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = workflow.ExecutionDestinationWorkflowTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+
+    def configuration(self, local, cloud):
+        value = self.fixture.configuration(local, cloud)
+        value["native_codex_catalog"] = True
+        value["upstreams"]["native-codex"] = {"protocol": "openai", "locality": "cloud",
+            "authentication": "codex_chatgpt", "base_url": "https://chatgpt.com/backend-api/codex"}
+        value["model_routes"]["cloud-code"] = {"protocol": "openai", "upstream_model": "fixture-cloud-model"}
+        value["model_routes"]["native-code"] = {"protocol": "openai", "destination": "native-codex",
+                                               "upstream_model": "fixture-cloud-model"}
+        value["policies"]["organization"]["allowed_models"].extend(["cloud-code", "native-code"])
+        return value
+
+    def test_native_catalog_consumes_gateway_auth_and_preserves_native_headers_only_to_its_backend(self):
+        visible = {"slug": "fixture-cloud-model", "display_name": "Fixture cloud", "context_window": 32000}
+        with workflow.provider("LOCAL_RESULT") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({"models": [visible, {"slug": "other-model", "display_name": "Not configured"}]}) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                self.assertEqual(submit()["status"], 200)
+                result = submit(method="GET", path="/backend-api/codex/models?client_version=0.147.0",
+                    absolute_path=True, headers={"X-Gateway-Key": "fixture-coding-client-credential",
+                        "Authorization": "Bearer NATIVE_CHATGPT_SENTINEL", "ChatGPT-Account-ID": "fixture-workspace",
+                        "X-Api-Key": "UNRELATED_API_KEY_SENTINEL", "Cookie": "unrelated=COOKIE_SENTINEL"})
+                self.assertEqual(result["status"], 200, result)
+                self.assertEqual(result["body"], {"models": [visible]})
+                self.assertEqual(result["headers"].get("x-hormuz-native-catalog-version"), "1")
+                self.assertEqual(result["headers"].get("cache-control"), "no-store")
+                usage = submit(method="GET", path="/gateway/usage")
+                self.assertEqual(usage["body"]["requests"], 1)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (1, 0, 1))
+            request = native_requests[0]
+            self.assertEqual(request["path"], "/backend-api/codex/models?client_version=0.147.0")
+            self.assertEqual(request["headers"]["authorization"], "Bearer NATIVE_CHATGPT_SENTINEL")
+            self.assertEqual(request["headers"]["chatgpt-account-id"], "fixture-workspace")
+            self.assertEqual(request["headers"]["host"], "chatgpt.com")
+            self.assertFalse({"x-gateway-key", "x-api-key", "cookie"} & request["headers"].keys())
+            self.assertNotIn("SENTINEL", json.dumps(result))
+
+    def test_native_credentials_cannot_fall_through_to_paid_api_or_local_inference(self):
+        with workflow.provider("LOCAL_RESULT") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                headers = {"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                           "X-Gateway-Key": "fixture-coding-client-credential",
+                           "X-Api-Key": "fixture-coding-client-credential"}
+                for options in ({"request": {"model": "cloud-code"}}, {"request": {"model": "local-code"}},
+                                {"method": "GET", "path": "/models"}):
+                    with self.subTest(options=options):
+                        response = submit(headers=headers, **options)
+                        self.assertEqual(response["status"], 403, response)
+                        self.assertEqual(response["body"]["error"]["code"], "hormuz_provider_policy_denied")
+                        self.assertNotIn("SENTINEL", json.dumps(response))
+                        self.assertEqual((local_requests, cloud_requests), ([], []))
+                response = submit(headers={"ChatGPT-Account-ID": "fixture-workspace"})
+                self.assertEqual(response["status"], 403)
+                self.assertEqual((local_requests, cloud_requests), ([], []))
+                self.assertEqual(submit()["status"], 200)
+            self.assertEqual((len(local_requests), len(cloud_requests)), (1, 0))
+
+    def test_known_gateway_and_api_credentials_cannot_be_repurposed_as_native_authorization(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
+            value = self.configuration(local, cloud)
+            self.fixture.environment["OTHER_GATEWAY_TOKEN"] = "OTHER_GATEWAY_SENTINEL"
+            value["identities"].append({**value["identities"][0], "actor_id": "other",
+                                         "token_env": "OTHER_GATEWAY_TOKEN"})
+            with self.fixture.connected_client(value) as submit:
+                for credential in ("fixture-cloud-destination-credential", "OTHER_GATEWAY_SENTINEL",
+                                   "fixture-coding-client-credential"):
+                    with self.subTest(credential_kind=credential.split("-")[0]):
+                        response = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                            headers={"Authorization": "Bearer " + credential,
+                                     "X-Gateway-Key": "fixture-coding-client-credential"})
+                        self.assertEqual(response["status"], 401, response)
+                        self.assertNotIn(credential, json.dumps(response))
+                        self.assertEqual((local_requests, cloud_requests, native_requests), ([], [], []))
+
+    def test_effective_client_model_and_local_only_permissions_block_before_native_egress(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
+            for case in ("local_only", "request_local_only", "identity_client", "actor_client", "team_client",
+                         "organization_models", "actor_models", "team_models"):
+                with self.subTest(case=case):
+                    value = self.configuration(local, cloud)
+                    headers = {"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                               "X-Gateway-Key": "fixture-coding-client-credential"}
+                    if case == "local_only":
+                        value["route_admission"] = {"mode": "local_only", "local_routes": {}}
+                    elif case == "request_local_only":
+                        headers["X-Hormuz-Routing-Mode"] = "local_only"
+                    elif case == "identity_client":
+                        value["identities"][0]["allowed_clients"] = ["claude-code"]
+                    elif case == "organization_models":
+                        value["policies"]["organization"]["allowed_models"] = ["local-code"]
+                    else:
+                        level, field = case.split("_")
+                        value["policies"][level + "s"] = {"developer" if level == "actor" else "local":
+                            {"allowed_clients" if field == "client" else "allowed_models":
+                             ["claude-code" if field == "client" else "local-code"]}}
+                    with self.fixture.connected_client(value) as submit:
+                        response = submit(method="GET", path="/backend-api/codex/models", absolute_path=True, headers=headers)
+                        self.assertEqual(response["status"], 403, response)
+                    self.assertEqual((local_requests, cloud_requests, native_requests), ([], [], []))
+
+    def test_malformed_or_ambiguous_native_catalogs_return_content_free_errors(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                for body in ({"models": "PRIVATE_UPSTREAM_SENTINEL"}, {"models": [None]},
+                             {"models": [{"slug": ["PRIVATE_UPSTREAM_SENTINEL"]}]},
+                             {"models": [{"slug": ""}]},
+                             {"models": [{"slug": "x" * 257}]},
+                             {"models": [{"slug": "fixture-cloud-model", "display_name": "PRIVATE_UPSTREAM_SENTINEL"},
+                                         {"slug": "fixture-cloud-model"}]},
+                             {"models": [{"slug": "model-" + str(index)} for index in range(257)]},
+                             b'{"models": [], "models": [{"slug":"PRIVATE_UPSTREAM_SENTINEL"}]}'):
+                    with self.subTest(shape=type(body).__name__), native_backend(body) as native_requests:
+                        result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                            headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                                     "X-Gateway-Key": "fixture-coding-client-credential"})
+                        self.assertEqual(result["status"], 502, result)
+                        self.assertEqual(result["body"]["error"]["code"], "gateway_upstream_error")
+                        self.assertNotIn("SENTINEL", json.dumps(result))
+                        self.assertEqual(len(native_requests), 1)
+                        self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_native_denial_redirect_and_rate_limit_do_not_retry_or_change_billing(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                for status in (401, 403, 307, 429):
+                    with self.subTest(status=status), native_backend({"error": "PRIVATE_UPSTREAM_SENTINEL"},
+                        status=status, headers={"Retry-After": "37", "Location": "https://chatgpt.com/other-path"}) as native_requests:
+                        result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                            headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                                     "X-Gateway-Key": "fixture-coding-client-credential"})
+                        self.assertEqual(result["status"], 502 if status == 307 else status)
+                        self.assertNotIn("SENTINEL", json.dumps(result))
+                        self.assertEqual(len(native_requests), 1)
+                        self.assertEqual((local_requests, cloud_requests), ([], []))
+                        if status == 429:
+                            self.assertEqual(result["headers"].get("retry-after"), "37")
+
+    def test_native_catalog_needs_no_api_key_and_does_not_make_native_inference_ready(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             native_backend({"models": [{"slug": "fixture-native-model"}]}) as native_requests:
+            value = self.fixture.configuration(local, "https://api.example.invalid/v1")
+            del value["upstreams"]["openai"]
+            self.fixture.environment.pop("DESTINATION_CLOUD_KEY")
+            value["native_codex_catalog"] = True
+            value["upstreams"]["native-codex"] = {"protocol": "openai", "locality": "cloud",
+                "authentication": "codex_chatgpt", "base_url": "https://chatgpt.com/backend-api/codex"}
+            value["model_routes"]["native-code"] = {"protocol": "openai", "destination": "native-codex",
+                                                    "upstream_model": "fixture-native-model"}
+            value["policies"]["organization"]["allowed_models"].append("native-code")
+            with self.fixture.connected_client(value) as submit:
+                result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                    headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                             "X-Gateway-Key": "fixture-coding-client-credential"})
+                self.assertEqual((result["status"], result["body"]), (200, {"models": [{"slug": "fixture-native-model"}]}))
+                ordinary_models = submit(method="GET", path="/models")
+                self.assertEqual([model["id"] for model in ordinary_models["body"]["data"]], ["local-code"])
+                blocked = submit(request={"model": "native-code"})
+                self.assertEqual(blocked["status"], 403, blocked)
+                self.assertEqual((len(native_requests), local_requests), (1, []))
+                usage = submit(method="GET", path="/gateway/usage")
+                self.assertEqual(usage["body"]["requests"], 0)
+                preflight = subprocess.run([sys.executable, "-m", "hormuz", "--config", str(self.fixture.root / "gateway.json"),
+                    "client", "cloud-readiness", "codex", "--client-home", str(self.fixture.root / "absent-home"),
+                    "--surface", "desktop"], capture_output=True, text=True, timeout=10)
+                self.assertEqual(preflight.returncode, 0, preflight.stderr)
+                readiness = json.loads(preflight.stdout)
+                self.assertEqual(readiness["configuration"]["cloud_routes"], 0)
+                self.assertEqual(readiness["paths"][1]["status"], "not_implemented")
+
+
+if __name__ == "__main__":
+    unittest.main()
