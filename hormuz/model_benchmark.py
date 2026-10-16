@@ -8,7 +8,10 @@ import os
 from pathlib import Path
 import platform
 import re
-import resource
+try:
+    import resource
+except ImportError:
+    resource = None
 import socket
 import stat
 import statistics
@@ -639,7 +642,7 @@ def run_benchmark(args):
               "organization_id": client.identity.organization_id,
               "machine": machine_facts(),
               "resources": {"runner_cpu_ms": (time.process_time() - cpu_started) * 1000,
-                            "runner_peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if platform.system() == "Darwin" else 1024),
+                            "runner_peak_rss_bytes": None if resource is None else resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if platform.system() == "Darwin" else 1024),
                             "model_peak_rss_bytes": None, "gpu_peak_memory_bytes": None, "energy_joules": None,
                             "scope": "runner_process_only_model_resources_unobserved"},
               "recorded_at": recorded, "expires_at": recorded + 7 * 86400,

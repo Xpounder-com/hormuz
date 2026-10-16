@@ -23,8 +23,11 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         self.environment = {**os.environ, **self.fixture.environment,
                             "HORMUZ_HISTORY_HOME": str(self.root / "history")}
 
-    def command(self, *arguments, expected=0):
-        result = subprocess.run([sys.executable, "-m", "hormuz", "--config", str(self.config_path),
+    def command(self, *arguments, expected=0, without_resource=False):
+        prefix = [sys.executable, "-m", "hormuz"]
+        if without_resource:
+            prefix = [sys.executable, "-c", "import sys; sys.modules['resource']=None; from hormuz.cli import main; raise SystemExit(main(sys.argv[1:]))"]
+        result = subprocess.run([*prefix, "--config", str(self.config_path),
                                  "benchmark", *arguments], env=self.environment,
                                 capture_output=True, text=True, timeout=25)
         self.assertEqual(result.returncode, expected, result.stderr or result.stdout)
@@ -447,6 +450,10 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 report = self.run_benchmark("local-code")
         self.report_path.write_bytes(json.dumps(report).encode() + b" " * 300000)
         self.assertEqual(self.command("show", "--scorecard", str(self.report_path)), report)
+
+    def test_optional_os_memory_statistics_do_not_disable_the_public_cli(self):
+        suite = self.command("init", "--output", str(self.suite_path), without_resource=True)
+        self.assertEqual(suite["schema_id"], "hormuz.benchmark-suite")
 
 
 if __name__ == "__main__":
