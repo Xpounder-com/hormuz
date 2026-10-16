@@ -30,6 +30,11 @@ class ManagedLlamaError(RuntimeError):
         super().__init__(reason)
 
 
+def checksum_timeout(size_bytes):
+    """A finite local-read budget: one minute plus one second per 8 MiB."""
+    return 60 + (size_bytes + 8 * 1024**2 - 1) // (8 * 1024**2)
+
+
 @dataclass(frozen=True)
 class ManagedLlamaProfile:
     route: str
@@ -43,6 +48,16 @@ class ManagedLlamaProfile:
     alias: str
     output_tokens: int
 
+    def verification_timeout_seconds(self):
+        budget = 30  # Archive expansion and extracted-file verification.
+        for path, limit in ((self.runtime_archive, 256 * 1024**2), (self.model_file, 32 * 1024**3)):
+            try:
+                size = min(limit, max(0, os.stat(path, follow_symlinks=False).st_size))
+            except OSError:
+                size = limit
+            budget += checksum_timeout(size)
+        return budget
+
     def verify(self, *, runtime_root=None):
         try:
             self._verify_files(runtime_root=runtime_root)
@@ -50,11 +65,11 @@ class ManagedLlamaProfile:
             raise ManagedLlamaError("runtime_invalid") from None
 
     def _verify_files(self, *, runtime_root=None):
+        if _digest(self.runtime_archive, 256 * 1024**2) != self.runtime_sha256:
+            raise ManagedLlamaError("runtime_invalid")
+        if _digest(self.model_file, 32 * 1024**3) != self.model_sha256:
+            raise ManagedLlamaError("runtime_invalid")
         deadline = time.monotonic() + 30
-        if _digest(self.runtime_archive, 256 * 1024**2, deadline) != self.runtime_sha256:
-            raise ManagedLlamaError("runtime_invalid")
-        if _digest(self.model_file, 32 * 1024**3, deadline) != self.model_sha256:
-            raise ManagedLlamaError("runtime_invalid")
         root = Path(self.executable).parent
         total = 0
         with gzip.open(self.runtime_archive, "rb") as expanded, tarfile.open(
@@ -230,13 +245,15 @@ def extract_runtime(archive_path, destination):
             shutil.rmtree(staged)
 
 
-def _digest(path, limit, deadline):
+def _digest(path, limit, deadline=None):
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     with os.fdopen(fd, "rb") as source:
         before = os.fstat(source.fileno())
         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
                 or before.st_mode & 0o022 or before.st_size > limit):
             raise ManagedLlamaError("runtime_invalid")
+        if deadline is None:
+            deadline = time.monotonic() + checksum_timeout(before.st_size)
         digest = hashlib.sha256()
         while chunk := source.read(1024**2):
             if time.monotonic() > deadline:
@@ -309,7 +326,7 @@ class OwnedLlama:
             raise
         finally:
             os.close(read_fd)
-        deadline = time.monotonic() + profile.startup_timeout_seconds + 32
+        deadline = time.monotonic() + profile.verification_timeout_seconds() + profile.startup_timeout_seconds + 2
         data = bytearray()
         try:
             while b"\n" not in data:
