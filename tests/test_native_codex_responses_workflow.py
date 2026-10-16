@@ -24,8 +24,8 @@ NATIVE_PATH = "/backend-api/codex/responses"
 def completed(response_id="native-response", *, output=None):
     return {"type": "response.completed", "response": {
         "id": response_id, "model": "fixture-cloud-model", "status": "completed",
-        "output": output or [{"id": "native-message", "type": "message", "role": "assistant",
-            "content": [{"type": "output_text", "text": "NATIVE_RESULT"}]}],
+        "output": output or [{"id": "native-message", "type": "message", "role": "assistant", "status": "completed",
+            "content": [{"type": "output_text", "text": "NATIVE_RESULT", "annotations": []}]}],
         "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}}}
 
 
@@ -86,6 +86,27 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
             self.assertEqual(request["headers"]["chatgpt-account-id"], "fixture-workspace")
             self.assertEqual(request["headers"]["host"], "chatgpt.com")
             self.assertFalse({"x-gateway-key", "x-api-key", "cookie"} & request["headers"].keys())
+
+    def test_exact_native_alias_wins_over_slugs_and_other_destination_aliases_stay_blocked(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            for case in ("exact_alias", "ambiguous_slug", "api_alias"):
+                with self.subTest(case=case):
+                    value = self.configuration(local, cloud)
+                    alias = "other-native" if case == "ambiguous_slug" else "fixture-cloud-model"
+                    value["model_routes"][alias] = {"protocol": "openai",
+                        "destination": "openai" if case == "api_alias" else "native-codex",
+                        "upstream_model": "fixture-cloud-model"}
+                    value["policies"]["organization"]["allowed_models"].append(alias)
+                    if case == "exact_alias":
+                        value["policies"]["organization"]["allowed_models"].remove("native-code")
+                    before = len(native_requests)
+                    with self.fixture.connected_client(value) as submit:
+                        result = self.native(submit)
+                        self.assertEqual(result["status"], 200 if case == "exact_alias" else 403, result)
+                    self.assertEqual(len(native_requests), before + (case == "exact_alias"))
+            self.assertEqual((local_requests, cloud_requests), ([], []))
 
     def test_client_receives_an_incremental_event_before_native_completion_is_released(self):
         signal = self.fixture.root / "first-event"
@@ -356,6 +377,53 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                                 {"type": "function_call_output", "call_id": "untrusted-call", "output": "result"}]})
                             self.assertEqual(replay["status"], 403, replay)
                         self.assertEqual(len(native_requests), 1)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_terminal_output_variants_require_their_native_fields_before_affinity(self):
+        call = {"type": "function_call", "call_id": "required-call", "name": "fixture_tool", "arguments": "{}"}
+        reasoning = {"id": "required-reasoning", "type": "reasoning", "summary": [], "encrypted_content": "OPAQUE"}
+        message = {"id": "required-message", "type": "message", "role": "assistant", "status": "completed",
+                   "content": [{"type": "output_text", "text": "valid", "annotations": []}]}
+        compaction = {"id": "required-compaction", "type": "compaction", "encrypted_content": "OPAQUE"}
+        cases = [("reasoning_id", {k: v for k, v in reasoning.items() if k != "id"}, False),
+            ("reasoning_summary", {k: v for k, v in reasoning.items() if k != "summary"}, False),
+            ("summary_shape", {**reasoning, "summary": [17]}, False),
+            ("summary_text", {**reasoning, "summary": [{"type": "summary_text"}]}, False),
+            ("reasoning_content", {**reasoning, "content": [{"type": "reasoning_text", "text": 17}]}, False),
+            ("message_id", {k: v for k, v in message.items() if k != "id"}, False),
+            ("message_status", {k: v for k, v in message.items() if k != "status"}, False),
+            ("text_annotations", {**message, "content": [{"type": "output_text", "text": "invalid"}]}, False),
+            ("compaction_id", {k: v for k, v in compaction.items() if k != "id"}, False),
+            ("compaction_content", {k: v for k, v in compaction.items() if k != "encrypted_content"}, False),
+            ("unknown_variant", {"id": "unknown-item", "type": "unsupported_native_variant"}, False),
+            ("valid_reasoning", {**reasoning, "summary": [{"type": "summary_text", "text": "summary"}]}, True),
+            ("valid_nullable_reasoning", {**reasoning, "encrypted_content": None}, True),
+            ("valid_message", message, True), ("valid_compaction", compaction, True),
+            ("valid_custom_tool", {"type": "custom_tool_call", "call_id": "custom-call", "name": "custom", "input": "data"}, True)]
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for name, item, valid in cases:
+                with self.subTest(case=name):
+                    data = ("data: " + json.dumps(completed(output=[call, item])) + "\n\n").encode()
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                            self.native(submit)
+                            status = submit(method="GET", path="/v1/router/native-codex", absolute_path=True,
+                                headers={"X-Gateway-Key": NATIVE_HEADERS["X-Gateway-Key"]})["body"]
+                            self.assertEqual((status["succeeded"], status["outcome_unknown"]),
+                                             (1, 0) if valid else (0, 1), status)
+                            replay = self.native(submit, request={"input": [call,
+                                {"type": "function_call_output", "call_id": "required-call", "output": "result"}]})
+                            self.assertEqual(replay["status"], 200 if valid else 403, replay)
+                        self.assertEqual(len(native_requests), 2 if valid else 1)
             self.assertEqual((local_requests, cloud_requests), ([], []))
 
     def test_unsupported_or_ambiguous_native_request_envelopes_never_reach_a_provider(self):

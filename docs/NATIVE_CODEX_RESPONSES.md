@@ -33,8 +33,9 @@ profile in `native_codex_responses.py`; tools, reasoning, text options and
 client metadata retain their native JSON after shared secret enforcement.
 Native compaction endpoints and WebSockets remain unsupported.
 
-A configured native alias or an unambiguous native catalog slug selects exactly
-one immutable destination. Policy fallback and operational failover are absent.
+A configured alias takes precedence over native catalog slugs; aliases owned by
+other destinations are blocked. Without an exact alias, an unambiguous native
+slug selects one immutable destination. Policy fallback and operational failover are absent.
 Identity, organization, team and actor Codex/model restrictions apply; hard or
 request-level local-only blocks before egress. Shared output caps and compacted
 context/secret redaction or denial apply before transport. Native credentials
@@ -49,8 +50,15 @@ API configured-rate accounting do not claim native coverage.
 SSE bytes are delivered incrementally through bounded private pipes. A complete,
 strict `response.completed` data event with matching model, ID and completed
 status establishes success after delivery. Response envelopes and response-ID
-fields must keep the same identity throughout the stream. Terminal output items
-must be typed objects; assistant messages require typed text/refusal content.
+fields must keep the same identity throughout the stream. Supported terminal
+items are messages, reasoning, function/custom calls and compaction. Messages
+require provider IDs, status and text/refusal content; text includes annotations.
+Reasoning requires an ID and typed summary, with optional typed reasoning text
+and nullable encrypted content. Compaction requires an ID and encrypted content.
+Function/custom calls retain their required call/name/argument or input fields.
+These follow the [official output message](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_output_message.py)
+and [reasoning item](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_reasoning_item.py)
+schemas checked October 16, 2026. Unsupported variants remain unknown until qualified.
 A bare event name, `[DONE]`, EOF,
 invalid/mismatched JSON or truncation cannot establish success. Native failed,
 incomplete and error events retain their payload and establish failure. A valid

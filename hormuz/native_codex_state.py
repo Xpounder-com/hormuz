@@ -36,7 +36,7 @@ def continuation_tags(items):
                 if type(item.get("name")) is not str or type(item.get(field)) is not str:
                     raise ValueError("native_call_invalid")
                 tags.append(("tool", [kind, call, item["name"], item[field]]))
-        if "encrypted_content" in item:
+        if "encrypted_content" in item and not (kind == "reasoning" and item["encrypted_content"] is None):
             opaque = item["encrypted_content"]
             if type(opaque) is not str or not 1 <= len(opaque) <= 1024 * 1024:
                 raise ValueError("native_opaque_invalid")

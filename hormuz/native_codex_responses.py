@@ -96,8 +96,9 @@ def handle_native_responses(handler):
     if value is None:
         return
     model = value.get("model")
-    routes = [route for alias, route in server.config.model_routes.items()
-              if model in (alias, route.upstream_model) and route.protocol == "openai"
+    candidates = ([server.config.model_routes[model]] if model in server.config.model_routes else
+                  [route for route in server.config.model_routes.values() if route.upstream_model == model])
+    routes = [route for route in candidates if route.protocol == "openai"
               and server.config.upstreams[route.destination_id].authentication == "codex_chatgpt"]
     if len(routes) != 1:
         handler._send_error("hormuz_policy_denied", "A unique configured native model is required.", 403)

@@ -99,8 +99,16 @@ class NativeCodexStream:
         for item in output:
             if type(item) is not dict or type(item.get("type")) is not str or not item["type"]:
                 raise ValueError("native_output_invalid")
-            if item["type"] == "message":
-                if item.get("role") != "assistant" or type(item.get("content")) is not list:
+            kind = item["type"]
+            if kind not in {"message", "reasoning", "function_call", "custom_tool_call", "compaction"}:
+                raise ValueError("native_output_unsupported")
+            if kind in {"message", "reasoning", "compaction"} and type(item.get("id")) is not str:
+                raise ValueError("native_output_invalid")
+            status = item.get("status")
+            if status is not None and (type(status) is not str or status not in {"in_progress", "completed", "incomplete"}):
+                raise ValueError("native_output_invalid")
+            if kind == "message":
+                if item.get("role") != "assistant" or status is None or type(item.get("content")) is not list:
                     raise ValueError("native_output_invalid")
                 for part in item["content"]:
                     if (type(part) is not dict or type(part.get("type")) is not str
@@ -109,6 +117,19 @@ class NativeCodexStream:
                     field = "text" if part["type"] == "output_text" else "refusal"
                     if type(part.get(field)) is not str:
                         raise ValueError("native_output_invalid")
+                    if field == "text" and (type(part.get("annotations")) is not list
+                            or any(type(annotation) is not dict for annotation in part["annotations"])):
+                        raise ValueError("native_output_invalid")
+            elif kind == "reasoning":
+                for field, part_type in (("summary", "summary_text"), ("content", "reasoning_text")):
+                    parts = item.get(field)
+                    if field == "content" and parts is None:
+                        continue
+                    if type(parts) is not list or any(type(part) is not dict or part.get("type") != part_type
+                            or type(part.get("text")) is not str for part in parts):
+                        raise ValueError("native_output_invalid")
+            elif kind == "compaction" and type(item.get("encrypted_content")) is not str:
+                raise ValueError("native_output_invalid")
         continuation_tags(output)
 
     def finish(self):
