@@ -16,6 +16,8 @@ Add `"native_codex_responses": true` to an existing reviewed configuration with
 contract. Discovery has its own `native_codex_catalog` flag. Existing generic
 CLI/plugin setup still excludes native profiles; it does not install managed
 native settings or activate this transport.
+The flag does not restore retired external-proxy ingress configuration, which
+the public configuration loader continues to reject before server construction.
 
 Supply one `X-Gateway-Key`, one native `Authorization: Bearer ...` and, when
 available, one `ChatGPT-Account-ID`. Hormuz consumes its gateway key and forwards
@@ -99,6 +101,9 @@ model/destination generation, body thread/session/cache identity and any
 async execution mode and status retain their validated issued values. Absent/null optional
 values are equivalent. Supplied result names/namespaces/callers must match the
 issued call; results and provider item IDs cannot change their item type.
+Fresh user/developer/system messages and client-created function/custom results
+must omit provider item IDs, including null IDs. Provider-owned messages/calls
+retain their validated IDs and successful affinity instead.
 Opaque values stay paired with their issued item kind/ID, and tool item IDs stay
 paired with their complete issued call. Individually known IDs and blobs cannot
 be recombined, and non-null issued state cannot be stripped on replay.

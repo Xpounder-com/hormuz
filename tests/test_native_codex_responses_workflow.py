@@ -187,6 +187,25 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                 self.assertEqual((result["status"], result["body"]["error"]["code"]), (403, "hormuz_secret_detected"))
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
 
+    def test_native_flag_cannot_reenable_retired_external_proxy_configuration(self):
+        secret = "fixture-native-ingress-credential-812739"
+        self.fixture.environment["NATIVE_INGRESS_CREDENTIAL"] = secret
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            value = self.configuration(local, cloud)
+            value["ingress"] = {"mode": "external_tls_proxy", "trusted_proxy_cidrs": ["127.0.0.1/32"],
+                                "credential_env": "NATIVE_INGRESS_CREDENTIAL"}
+            path = self.fixture.root / "retired-native-proxy.json"
+            path.write_text(json.dumps(value))
+            result = subprocess.run([sys.executable, "-m", "hormuz", "--config", str(path),
+                "client", "config", "codex"], capture_output=True, text=True, timeout=10,
+                env={**os.environ, **self.fixture.environment})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("router_scope_retired_configuration", result.stderr)
+            self.assertNotIn(secret, result.stderr + result.stdout)
+            self.assertEqual((local_requests, cloud_requests, native_requests), ([], [], []))
+
     def test_native_credentials_contained_in_the_redaction_marker_fail_closed(self):
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
@@ -553,6 +572,45 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                     self.assertEqual(accepted["status"], 200, accepted)
                     self.assertEqual(native_requests[-1]["body"]["input"], replay)
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 3))
+
+    def test_client_originated_messages_and_results_cannot_supply_provider_ids(self):
+        message = {"id": "issued-message", "type": "message", "role": "assistant", "status": "completed",
+            "content": [{"type": "output_text", "text": "Issued provider text", "annotations": []}]}
+        calls = [{"id": "issued-function", "type": "function_call", "call_id": "client-function", "name": "fixture_tool", "arguments": "{}"},
+                 {"id": "issued-custom", "type": "custom_tool_call", "call_id": "client-custom", "name": "fixture_tool", "input": "plain"}]
+        data = ("data: " + json.dumps(completed(output=[message, *calls])) + "\n\n").encode()
+        def reply(handler, value, number):
+            if number != 1:
+                return stream_reply(handler, value, number)
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                self.assertEqual(self.native(submit)["body"], data.decode())
+                client_items = [{**typed, "role": role, "content": "Fresh client text"}
+                    for role in ("user", "developer", "system") for typed in ({}, {"type": "message"})]
+                results = [{"type": call["type"] + "_output", "call_id": call["call_id"], "output": "Client result"}
+                    for call in calls]
+                for item in [*client_items, *results]:
+                    for identifier in ("foreign-provider-item", message["id"], {}, None):
+                        with self.subTest(item=item, identifier=identifier):
+                            denied = self.native(submit, request={"input": [{**item, "id": identifier}]})
+                            self.assertEqual(denied["status"], 403, denied)
+                            self.assertEqual(len(native_requests), 1)
+                for item in client_items:
+                    accepted = self.native(submit, request={"input": [item]})
+                    self.assertEqual(accepted["status"], 200, accepted)
+                    self.assertEqual(native_requests[-1]["body"]["input"], [item])
+                replay = [*calls, *results, message]
+                accepted = self.native(submit, request={"input": replay})
+                self.assertEqual(accepted["status"], 200, accepted)
+                self.assertEqual(native_requests[-1]["body"]["input"], replay)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 8))
 
     def test_redacted_conversation_identifiers_cannot_collapse_distinct_native_owners(self):
         call = {"id": "secret-thread-tool", "type": "function_call", "call_id": "secret-thread-call",

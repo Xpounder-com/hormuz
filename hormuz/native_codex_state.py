@@ -63,6 +63,9 @@ def continuation_tags(items):
             raise ValueError("native_item_invalid")
         if message:
             validate_text_content(item["content"], assistant=item["role"] == "assistant")
+        if "id" in item and (message and item["role"] in {"user", "developer", "system"}
+                or kind in {"function_call_output", "custom_tool_call_output"}):
+            raise ValueError("native_client_item_id_unsupported")
         status = item.get("status")
         if (status is not None and (type(status) is not str or status not in {"in_progress", "completed", "incomplete"})
                 or message and item["role"] == "assistant" and "id" in item and status is None):
@@ -108,9 +111,7 @@ def continuation_tags(items):
             tags.append(("state", [kind, item["id"], opaque]))
         elif "encrypted_content" in item:
             raise ValueError("native_opaque_invalid")
-        if ("id" in item and kind not in {"function_call_output", "custom_tool_call_output"}
-                and not (kind in {"function_call", "custom_tool_call"} and item["id"] is None)
-                and not (message and item.get("role") in {"user", "developer", "system"})):
+        if "id" in item and not (kind in {"function_call", "custom_tool_call"} and item["id"] is None):
             if (type(item["id"]) is not str or not 1 <= len(item["id"]) <= 256
                     or any(not 33 <= ord(c) <= 126 for c in item["id"])):
                 raise ValueError("native_item_invalid")

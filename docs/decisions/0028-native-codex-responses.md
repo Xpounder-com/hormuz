@@ -11,6 +11,9 @@ credential/account, identity, session, model and destination generation. Retain
 only bounded keyed digests in process memory. This keeps native credentials and
 transcripts out of persistence, at the cost of losing affinity on refresh,
 restart, expiry or eviction. Such changes require a fresh conversation.
+Client-originated messages/results cannot supply provider item IDs; only
+qualified provider-owned replay retains those identities. The native flag also
+does not restore the external ingress configuration retired by ADR 0018.
 
 Message and tool-result content use a qualified text profile. Active media/file
 and nested provider references remain closed until their ownership path is

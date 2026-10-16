@@ -18,6 +18,8 @@
     "reasoning_summary_parts": ["summary_text"],
     "reasoning_content_parts": ["reasoning_text"],
     "issued_provider_status_preserved": true,
+    "client_originated_provider_ids": false,
+    "retired_external_proxy_ingress": false,
     "redact_mode_marker_overlap": "deny-before-egress",
     "marker_overlap_protected_values": "all-configured-literals-including-native-grant",
     "protected_member_names": "deny-before-egress-in-redact-and-deny-modes"
