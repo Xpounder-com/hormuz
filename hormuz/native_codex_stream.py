@@ -1,4 +1,5 @@
 """Bounded SSE observation; only complete native terminal data grants success."""
+import re
 from .compaction_formats import strict_json_loads
 from .usage import Usage
 from .native_codex_state import continuation_tags
@@ -6,6 +7,7 @@ from .finance_attempts import NativeUsageAccumulator
 
 
 MAX_EVENT_BYTES = 1024 * 1024
+LINE_END = re.compile(br"\r\n|\r|\n")
 ANNOTATION_FIELDS = {
     "url_citation": (("url", "title"), ("start_index", "end_index")),
     "file_citation": (("file_id", "filename"), ("index",)),
@@ -40,28 +42,52 @@ class NativeCodexStream:
         self._data = []
         self._event = None
         self._event_bytes = 0
+        self._at_start = True
+        self._skip_lf = False
 
     def feed(self, chunk):
+        if self.terminal_state is not None:
+            return 0
         try:
             self._buffer.extend(chunk)
-            while b"\n" in self._buffer:
-                line, _, tail = self._buffer.partition(b"\n")
-                self._buffer = bytearray(tail)
+            if self._at_start:
+                bom = b"\xef\xbb\xbf"
+                if len(self._buffer) < len(bom) and bom.startswith(self._buffer):
+                    return len(chunk)
+                self._at_start = False
+                if self._buffer.startswith(bom):
+                    del self._buffer[:len(bom)]
+            if self._skip_lf and self._buffer:
+                if self._buffer.startswith(b"\n"):
+                    del self._buffer[:1]
+                self._skip_lf = False
+            while (ending := LINE_END.search(self._buffer)) is not None:
+                line = bytes(self._buffer[:ending.start()])
+                delimiter = ending.group()
+                del self._buffer[:ending.end()]
+                self._skip_lf = delimiter == b"\r" and not self._buffer
                 if len(line) > MAX_EVENT_BYTES:
                     raise ValueError("native_event_oversized")
-                line = line.rstrip(b"\r")
                 if not line:
                     self._dispatch()
                     self._data, self._event, self._event_bytes = [], None, 0
-                elif line.startswith(b"data:"):
-                    self._event_bytes += len(line)
-                    if self._event_bytes > MAX_EVENT_BYTES:
-                        raise ValueError("native_event_oversized")
-                    self._data.append(bytes(line[5:]).removeprefix(b" "))
-                elif line.startswith(b"event:"):
-                    self._event = bytes(line[6:]).strip().decode("utf-8")
+                    if self.terminal_state is not None:
+                        consumed = len(chunk) - len(self._buffer)
+                        self._buffer.clear()
+                        return consumed
+                elif not line.startswith(b":"):
+                    field, _, value = line.partition(b":")
+                    value = value.removeprefix(b" ")
+                    if field == b"data":
+                        self._event_bytes += len(line)
+                        if self._event_bytes > MAX_EVENT_BYTES:
+                            raise ValueError("native_event_oversized")
+                        self._data.append(value)
+                    elif field == b"event":
+                        self._event = value.decode("utf-8") or None
             if len(self._buffer) > MAX_EVENT_BYTES:
                 raise ValueError("native_event_oversized")
+            return len(chunk)
         except (ValueError, RecursionError):
             self.invalid = True
             raise ValueError("native_event_invalid") from None

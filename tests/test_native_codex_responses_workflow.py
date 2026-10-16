@@ -1029,6 +1029,76 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
             self.assertEqual(set(view), set(fixture["status_fields"]))
             self.assertEqual((local_requests, cloud_requests), ([], []))
 
+    def test_native_terminal_outcome_does_not_depend_on_trailing_bytes_or_their_chunking(self):
+        call = {"id": "terminal-tool", "type": "function_call", "call_id": "terminal-call",
+                "name": "fixture_tool", "arguments": "{}"}
+        terminal = ("data: " + json.dumps(completed(output=[call])) + "\n\n").encode()
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for tail in (b"data: [DO", b"data: [DONE]\n\n", b"data: malformed\n\n"):
+                with self.subTest(tail=tail):
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        data = terminal + tail
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                            response = self.native(submit)
+                            self.assertEqual(response["body"], terminal.decode())
+                            status = submit(method="GET", path="/v1/router/native-codex", absolute_path=True,
+                                headers={"X-Gateway-Key": NATIVE_HEADERS["X-Gateway-Key"]})["body"]
+                            self.assertEqual((status["succeeded"], status["outcome_unknown"]), (1, 0), status)
+                            replay = self.native(submit, request={"input": [call,
+                                {"type": "function_call_output", "call_id": "terminal-call", "output": "result"}]})
+                            self.assertEqual(replay["status"], 200, replay)
+                        self.assertEqual(len(native_requests), 2)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_valid_sse_line_endings_bom_and_event_resets_preserve_native_completion(self):
+        call = {"id": "framing-tool", "type": "function_call", "call_id": "framing-call",
+                "name": "fixture_tool", "arguments": "{}"}
+        payload = json.dumps(completed(output=[call])).encode()
+        lf = b"data: " + payload + b"\n\n"
+        cases = {"lf": [lf], "crlf": [lf.replace(b"\n", b"\r\n")], "cr": [lf.replace(b"\n", b"\r")],
+                 "bom": [b"\xef\xbb\xbf" + lf], "event_reset": [b"event: previous\nevent\n" + lf],
+                 "split_bom": [b"\xef", b"\xbb", b"\xbf" + lf],
+                 "split_crlf": [b"event: response.completed\r", b"\ndata: " + payload + b"\r", b"\n\r", b"\n"]}
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for case, frames in cases.items():
+                with self.subTest(case=case):
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(sum(map(len, frames))))
+                        handler.end_headers()
+                        try:
+                            for frame in frames:
+                                handler.wfile.write(frame)
+                                handler.wfile.flush()
+                                time.sleep(0.02)
+                        except OSError:
+                            pass  # A valid CR terminal can close before its optional LF.
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                            result = self.native(submit)
+                            self.assertIn(payload.decode(), result["body"])
+                            status = submit(method="GET", path="/v1/router/native-codex", absolute_path=True,
+                                headers={"X-Gateway-Key": NATIVE_HEADERS["X-Gateway-Key"]})["body"]
+                            self.assertEqual((status["succeeded"], status["outcome_unknown"]), (1, 0), status)
+                            replay = self.native(submit, request={"input": [call,
+                                {"type": "function_call_output", "call_id": "framing-call", "output": "result"}]})
+                            self.assertEqual(replay["status"], 200, replay)
+                        self.assertEqual(len(native_requests), 2)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_a_valid_terminal_ends_native_streaming_without_waiting_for_provider_eof(self):
         closed = threading.Event()
         def reply(handler, _value, _number):

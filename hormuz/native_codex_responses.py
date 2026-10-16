@@ -200,8 +200,8 @@ def _dispatch_native_responses(handler, credentials):
                 handler.send_header(key, item)
             handler.end_headers()
             for data in response:
-                parser.feed(data)
-                handler._write_downstream_chunk(data)
+                consumed = parser.feed(data)
+                handler._write_downstream_chunk(data[:consumed])
                 if parser.terminal_state is not None:
                     break
             parser.finish()

@@ -50,7 +50,10 @@ API configured-rate accounting do not claim native coverage.
 
 ## Streaming, continuation and outcomes
 
-SSE bytes are delivered incrementally through bounded private pipes. A complete,
+SSE bytes are delivered incrementally through bounded private pipes. Framing
+accepts LF, CRLF or CR lines, one leading UTF-8 BOM and empty/colonless event
+resets according to the [SSE parsing standard](https://html.spec.whatwg.org/multipage/server-sent-events.html#parsing-an-event-stream).
+A complete,
 strict `response.completed` data event with matching model, ID and completed
 status establishes success after delivery. Response envelopes and response-ID
 fields must keep the same identity throughout the stream. Supported terminal
@@ -68,7 +71,9 @@ schemas checked October 16, 2026. Unsupported variants remain unknown until qual
 A bare event name, `[DONE]`, EOF,
 invalid/mismatched JSON or truncation cannot establish success. Native failed,
 incomplete and error events retain their payload and establish failure. A valid
-terminal ends the owned transport without waiting for provider EOF. Partial
+terminal ends delivery at that event boundary and closes the owned transport
+without waiting for provider EOF. Trailing bytes do not change the validated
+outcome or affinity. Partial
 output closes without a second HTTP response, retry or alternate provider.
 
 HTTP continuation uses replayed input. Function/custom tool calls, matching tool
