@@ -28,7 +28,9 @@ An optional [managed llama.cpp profile](docs/MANAGED_LLAMA_LIFETIME.md) now
 starts and stops one engine from existing verified runtime/model files through
 the same connection commands. It verifies bundled libraries as well as the
 launcher, preserves external engines, and keeps cleanup pending until its owned
-lease is released. Downloads and model selection remain separate work.
+lease is released. [Verified acquisition](docs/LOCAL_ASSET_ACQUISITION.md) now
+previews and explicitly downloads the existing pinned experimental runtime/model
+into a private generation. Model selection and coding qualification remain separate.
 
 [Shared local setup](docs/SHARED_LOCAL_SETUP.md) now generates the local-only
 configuration from existing verified engine/model files and connects through
