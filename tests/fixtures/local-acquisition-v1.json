@@ -1,0 +1,39 @@
+{
+  "schema_id": "hormuz.local-acquisition",
+  "schema_version": 1,
+  "catalog_id": "synthetic-acquisition-v1",
+  "catalog_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "operation": "preview",
+  "state": "planned",
+  "directory": "/private/example/assets/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "artifacts": {
+    "runtime": {
+      "url": "http://127.0.0.1:18081/runtime",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "size_bytes": 1024,
+      "license": "MIT",
+      "license_url": "https://example.invalid/runtime",
+      "allowed_hosts": [
+        "127.0.0.1"
+      ],
+      "path": "/private/example/assets/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/runtime.tar.gz"
+    },
+    "model": {
+      "url": "http://127.0.0.1:18081/model",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "size_bytes": 64,
+      "license": "Apache-2.0",
+      "license_url": "https://example.invalid/model",
+      "allowed_hosts": [
+        "127.0.0.1"
+      ],
+      "path": "/private/example/assets/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc/model.gguf"
+    }
+  },
+  "storage": {
+    "download_bytes": 1088,
+    "required_free_bytes": 1140851776,
+    "available_bytes": 2147483648
+  },
+  "setup_arguments": []
+}

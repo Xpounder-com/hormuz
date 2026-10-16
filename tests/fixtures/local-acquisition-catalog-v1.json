@@ -1,0 +1,47 @@
+{
+  "schema_id": "hormuz.local-acquisition-catalog",
+  "schema_version": 1,
+  "catalog_id": "synthetic-acquisition-v1",
+  "profile": {
+    "schema_id": "hormuz.local-setup-profile",
+    "schema_version": 1,
+    "qualification_id": "synthetic-managed-v1",
+    "client_version": "0.147.0",
+    "system": "Darwin",
+    "machine": "arm64",
+    "runtime_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "model": "local-code",
+    "capabilities": [
+      "responses",
+      "text"
+    ],
+    "max_request_bytes": 4096,
+    "max_output_tokens": 8,
+    "task_types": [
+      "summarization"
+    ],
+    "upstream_timeout_seconds": 6,
+    "startup_timeout_seconds": 3
+  },
+  "runtime": {
+    "url": "http://127.0.0.1:18081/runtime",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "size_bytes": 1024,
+    "license": "MIT",
+    "license_url": "https://example.invalid/runtime",
+    "allowed_hosts": [
+      "127.0.0.1"
+    ]
+  },
+  "model": {
+    "url": "http://127.0.0.1:18081/model",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "size_bytes": 64,
+    "license": "Apache-2.0",
+    "license_url": "https://example.invalid/model",
+    "allowed_hosts": [
+      "127.0.0.1"
+    ]
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "schema_id": "hormuz.local-acquisition-catalog",
+  "schema_version": 1,
+  "catalog_id": "codex0147-llamab11617-qwen3-4b-macos-arm64-experiment-v1",
+  "profile": {
+    "schema_id": "hormuz.local-setup-profile",
+    "schema_version": 1,
+    "qualification_id": "codex0147-llamab11617-qwen3-4b-macos-arm64-experiment-v1",
+    "client_version": "0.147.0",
+    "system": "Darwin",
+    "machine": "arm64",
+    "runtime_sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9",
+    "model_sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "model": "Qwen3-4B-Q4_K_M",
+    "capabilities": [
+      "responses",
+      "text",
+      "streaming",
+      "tools",
+      "codex_http"
+    ],
+    "max_request_bytes": 65536,
+    "max_output_tokens": 512,
+    "task_types": [
+      "code_change",
+      "code_review"
+    ],
+    "upstream_timeout_seconds": 90,
+    "startup_timeout_seconds": 60
+  },
+  "runtime": {
+    "url": "https://github.com/ggml-org/llama.cpp/releases/download/b11617/llama-b11617-bin-macos-arm64.tar.gz",
+    "sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9",
+    "size_bytes": 12157609,
+    "license": "MIT",
+    "license_url": "https://github.com/ggml-org/llama.cpp/blob/14310190cd0a0c831fe949ac8cbedd8abdc90695/LICENSE",
+    "allowed_hosts": [
+      "github.com",
+      "release-assets.githubusercontent.com"
+    ]
+  },
+  "model": {
+    "url": "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf",
+    "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "size_bytes": 2497280256,
+    "license": "Apache-2.0",
+    "license_url": "https://huggingface.co/Qwen/Qwen3-4B-GGUF/blob/bc640142c66e1fdd12af0bd68f40445458f3869b/README.md",
+    "allowed_hosts": [
+      "huggingface.co",
+      "cdn-lfs.huggingface.co",
+      "cdn-lfs-us-1.hf.co",
+      "cas-bridge.xethub.hf.co"
+    ]
+  }
+}
