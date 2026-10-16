@@ -506,8 +506,9 @@ def contract_manifest() -> dict[str, object]:
                  "X-Hormuz-Routed-Model", "X-Hormuz-Redactions", "X-Hormuz-Error-Code",
                  "X-Hormuz-Routing-Qualification", "X-Hormuz-Destination", "X-Hormuz-Destination-Locality",
                  "X-Hormuz-Destination-Generation", "X-Hormuz-Routing-Mode", "X-Hormuz-Routing-Reason",
-                 "X-Hormuz-Scorecard-Status", "X-Hormuz-Scorecard-SHA256"]),
-            *[_manifest_schema(schema, 1, "cli-output", "hormuz", fields)
+                 "X-Hormuz-Scorecard-Status", "X-Hormuz-Scorecard-SHA256",
+                 "X-Hormuz-Benchmark-Request-Bytes", "X-Hormuz-Benchmark-Max-Output-Tokens"]),
+            *[_manifest_schema(schema, 1, "response" if schema == "hormuz.benchmark-runtime" else "cli-output", "hormuz", fields)
               for schema, fields in BENCHMARK_FIELDS.items()],
             *[_manifest_schema(ROUTE_ADMISSION_SCHEMA_ID, version, "response", "hormuz",
                 ["schema_id", "schema_version", "mode", "task_classifier", "local_capacity", "routes"])

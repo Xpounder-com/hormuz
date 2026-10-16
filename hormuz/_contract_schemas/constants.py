@@ -208,6 +208,7 @@ PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restrict
 _CURRENT_SCHEMA_VERSIONS = {
     "hormuz.model-scorecard": 1, "hormuz.benchmark-suite": 1,
     "hormuz.benchmark-routing-configuration": 1, "hormuz.benchmark-error": 1,
+    "hormuz.benchmark-runtime": 1,
     "hormuz.local-coding-evidence": 1,
     "hormuz.cloud-readiness": 1,
     LOCAL_SETUP_SCHEMA_ID: 1,

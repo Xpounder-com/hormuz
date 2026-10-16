@@ -55,10 +55,15 @@ class ScorecardRouting:
             if (not prices_known and (report["targets"]["objective"] == "cost"
                     or report["targets"].get("max_mean_cost_microusd") is not None)):
                 continue
+            prepared = dict(value)
+            if self.config.ai_work.enabled:
+                from .work_gateway import _prepare_pricing
+                _prepare_pricing(candidate.route.protocol, prepared)
+            request_bytes = len(provider_body(prepared, candidate.route))
             for workload in model["workloads"]:
                 if (not workload["target_met"] or workload["task_type"] != characteristics["task_hint"]
                         or workload["request_profile_sha256"] != profile or workload["input_size"] != characteristics["input_size"]
-                        or len(provider_body(value, candidate.route)) > workload["request_bytes_max"]
+                        or request_bytes > workload["request_bytes_max"]
                         or type(value.get("max_output_tokens")) is not int
                         or value["max_output_tokens"] > workload["max_output_tokens"]):
                     continue

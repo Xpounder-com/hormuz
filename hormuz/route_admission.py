@@ -272,8 +272,11 @@ class RouteAdmission:
         handler._route_admission_candidates = None
         handler._route_admission_selection_candidates = None
         handler._route_admission_headers = {}
+        handler._benchmark_forwarded = None
         probes = handler.headers.get_all("X-Hormuz-Benchmark", [])
         if len(probes) > 1 or probes and probes[0] != "1":
+            raise RouteAdmissionError("invalid_benchmark_mode")
+        if probes and self.config.shadow_router is not None:
             raise RouteAdmissionError("invalid_benchmark_mode")
         requested = handler.headers.get_all("X-Hormuz-Routing-Mode", [])
         if len(requested) > 1 or requested and requested[0] != "local_only":
@@ -364,6 +367,8 @@ class RouteAdmission:
         if self.settings.scorecard:
             if continuation or probes:
                 scorecard_headers["X-Hormuz-Scorecard-Status"] = "affinity_preserved" if continuation else "benchmark_probe"
+            elif protocol != "openai" or endpoint != "/v1/responses":
+                scorecard_headers["X-Hormuz-Scorecard-Status"] = "no_target_match"
             else:
                 alias, scorecard_headers = self.scorecards.choose(identity, candidates, value, handler._provider_body)
                 if alias is not None:
@@ -415,13 +420,17 @@ class RouteAdmission:
 
     def contract_header(self, handler, route):
         if getattr(handler, "_route_admission_headers", {}):
-            return "hormuz.relay-metadata;v=4" if self.settings.scorecard else "hormuz.relay-metadata;v=3"
+            return "hormuz.relay-metadata;v=4" if self.settings.scorecard or handler.headers.get("X-Hormuz-Benchmark") == "1" else "hormuz.relay-metadata;v=3"
         return self.destinations.contract_header(route)
 
     def response_headers(self, handler, route):
         headers = dict(getattr(handler, "_route_admission_headers", {}))
         if not headers:
             return self.destinations.response_headers(route)
+        forwarded = getattr(handler, "_benchmark_forwarded", None)
+        if handler.headers.get("X-Hormuz-Benchmark") == "1" and forwarded is not None:
+            headers.update({"X-Hormuz-Benchmark-Request-Bytes": str(forwarded[0]),
+                            "X-Hormuz-Benchmark-Max-Output-Tokens": str(forwarded[1])})
         destination = self.destinations.resolve(route)
         headers.update({"X-Hormuz-Destination": destination.name,
                         "X-Hormuz-Destination-Locality": destination.locality,
@@ -453,3 +462,14 @@ class RouteAdmission:
             capacity = {"limit": 1, "active": self._active_local}
         return {"schema_id": "hormuz.route-admission", "schema_version": 2, "mode": self.settings.mode,
                 "task_classifier": "bounded_local_heuristic", "local_capacity": capacity, "routes": routes}
+
+    def benchmark_status(self, identity, policy_engine):
+        from .execution_destination import route_fingerprint
+        routes = self.status(identity, policy_engine)["routes"]
+        return {"schema_id": "hormuz.benchmark-runtime", "schema_version": 1,
+                "actor_id": identity.actor_id, "organization_id": identity.organization_id,
+                "shadow_router_enabled": self.config.shadow_router is not None,
+                "routes": [{"model": row["model"], "generation": row["generation"],
+                    "route_fingerprint": route_fingerprint(self.config.model_routes[row["model"]], upstreams=self.config.upstreams),
+                    "explicit_price_fields": sorted(self.config.model_routes[row["model"]].explicit_price_fields)}
+                    for row in routes]}

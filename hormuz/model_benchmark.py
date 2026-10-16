@@ -21,6 +21,7 @@ import time
 
 from .compaction_formats import strict_json_loads
 from .config import GatewayConfig
+from ._config_input import load_configuration_input
 from .execution_destination import route_fingerprint
 from .coding_qualification import request_profile_digest
 from .local_history_files import export_private, local_path, read_private, safe_path
@@ -28,7 +29,7 @@ from .work_learning import contains_provider_state, request_characteristics
 
 MAX_BYTES = 262144
 MAX_SCORECARD_BYTES = 2 * 1024 * 1024
-TASKS = {"summarization", "translation", "structured_extraction", "code_change", "code_review"}
+TASKS = {"summarization", "translation", "structured_extraction"}
 
 
 class BenchmarkError(ValueError):
@@ -293,6 +294,29 @@ def hash_label(value):
     return type(value) is str and re.fullmatch(r"[a-f0-9]{64}", value) is not None
 
 
+def validate_runtime(value):
+    try:
+        if (type(value) is not dict or set(value) != {"schema_id", "schema_version", "actor_id", "organization_id", "shadow_router_enabled", "routes"}
+                or value["schema_id"] != "hormuz.benchmark-runtime" or type(value["schema_version"]) is not int or value["schema_version"] != 1
+                or any(type(value[key]) is not str or not 1 <= len(value[key]) <= 256 for key in ("actor_id", "organization_id"))
+                or type(value["shadow_router_enabled"]) is not bool or type(value["routes"]) is not list):
+            raise ValueError()
+        seen = set()
+        prices = {"input_cost_per_million", "output_cost_per_million", "cache_read_cost_per_million", "cache_write_cost_per_million"}
+        for route in value["routes"]:
+            if (type(route) is not dict or set(route) != {"model", "generation", "route_fingerprint", "explicit_price_fields"}
+                    or type(route["model"]) is not str or not 1 <= len(route["model"]) <= 4096 or route["model"] in seen
+                    or not hash_label(route["generation"]) or type(route["route_fingerprint"]) is not str
+                    or re.fullmatch(r"destination-v1:[a-f0-9]{64}", route["route_fingerprint"]) is None
+                    or type(route["explicit_price_fields"]) is not list or len(route["explicit_price_fields"]) > 4
+                    or any(type(item) is not str or item not in prices for item in route["explicit_price_fields"])
+                    or len(set(route["explicit_price_fields"])) != len(route["explicit_price_fields"])):
+                raise ValueError()
+            seen.add(route["model"])
+    except (ValueError, TypeError, KeyError, RecursionError):
+        raise BenchmarkError("benchmark_execution_unverified") from None
+
+
 def format_scorecard(report):
     def measured(value):
         return "unknown" if value is None else f"{value:.2f}"
@@ -324,7 +348,9 @@ def format_scorecard(report):
 
 
 def configure_routing(args):
-    config = GatewayConfig.load(args.config)
+    source_path = local_path(Path(args.config)).resolve()
+    source = load_configuration_input(source_path)
+    config = GatewayConfig.parse_preflight(source_path, json.dumps(source, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
     report = read_scorecard(args.scorecard)
     identity = config.identities_by_actor.get(report["actor_id"])
     if identity is None or identity.organization_id != report["organization_id"]:
@@ -338,12 +364,11 @@ def configure_routing(args):
         raise BenchmarkError("benchmark_configuration_must_be_new_and_beside_source")
     if output.exists() or output.is_symlink():
         raise BenchmarkError("benchmark_output_exists")
-    source = load_document(config.source_path)
     admission = source.setdefault("route_admission", {})
     admission["scorecard"] = str(local_path(Path(args.scorecard)))
     if admission.get("mode", "configured") == "configured":
         admission["mode"] = "auto"
-    serialized = json.dumps(source, indent=2, allow_nan=False)
+    serialized = json.dumps(source, indent=2, ensure_ascii=False, allow_nan=False)
     GatewayConfig.parse_preflight(output, serialized)
     if not args.dry_run:
         export_private(output, serialized.encode())
@@ -356,6 +381,7 @@ def configure_routing(args):
 class RouterClient:
     """One reusable loopback connection, finite reads, an absolute request deadline."""
     def __init__(self, config, actor=None):
+        self.config = config
         identities = [identity for identity in config.identities_by_actor.values()
                       if actor is None or identity.actor_id == actor]
         if len(identities) != 1:
@@ -373,11 +399,14 @@ class RouterClient:
         self.connection.close()
 
     def bindings(self, routes, *, timeout):
-        status, _, value, _ = self.request(None, method="GET", path="/v1/router/state", timeout=timeout)
-        if (status != 200 or type(value) is not dict or value.get("schema_id") != "hormuz.route-admission"
-                or type(value.get("schema_version")) is not int or value["schema_version"] != 2
-                or type(value.get("routes")) is not list):
+        status, _, value, _ = self.request(None, method="GET", path="/v1/router/benchmark-state", timeout=timeout)
+        if status != 200:
             raise BenchmarkError("benchmark_execution_unverified")
+        validate_runtime(value)
+        if value["actor_id"] != self.identity.actor_id or value["organization_id"] != self.identity.organization_id:
+            raise BenchmarkError("benchmark_execution_mismatch")
+        if value["shadow_router_enabled"]:
+            raise BenchmarkError("benchmark_shadow_router_unsupported")
         result = {}
         for route in routes:
             matches = [item for item in value["routes"]
@@ -385,10 +414,8 @@ class RouterClient:
             if len(matches) != 1:
                 raise BenchmarkError("benchmark_execution_mismatch")
             live = matches[0]
-            expected = {"destination": route.destination_id, "model_revision": route.model_revision,
-                        "capabilities": list(route.capabilities)}
-            if (any(live.get(key) != item for key, item in expected.items())
-                    or not hash_label(live.get("generation"))):
+            if (live["route_fingerprint"] != route_fingerprint(route, upstreams=self.config.upstreams)
+                    or live["explicit_price_fields"] != sorted(route.explicit_price_fields)):
                 raise BenchmarkError("benchmark_execution_mismatch")
             result[route.alias] = live["generation"]
         return result
@@ -510,6 +537,14 @@ def measured_usage(value, route):
     return observed
 
 
+def forwarded_count(headers, name, maximum):
+    value = headers.get(name, "")
+    if type(value) is not str or not value.isascii() or not value.isdigit() or len(value) > 6:
+        return None
+    count = int(value)
+    return count if 1 <= count <= maximum else None
+
+
 def summarize(observations):
     count = len(observations)
     completed = sum(row["completed"] for row in observations)
@@ -616,6 +651,7 @@ def run_benchmark(args):
                     payload["max_output_tokens"] = min(payload["max_output_tokens"], cap)
                 started = time.monotonic()
                 value, error = {}, None
+                request_bytes = len(json.dumps({**payload, "model": route.upstream_model}, separators=(",", ":")).encode())
                 timing = {"latency_ms": 0, "headers_ms": None, "ttft_ms": None, "first_byte_ms": None}
                 try:
                     remaining = deadline - time.monotonic()
@@ -624,6 +660,10 @@ def run_benchmark(args):
                     if stopped:
                         raise BenchmarkError(stopped)
                     status, headers, value, timing = client.request(payload, timeout=min(args.timeout_seconds, remaining))
+                    observed_bytes = forwarded_count(headers, "x-hormuz-benchmark-request-bytes", 131072)
+                    observed_limit = forwarded_count(headers, "x-hormuz-benchmark-max-output-tokens", 4096)
+                    if observed_bytes is not None:
+                        request_bytes = observed_bytes
                     if status != 200:
                         error = "http_" + str(status)
                         if status in (429, 529):
@@ -632,7 +672,8 @@ def run_benchmark(args):
                             or headers.get("x-hormuz-destination") != route.destination_id
                             or headers.get("x-hormuz-destination-generation") != bindings[route.alias]
                             or headers.get("x-hormuz-requested-model") != route.alias
-                            or headers.get("x-hormuz-routed-model") != route.upstream_model):
+                            or headers.get("x-hormuz-routed-model") != route.upstream_model
+                            or observed_bytes is None or observed_limit != payload["max_output_tokens"]):
                         error = "execution_mismatch"
                     elif (type(value) is not dict or value.get("status") != "completed"
                             or value.get("error") is not None):
@@ -655,7 +696,7 @@ def run_benchmark(args):
                     "partition": case["partition"], "repeat": repeat,
                     "request_profile_sha256": benchmark_profile_digest(payload),
                     "input_size": request_characteristics(payload)["input_size"],
-                    "request_bytes": len(json.dumps({**payload, "model": route.upstream_model}).encode()),
+                    "request_bytes": request_bytes,
                     "max_output_tokens": payload["max_output_tokens"],
                     "completed": completed, "passed": completed and all(check["passed"] for check in checks),
                     "checks": checks, "error": error, "usage": measured_usage(value if type(value) is dict else {}, route), **timing})

@@ -94,7 +94,7 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            received.append({"path": self.path, "body": body,
+            received.append({"path": self.path, "body": body, "wire_bytes": int(self.headers["Content-Length"]),
                              "headers": {k.lower(): v for k, v in self.headers.items()}})
             if hold_first and len(received) == 1:
                 hold_first[0].set()

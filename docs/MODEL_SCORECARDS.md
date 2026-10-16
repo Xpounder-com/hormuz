@@ -63,12 +63,12 @@ Each check has a user-chosen metric name, a kind, and an expected value:
 
 The runner never executes returned tools or generated code. Ground truth belongs
 in `checks`, outside the model request. There is no model judging itself and no
-automatic collection from your history. Supported task labels match the router's
-domain vocabulary: `summarization`, `translation`, `structured_extraction`,
-`code_change`, and `code_review`. The router still enforces its admitted task
-envelope: a label or successful reference check cannot qualify an unqualified
-coding route. Actual coding edits and independent execution checks use the
-separate [local coding qualification](LOCAL_CODING_QUALIFICATION.md) workflow.
+automatic collection from your history. Direct benchmarks support
+`summarization`, `translation`, and `structured_extraction`. Suites containing
+`code_change` or `code_review` fail preflight. Actual coding edits and independent
+execution checks use the separate
+[local coding qualification](LOCAL_CODING_QUALIFICATION.md) workflow. A benchmark
+label or successful answer check cannot grant coding qualification.
 
 ## Run and compare
 
@@ -89,6 +89,8 @@ hormuz benchmark show --scorecard "$PWD/scorecard.json" --format markdown
 Omit `--format markdown` for JSON. `show` works without the configuration,
 credentials or a live router. If the configuration has several actors, select
 one explicitly with `run --actor ACTOR_ID`.
+The running router and CLI use the configured static gateway identity. OIDC-only
+configurations are outside the current local-router configuration contract.
 
 | Recorded metric | Interpretation |
 | --- | --- |
@@ -128,9 +130,15 @@ speculative calls or background benchmark workers. Default deadlines are 30
 seconds per request and 300 seconds per run; maximums are 120 and 1800 seconds.
 Capacity rejection stops further requests, as do three consecutive request
 failures or local socket exhaustion. Remaining cases are recorded as unstarted.
-Before model work, one authenticated router-status request checks the configured
-alias, revision, destination and capabilities against the running router. Every
+Before model work, one authenticated `/v1/router/benchmark-state` snapshot checks
+the actor, full route fingerprint and explicit-price fields against the running
+router. The fingerprint includes the endpoint, revision and capabilities. Every
 model response must match that live destination generation and requested model.
+Benchmark receipts report the forwarded request's byte count and output budget
+after router preparation; recorded byte bounds use these observed values.
+An unexpected live policy cap invalidates the measurement for the requested
+generation budget. The running router also rejects benchmark probes while its
+shadow helpers are enabled, even if the configuration file has since changed.
 Benchmark probes disable operational failover so another model's answer cannot
 be attributed to the selected one; admission also refuses to substitute another
 alias when the requested route is unready. A configuration with `shadow_router` is
@@ -157,6 +165,9 @@ The receipt says `requires_reconnect`; creating a file does not change a running
 router. Existing local-only privacy remains local-only. If the prior mode was
 `configured`, the staged mode becomes `auto`, and existing local qualifications
 are still required. The active source file is never overwritten.
+Staging uses the normal 1 MiB configuration parser and a credential-free metadata
+preflight. The staging shell does not need the service's token environment or
+access to its credential files.
 
 Advanced configurations can explicitly add an absolute private report path:
 
@@ -167,7 +178,7 @@ Advanced configurations can explicitly add an absolute private report path:
 Keep your existing qualified `local_routes`; the empty object above is only a
 field-shape illustration and admits no local models.
 
-For a fresh supported request, the router first applies identity, policy,
+For a fresh `POST /v1/responses` request, the router first applies identity, policy,
 privacy, capability, readiness and coding-qualification checks. It then ranks
 eligible local candidates whose scorecard workload matches the task hint,
 generation controls including the exact output-token budget, tool/format schema,
@@ -176,6 +187,8 @@ uses the mean estimate. Other metrics break ties deterministically. An explicitl
 enabled scorecard may replace the client's default local alias within that set.
 Cost-based preferences and cost targets require the relevant prices to remain
 explicitly configured; removing a zero rate makes that price unknown.
+Other API operations, including compaction, retain their existing admission and
+cannot inherit generation scores.
 
 Inspect `X-Hormuz-Scorecard-Status`, `X-Hormuz-Routing-Reason` and, when selected,
 `X-Hormuz-Scorecard-SHA256`. The selected reason is `benchmark_scorecard`.
@@ -208,11 +221,15 @@ internally inconsistent summaries; it cannot prove that someone controlling
 the local account supplied honest references or outcomes. Scores express
 performance on the declared cases, not universal model quality.
 
-The suite, scorecard, routing-configuration and error receipts start at schema
+The suite, scorecard, runtime-snapshot, routing-configuration and error receipts start at schema
 version 1 and appear in `hormuz contract manifest`. The
 [compatibility fixture](../tests/fixtures/model-benchmark-v1.json) freezes the
-initial shape. Scorecard-enabled relay metadata uses version 4; configurations
-without it retain existing versions. Existing SQLite and AI Work storage need
+initial shape. Scorecard-enabled and benchmark-probe relay metadata uses version
+4, including observed `X-Hormuz-Benchmark-Request-Bytes` and
+`X-Hormuz-Benchmark-Max-Output-Tokens` on probes. Ordinary configurations without
+scorecard routing retain existing versions. Reconnect after upgrading the router
+before running probes; an older running process cannot provide the version-1
+runtime snapshot. Existing SQLite and AI Work storage need
 no migration. Re-run into a new report path to retain earlier comparisons.
 
 For rollback, disconnect with the current binary, remove `route_admission.scorecard`

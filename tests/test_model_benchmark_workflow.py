@@ -109,6 +109,23 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         self.assertGreater(metrics["output_tokens_per_second"], 0)
         self.assertGreater(report["resources"]["runner_peak_rss_bytes"], 0)
 
+    def test_request_bounds_measure_the_bytes_delivered_to_the_model(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        for accounting in (False, True):
+            with self.subTest(accounting=accounting):
+                self.report_path = self.root / f"wire-scorecard-{accounting}.json"
+                with workflow.provider("7") as (endpoint, received):
+                    value = self.fixture.admission_configuration(endpoint, endpoint)
+                    if accounting:
+                        value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+                    with self.fixture.connected_client(value):
+                        report = self.run_benchmark("local-code", suite=suite)
+                model = report["models"][0]
+                self.assertEqual((model["observations"][0]["request_bytes"], model["workloads"][0]["request_bytes_max"]),
+                                 (received[0]["wire_bytes"], received[0]["wire_bytes"]))
+
     def test_unavailable_model_is_reported_without_omitting_failures_or_retrying(self):
         with workflow.provider("7", status=503) as (endpoint, received):
             with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
@@ -183,6 +200,21 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
             self.assertLessEqual(observation["first_byte_ms"], observation["ttft_ms"])
             self.assertLessEqual(observation["ttft_ms"], observation["latency_ms"])
 
+    def test_native_coding_tasks_are_rejected_before_direct_model_benchmarking(self):
+        with workflow.provider("7") as (endpoint, received):
+            with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
+                for task, prompt in (("code_change", "Fix the Python function to return seven."),
+                                     ("code_review", "Review this code diff for bugs.")):
+                    with self.subTest(task=task):
+                        suite = self.suite()
+                        suite["cases"] = suite["cases"][:1]
+                        suite["cases"][0]["task_type"] = task
+                        suite["cases"][0]["request"]["input"] = prompt
+                        result = self.run_benchmark("local-code", suite=suite, expected=2)
+                        self.assertEqual(result["error"]["code"], "benchmark_suite_invalid")
+                        self.assertFalse(self.report_path.exists())
+        self.assertEqual(received, [])
+
     def test_stream_failure_after_a_completed_event_cannot_qualify_the_model(self):
         suite = self.suite()
         suite["cases"] = suite["cases"][:1]
@@ -227,6 +259,37 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                                   result["headers"].get("x-hormuz-scorecard-status")),
                                  (200, "7", "benchmark_scorecard", "selected"))
             self.assertEqual((len(first_requests), len(second_requests)), (1, 2))
+
+    def test_larger_prepared_requests_do_not_inherit_a_smaller_workloads_score(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("0") as (first, _), workflow.provider("7") as (second, _):
+            value = self.two_local_configuration(first, second)
+            value["route_admission"]["scorecard"] = str(self.report_path)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            with self.fixture.connected_client(value) as submit:
+                self.run_benchmark("local-code", "local-better", suite=suite)
+                result = submit(request={"input": suite["cases"][0]["request"]["input"] + "!", "stream": False})
+        self.assertEqual((result["status"], result["headers"].get("x-hormuz-routed-model"),
+                          result["headers"].get("x-hormuz-scorecard-status")),
+                         (200, "fixture-local-model", "no_target_match"))
+
+    def test_compaction_requests_cannot_inherit_response_generation_scores(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("0") as (first, _), workflow.provider("7") as (second, _):
+            value = self.two_local_configuration(first, second)
+            value["route_admission"]["scorecard"] = str(self.report_path)
+            for route in value["model_routes"].values():
+                route["capabilities"] = sorted(set(route.get("capabilities", [])) | {"compact"})
+            with self.fixture.connected_client(value) as submit:
+                self.run_benchmark("local-code", "local-better", suite=suite)
+                result = submit(path="/responses/compact", request={"input": "Summarize seven boxes as a digit.", "stream": False})
+        self.assertEqual((result["status"], result["headers"].get("x-hormuz-routed-model"),
+                          result["headers"].get("x-hormuz-scorecard-status")),
+                         (200, "fixture-local-model", "no_target_match"))
 
     def test_inconsistent_scorecard_totals_cannot_override_the_existing_route(self):
         suite = self.suite()
@@ -280,16 +343,45 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(self.config_path.read_bytes(), original)
         self.assertEqual(output.stat().st_mode & 0o777, 0o600)
 
-    def test_benchmark_receipts_have_valid_discoverable_versioned_contracts(self):
+    def test_valid_large_configurations_can_stage_scorecard_routing(self):
         with workflow.provider("7") as (endpoint, _):
             with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
+                self.run_benchmark("local-code")
+        self.config_path.write_bytes(self.config_path.read_bytes() + b" " * 300000)
+        original = self.config_path.read_bytes()
+        output = self.root / "large-scorecard-routing.json"
+        result = self.command("configure", "--scorecard", str(self.report_path), "--output", str(output))
+        self.assertEqual((result["activation"], json.loads(output.read_text())["route_admission"]["scorecard"]),
+                         ("requires_reconnect", str(self.report_path)))
+        self.assertEqual(self.config_path.read_bytes(), original)
+
+    def test_scorecard_staging_does_not_need_the_running_services_credentials(self):
+        with workflow.provider("7") as (endpoint, _):
+            with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
+                self.run_benchmark("local-code")
+        for name in self.fixture.environment:
+            self.environment.pop(name, None)
+        original = self.config_path.read_bytes()
+        output = self.root / "offline-scorecard-routing.json"
+        result = self.command("configure", "--scorecard", str(self.report_path), "--output", str(output))
+        self.assertEqual((result["activation"], json.loads(output.read_text())["route_admission"]["scorecard"]),
+                         ("requires_reconnect", str(self.report_path)))
+        self.assertEqual(self.config_path.read_bytes(), original)
+
+    def test_benchmark_receipts_have_valid_discoverable_versioned_contracts(self):
+        with workflow.provider("7") as (endpoint, _):
+            with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)) as submit:
                 report = self.run_benchmark("local-code")
+                runtime = submit(method="GET", path="/router/benchmark-state")["body"]
         validate_contract(report)
+        validate_contract(runtime)
         frozen = json.loads((Path(__file__).parent / "fixtures/model-benchmark-v1.json").read_text())
         self.assertEqual(sorted(report), sorted(frozen["scorecard_required_fields"]))
         self.assertEqual(sorted(report["machine"]), sorted(frozen["machine_required_fields"]))
         self.assertEqual(sorted(report["models"][0]), sorted(frozen["model_required_fields"]))
         self.assertEqual(sorted(report["models"][0]["observations"][0]), sorted(frozen["observation_required_fields"]))
+        self.assertEqual(sorted(runtime), sorted(frozen["runtime_required_fields"]))
+        self.assertEqual(sorted(runtime["routes"][0]), sorted(frozen["runtime_route_required_fields"]))
         manifest = subprocess.run([sys.executable, "-m", "hormuz", "contract", "manifest"],
                                   capture_output=True, text=True, timeout=10, check=True)
         schemas = {(row["schema_id"], row["schema_version"]) for row in json.loads(manifest.stdout)["schemas"]}
@@ -298,7 +390,7 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         self.assertTrue(relay[3] <= relay[4])
         self.assertTrue({("hormuz.model-scorecard", 1), ("hormuz.benchmark-suite", 1),
                          ("hormuz.benchmark-routing-configuration", 1), ("hormuz.benchmark-error", 1),
-                         ("hormuz.relay-metadata", 4)} <= schemas)
+                         ("hormuz.relay-metadata", 4), ("hormuz.benchmark-runtime", 1)} <= schemas)
 
     def test_user_can_read_a_comparison_table_with_unknown_prices_labeled(self):
         with workflow.provider("7") as (endpoint, _):
@@ -374,6 +466,38 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 result = self.run_benchmark("local-code", expected=2)
         self.assertEqual((result["error"]["code"], received, self.report_path.exists()),
                          ("benchmark_execution_mismatch", [], False))
+
+    def test_a_changed_endpoint_cannot_receive_an_older_endpoints_benchmark_evidence(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7") as (first, first_requests), workflow.provider("0") as (second, second_requests):
+            value = self.fixture.admission_configuration(first, first)
+            with self.fixture.connected_client(value):
+                changed = json.loads(self.config_path.read_text())
+                changed["upstreams"]["local-llama"]["base_url"] = second
+                self.config_path.write_text(json.dumps(changed))
+                result = self.run_benchmark("local-code", suite=suite, expected=2)
+        self.assertEqual((result["error"]["code"], first_requests, second_requests, self.report_path.exists()),
+                         ("benchmark_execution_mismatch", [], [], False))
+
+    def test_an_unexpected_live_output_cap_cannot_certify_the_requested_budget(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["cases"][0]["request"]["max_output_tokens"] = 16
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7") as (endpoint, received):
+            value = self.fixture.admission_configuration(endpoint, endpoint)
+            with self.fixture.connected_client(value):
+                changed = json.loads(self.config_path.read_text())
+                changed["policies"]["organization"]["max_output_tokens"] = 16
+                self.config_path.write_text(json.dumps(changed))
+                report = self.run_benchmark("local-code", suite=suite)
+        model = report["models"][0]
+        self.assertEqual((model["metrics"]["completed"], model["workloads"][0]["target_met"],
+                          model["observations"][0]["error"],
+                          [item["body"]["max_output_tokens"] for item in received]),
+                         (0, False, "execution_mismatch", [8]))
 
     def test_stale_missing_and_mismatched_evidence_preserve_the_existing_route(self):
         suite = self.suite()
@@ -500,6 +624,21 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
             value["shadow_router"] = {"schema_version": 1, "mode": "shadow", "model": "local-code", "local_model": "local-code"}
             with self.fixture.connected_client(value):
                 result = self.run_benchmark("local-code", expected=2)
+        self.assertEqual((result["error"]["code"], received), ("benchmark_shadow_router_unsupported", []))
+
+    def test_live_shadow_helpers_cannot_add_calls_after_the_config_file_changes(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7") as (endpoint, received):
+            value = self.fixture.admission_configuration(endpoint, endpoint)
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            value["shadow_router"] = {"schema_version": 1, "mode": "shadow", "model": "local-code", "local_model": "local-code"}
+            with self.fixture.connected_client(value):
+                changed = json.loads(self.config_path.read_text())
+                changed.pop("shadow_router")
+                self.config_path.write_text(json.dumps(changed))
+                result = self.run_benchmark("local-code", suite=suite, expected=2)
         self.assertEqual((result["error"]["code"], received), ("benchmark_shadow_router_unsupported", []))
 
     def test_different_generation_budget_does_not_inherit_a_benchmark_quality_score(self):
