@@ -37,12 +37,13 @@ def main():
                         'from pathlib import Path; import hormuz; '
                         'assert Path(hormuz.__file__).resolve().is_relative_to(Path("installed").resolve())'],
                        cwd=temporary, env=environment, check=True, timeout=10)
+        # unittest timings include setup and cleanup. Python 3.11 runs the same
+        # complete suite without the duration flag introduced in Python 3.12.
+        durations = ['--durations', '20'] if sys.version_info >= (3, 12) else []
         subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
-                        '-p', 'test_*workflow.py', '-f', '-v'],
-                       # The 392-test installed CI suite passed in 1046 seconds.
-                       # Additional benchmark and managed-runtime cases need
-                       # a finite twenty-minute budget, leaving
-                       # two minutes for build, artifacts and job cleanup.
+                        '-p', 'test_*workflow.py', '-f', '-v', *durations],
+                       # Keep a finite twenty-minute suite budget, leaving two
+                       # minutes for artifact transfer, installation and cleanup.
                        cwd=temporary, env=environment, check=True, timeout=1200)
     print('Installed-wheel workflow passed outside the source checkout')
 

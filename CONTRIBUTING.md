@@ -16,7 +16,14 @@ python tools/verify_router_wheel.py dist/hormuz-*.whl
 ```
 
 Install the pinned build frontend with `python -m pip install build==1.3.0` if
-needed. Workflow tests use bounded loopback providers, a disposable coding-client
+needed. CI builds the distributions once, then tests the same wheel outside the
+source checkout on Python 3.11–3.14, with at most four test jobs in flight. The
+source scope check runs in the build job, and `CI / required` requires the build
+and every Python version to pass. The wheel verifier reports the 20 slowest tests
+on Python 3.12 and newer, including fixture setup and cleanup; Python 3.11 runs
+the complete suite without that newer reporting option.
+
+Workflow tests use bounded loopback providers, a disposable coding-client
 executable, real routing and temporary private storage. New behavior follows
 one failing workflow test, the smallest implementation, and a passing test.
 Observe client output/status and controlled external traffic; do not query
