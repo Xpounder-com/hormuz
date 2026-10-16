@@ -1,6 +1,6 @@
 ---
 name: hormuz
-description: Manage Hormuz local routing, connection status, troubleshooting, disconnect, or opt-in device-local history review, spending insights, deletion and export through the shared CLI.
+description: Manage Hormuz local routing, cloud-readiness preflight, connection status, troubleshooting, disconnect, or opt-in device-local history review, spending insights, deletion and export through the shared CLI.
 ---
 
 # Hormuz
@@ -20,6 +20,9 @@ commands. These instructions travel with this skill across agent hosts.
 3. Follow the shared `client setup` branch to generate a new local-only
    configuration from existing verified files, or the connect branch for an
    existing configuration. Use status/troubleshooting or disconnect as requested.
+   For cloud authorization or readiness questions, follow the shared
+   [cloud-readiness preflight](references/workflow.md#inspect-cloud-readiness)
+   before proposing settings changes.
    Preserve the user's chosen client home, local-only policy and setup owner.
    For history, follow its separate consent/review branch in the shared workflow.
    For diagnosis, explanations, bounded probes, recommendations, policy staging

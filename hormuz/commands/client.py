@@ -57,6 +57,14 @@ def add_client_commands(
             lifecycle.add_argument("--credential-env", help="Use an existing token environment variable instead of managed local authentication")
             lifecycle.add_argument("--shadow-router", action="store_true", help="Record bounded local model routing advice without changing routes")
 
+    readiness = client_subparsers.add_parser("cloud-readiness", help="Inspect cloud authorization paths without activating them")
+    readiness.add_argument("client", choices=["codex"])
+    readiness.add_argument("--client-home", help="Codex home (default CODEX_HOME or ~/.codex)")
+    readiness.add_argument("--executable", default="codex", help="Codex CLI executable for a bounded version check")
+    readiness.add_argument("--actor", help="Configured actor ID")
+    readiness.add_argument("--surface", choices=["cli", "desktop"], default="cli",
+                           help="Desktop remains separately unqualified; a CLI version cannot qualify it")
+
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
     auth_token = auth_subparsers.add_parser("token", help="Print a credential from an environment variable")
@@ -216,7 +224,10 @@ def run_lifetime(args: argparse.Namespace) -> int:
     from ..connected_client import ConnectedClientError, ConnectedClientLifetime, lifetime_error
     try:
         lifetime = ConnectedClientLifetime(Path(args.client_home or os.environ.get("CODEX_HOME", "~/.codex")))
-        if args.client_command == "setup":
+        if args.client_command == "cloud-readiness":
+            result = lifetime.cloud_readiness(Path(args.config), executable=args.executable,
+                                             actor_id=args.actor, surface=args.surface)
+        elif args.client_command == "setup":
             from ..local_setup import setup_local
             result = setup_local(lifetime, args)
         elif args.client_command == "connect":
