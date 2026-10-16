@@ -144,6 +144,11 @@ tool and provider state retains destination affinity.
 Codex subscription access is not established by login or these tests. There is
 no automatic fallback to billable API usage. Unknown costs remain unknown.
 
+Inspect [cloud authorization readiness](docs/CLOUD_READINESS.md) before changing
+settings with `hormuz --config hormuz.json client cloud-readiness codex`.
+The read-only receipt distinguishes declared API access from the two separately
+authorized ChatGPT plan paths and reports their remaining blockers.
+
 [Optional local history](docs/LOCAL_HISTORY.md) adds encrypted, redacted text
 review and spending estimates on your device. Collection starts disabled;
 `hormuz --config hormuz.json history enable` opts in for future intercepted

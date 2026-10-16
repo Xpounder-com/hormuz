@@ -1,0 +1,104 @@
+{
+  "client": {
+    "pinned_cli_version": "0.147.0",
+    "surface": "cli",
+    "version_check": "pinned"
+  },
+  "configuration": {
+    "allowed_cloud_routes": 0,
+    "cloud_routes": 0,
+    "codex_allowed": true,
+    "routing_mode": "local_only",
+    "status": "available"
+  },
+  "effects": {
+    "credentials_read": false,
+    "provider_requests": 0,
+    "settings_changed": false
+  },
+  "paths": [
+    {
+      "billing": "api_usage",
+      "blockers": [
+        {
+          "action": "Keep local-only for offline work; changing cloud permissions requires a separate decision.",
+          "code": "local_only_forbids_cloud"
+        },
+        {
+          "action": "Declare an explicit cloud OpenAI route only if API usage is intended.",
+          "code": "cloud_route_missing"
+        },
+        {
+          "action": "Verify the intended credential through a separately authorized connection.",
+          "code": "credentials_unverified"
+        },
+        {
+          "action": "Qualify the selected provider, model, streaming, tools and continuation separately.",
+          "code": "provider_unqualified"
+        }
+      ],
+      "documentation": "https://learn.chatgpt.com/docs/enterprise/gateway-compatibility",
+      "id": "api_key",
+      "status": "blocked"
+    },
+    {
+      "billing": "chatgpt_plan",
+      "blockers": [
+        {
+          "action": "Keep local-only for offline work; changing cloud permissions requires a separate decision.",
+          "code": "local_only_forbids_cloud"
+        },
+        {
+          "action": "Implement the native Codex gateway adapter before activation.",
+          "code": "native_gateway_not_implemented"
+        },
+        {
+          "action": "Verify the supported build and workspace-managed provider requirements.",
+          "code": "managed_workspace_setup_required"
+        },
+        {
+          "action": "Complete the chosen native consent flow and establish account eligibility.",
+          "code": "account_consent_eligibility_unverified"
+        },
+        {
+          "action": "Qualify the selected provider, model, streaming, tools and continuation separately.",
+          "code": "provider_unqualified"
+        }
+      ],
+      "documentation": "https://learn.chatgpt.com/docs/enterprise/sign-in-with-chatgpt-through-a-gateway",
+      "id": "native_codex_gateway",
+      "status": "not_implemented"
+    },
+    {
+      "billing": "chatgpt_plan",
+      "blockers": [
+        {
+          "action": "Keep local-only for offline work; changing cloud permissions requires a separate decision.",
+          "code": "local_only_forbids_cloud"
+        },
+        {
+          "action": "Implement app-specific authorization and its plan request profile.",
+          "code": "app_authorization_not_implemented"
+        },
+        {
+          "action": "Register the app and persist a stable host ID in the authorized flow.",
+          "code": "registration_and_host_id_required"
+        },
+        {
+          "action": "Complete the chosen native consent flow and establish account eligibility.",
+          "code": "account_consent_eligibility_unverified"
+        },
+        {
+          "action": "Qualify the selected provider, model, streaming, tools and continuation separately.",
+          "code": "provider_unqualified"
+        }
+      ],
+      "documentation": "https://developers.openai.com/siwc/token-sharing-open-source/",
+      "id": "chatgpt_app",
+      "status": "not_implemented"
+    }
+  ],
+  "schema_id": "hormuz.cloud-readiness",
+  "schema_version": 1,
+  "scope": "configuration_only"
+}
