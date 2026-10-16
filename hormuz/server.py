@@ -1008,6 +1008,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             failover_decision = None
         if (
             not account_usage
+            or self.headers.get("X-Hormuz-Benchmark") == "1"
             or self._request_precludes_failover(protocol, redaction.value)
         ):
             failover_decision = None

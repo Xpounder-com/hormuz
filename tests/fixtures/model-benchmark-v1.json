@@ -1,0 +1,13 @@
+{
+  "schema_id": "hormuz.model-scorecard",
+  "schema_version": 1,
+  "scorecard_required_fields": ["schema_id", "schema_version", "suite", "actor_id", "organization_id", "machine", "resources", "recorded_at", "expires_at", "targets", "models"],
+  "model_required_fields": ["model_alias", "subject", "route_fingerprint", "observations", "metrics", "workloads"],
+  "machine_required_fields": ["system", "architecture", "logical_cpu_count", "physical_memory_bytes"],
+  "observation_required_fields": ["case_id", "case_sha256", "task_type", "partition", "repeat", "request_profile_sha256", "input_size", "request_bytes", "max_output_tokens", "completed", "passed", "checks", "error", "usage", "latency_ms", "headers_ms", "ttft_ms", "first_byte_ms"],
+  "routing_headers_version": 4,
+  "routing_headers": ["X-Hormuz-Scorecard-Status", "X-Hormuz-Scorecard-SHA256"],
+  "score_basis": "independent_reference_checks_on_user_supplied_tasks",
+  "route_authority": "preexisting_policy_and_qualification",
+  "rollback": "remove_route_admission_scorecard_and_reconnect"
+}

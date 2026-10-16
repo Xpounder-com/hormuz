@@ -195,6 +195,7 @@ PUBLIC_ERROR_CODES_V1 = frozenset(
 PUBLIC_ERROR_CODES_V2 = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unavailable"})
 
 ROUTE_ADMISSION_ERROR_CODES = frozenset({
+    "hormuz_route_invalid_benchmark_mode",
     "hormuz_route_invalid_routing_mode", "hormuz_route_affinity_required",
     "hormuz_route_local_route_unavailable", "hormuz_route_local_capacity_busy",
     "hormuz_route_destination_not_admitted", "hormuz_route_policy_changed",
@@ -205,6 +206,8 @@ PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restrict
                               *ROUTE_ADMISSION_ERROR_CODES, *CONNECTED_CLIENT_ERROR_ACTIONS})
 
 _CURRENT_SCHEMA_VERSIONS = {
+    "hormuz.model-scorecard": 1, "hormuz.benchmark-suite": 1,
+    "hormuz.benchmark-routing-configuration": 1, "hormuz.benchmark-error": 1,
     "hormuz.local-coding-evidence": 1,
     "hormuz.cloud-readiness": 1,
     LOCAL_SETUP_SCHEMA_ID: 1,

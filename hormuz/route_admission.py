@@ -2,6 +2,7 @@
 from dataclasses import dataclass, replace
 from contextlib import contextmanager
 import json
+from pathlib import Path
 import threading
 import time
 import urllib.error
@@ -31,6 +32,7 @@ class LocalQualification:
 class RouteAdmissionConfig:
     mode: str = "configured"
     local_routes: tuple[tuple[str, LocalQualification], ...] = ()
+    scorecard: str | None = None
 
 
 class RouteAdmissionError(Exception):
@@ -42,7 +44,7 @@ class RouteAdmissionError(Exception):
 def build_route_admission(raw, routes, upstreams):
     from .config import ConfigError
     value = raw.get("route_admission", {})
-    if type(value) is not dict or set(value) - {"mode", "local_routes"}:
+    if type(value) is not dict or set(value) - {"mode", "local_routes", "scorecard"}:
         raise ConfigError("route_admission is invalid")
     mode = value.get("mode", "configured")
     if type(mode) is not str or mode not in {"configured", "auto", "local_only"}:
@@ -86,7 +88,12 @@ def build_route_admission(raw, routes, upstreams):
         result.append((alias, LocalQualification(record["qualification_id"], record["model_revision"],
             record["max_request_bytes"], record["max_output_tokens"], tuple(kinds),
             None if evidence is None else json.dumps(evidence, sort_keys=True, separators=(",", ":")))))
-    return RouteAdmissionConfig(mode, tuple(result))
+    scorecard = value.get("scorecard")
+    if scorecard is not None and (type(scorecard) is not str or not 1 <= len(scorecard) <= 4096
+                                 or "\x00" in scorecard or not Path(scorecard).is_absolute()
+                                 or mode == "configured"):
+        raise ConfigError("route_admission.scorecard requires an absolute local path and automatic admission")
+    return RouteAdmissionConfig(mode, tuple(result), scorecard)
 
 
 def _text_envelope(value, protocol, endpoint):
@@ -188,6 +195,8 @@ class RouteAdmission:
         self._local_capacity = threading.BoundedSemaphore(1)
         self._capacity_lock = threading.Lock()
         self._active_local = 0
+        from .scorecard_routing import ScorecardRouting
+        self.scorecards = ScorecardRouting(config)
 
     @staticmethod
     def _within_envelope(handler, route, qualification, value, output_field):
@@ -263,6 +272,9 @@ class RouteAdmission:
         handler._route_admission_candidates = None
         handler._route_admission_selection_candidates = None
         handler._route_admission_headers = {}
+        probes = handler.headers.get_all("X-Hormuz-Benchmark", [])
+        if len(probes) > 1 or probes and probes[0] != "1":
+            raise RouteAdmissionError("invalid_benchmark_mode")
         requested = handler.headers.get_all("X-Hormuz-Routing-Mode", [])
         if len(requested) > 1 or requested and requested[0] != "local_only":
             raise RouteAdmissionError("invalid_routing_mode")
@@ -343,10 +355,20 @@ class RouteAdmission:
         else:
             selected, candidates, reason = decision, {decision.resolved_alias: decision}, "permitted_baseline"
             selection_candidates = candidates
+        scorecard_headers = {}
+        if self.settings.scorecard:
+            if continuation or probes:
+                scorecard_headers["X-Hormuz-Scorecard-Status"] = "affinity_preserved" if continuation else "benchmark_probe"
+            else:
+                alias, scorecard_headers = self.scorecards.choose(identity, candidates, value, handler._provider_body)
+                if alias is not None:
+                    selected = candidates[alias]
+                    selection_candidates = {alias: selected}
+                    reason = "benchmark_scorecard"
         handler._route_admission_candidates = candidates
         handler._route_admission_selection_candidates = selection_candidates
         handler._route_admission_headers = {"X-Hormuz-Routing-Mode": mode,
-                                            "X-Hormuz-Routing-Reason": reason}
+                                            "X-Hormuz-Routing-Reason": reason, **scorecard_headers}
         if selected.resolved_alias in self.qualifications:
             handler._route_admission_headers["X-Hormuz-Routing-Qualification"] = self.qualifications[selected.resolved_alias].qualification_id
         action = selected.action
@@ -388,7 +410,7 @@ class RouteAdmission:
 
     def contract_header(self, handler, route):
         if getattr(handler, "_route_admission_headers", {}):
-            return "hormuz.relay-metadata;v=3"
+            return "hormuz.relay-metadata;v=4" if self.settings.scorecard else "hormuz.relay-metadata;v=3"
         return self.destinations.contract_header(route)
 
     def response_headers(self, handler, route):

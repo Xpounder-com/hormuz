@@ -61,6 +61,7 @@ from ._contract_schemas.connected_client import (
     _validate_preview_v2 as _validate_connected_client_preview_v2,
 )
 from ._contract_schemas.local_coding import EVIDENCE_FIELDS, validate_evidence as _validate_coding_evidence
+from ._contract_schemas.benchmark import FIELDS as BENCHMARK_FIELDS, validate_benchmark as _validate_benchmark
 from ._contract_schemas.cloud_readiness import FIELDS as CLOUD_READINESS_FIELDS, validate_readiness as _validate_cloud_readiness
 from ._contract_schemas.local_setup import (validate_profile as _validate_local_setup_profile,
     validate_setup as _validate_local_setup, validate_setup_v2 as _validate_local_setup_v2,
@@ -500,6 +501,14 @@ def contract_manifest() -> dict[str, object]:
                  "X-Hormuz-Routed-Model", "X-Hormuz-Redactions", "X-Hormuz-Error-Code",
                  "X-Hormuz-Destination", "X-Hormuz-Destination-Locality", "X-Hormuz-Destination-Generation",
                  "X-Hormuz-Routing-Mode", "X-Hormuz-Routing-Reason", "X-Hormuz-Routing-Qualification"]),
+            _manifest_schema(RELAY_METADATA_SCHEMA_ID, 4, "http-headers", "hormuz",
+                ["X-Hormuz-Contract", "X-Hormuz-Policy-Decision", "X-Hormuz-Requested-Model",
+                 "X-Hormuz-Routed-Model", "X-Hormuz-Redactions", "X-Hormuz-Error-Code",
+                 "X-Hormuz-Routing-Qualification", "X-Hormuz-Destination", "X-Hormuz-Destination-Locality",
+                 "X-Hormuz-Destination-Generation", "X-Hormuz-Routing-Mode", "X-Hormuz-Routing-Reason",
+                 "X-Hormuz-Scorecard-Status", "X-Hormuz-Scorecard-SHA256"]),
+            *[_manifest_schema(schema, 1, "cli-output", "hormuz", fields)
+              for schema, fields in BENCHMARK_FIELDS.items()],
             *[_manifest_schema(ROUTE_ADMISSION_SCHEMA_ID, version, "response", "hormuz",
                 ["schema_id", "schema_version", "mode", "task_classifier", "local_capacity", "routes"])
               for version in (1, 2)],
@@ -575,6 +584,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
     schema_id = _value_string(value, "schema_id")
     schema_version = _value_integer(value, "schema_version")
     validator = {
+        **{(schema, 1): _validate_benchmark for schema in BENCHMARK_FIELDS},
         ("hormuz.local-acquisition-catalog", 1): _validate_acquisition_catalog,
         ("hormuz.local-acquisition", 1): _validate_acquisition_receipt,
         ("hormuz.local-acquisition-error", 1): _validate_acquisition_error,

@@ -49,6 +49,13 @@ coding admission on a pinned, predeclared campaign of actual edits, independent
 checks and normal completion. The bundled experiment remains unqualified for
 automatic coding. Engine health and shadow advice do not grant that qualification.
 
+[Personal model scorecards](docs/MODEL_SCORECARDS.md) benchmark your own examples
+through the local router. Create a suite with reference checks and targets, compare
+quality, latency, streaming first-token timing, throughput, usage and configured
+cost estimates, then explicitly enable deterministic routing among already
+qualified local models. Scorecards stay local and preserve failed or unknown
+measurements. They do not grant coding qualification.
+
 ## Install in your agent
 
 The plugin manifests and shared CLI implementation are included in this source.
