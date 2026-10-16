@@ -82,6 +82,12 @@ observed unsuccessful episodes are `failed`; a different execution subject is
 `code_change`. Review remains unsupported. A healthy engine can remain unqualified.
 Qualified public summaries require at least 16 planned cases and identical
 planned, evaluated and passed counts. Contradictory summaries fail validation.
+Every nonnull evidence summary has at least one planned case; failed readiness
+requires an evaluated case that did not pass. Incomplete campaigns can have
+every planned case pass while lacking the required coverage. Subject mismatch
+takes precedence over outcome readiness and may have zero evaluated cases.
+Summary identifiers retain the receipt's bounded ASCII identifier rule, and
+automatic task lists contain unique supported tasks only.
 Summary plan/receipt digests require 64 lowercase hexadecimal characters.
 Malformed readiness or task-list types raise `ContractValidationError`, like
 other invalid summary fields.

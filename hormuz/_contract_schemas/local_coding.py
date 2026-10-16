@@ -23,7 +23,7 @@ def _digest(value):
         raise ContractValidationError("invalid coding evidence digest")
 
 
-def _tag(value):
+def validate_identifier(value):
     if type(value) is not str or re.fullmatch(r"[A-Za-z0-9_.:+-]{1,128}", value) is None:
         raise ContractValidationError("invalid coding evidence identifier")
 
@@ -32,7 +32,7 @@ def validate_evidence(value):
     _exact_keys(value, EVIDENCE_FIELDS)
     if value["schema_id"] != "hormuz.local-coding-evidence" or type(value["schema_version"]) is not int or value["schema_version"] != 1:
         raise ContractValidationError("invalid coding evidence version")
-    _tag(value["evidence_id"])
+    validate_identifier(value["evidence_id"])
     plan = value["plan"]
     if type(plan) is not dict:
         raise ContractValidationError("invalid coding evidence plan")
@@ -44,7 +44,7 @@ def validate_evidence(value):
         raise ContractValidationError("invalid coding evidence subject")
     _exact_keys(subject, SUBJECT_FIELDS)
     for key in ("client_version", "system", "machine", "runtime_profile", "model_revision", "upstream_model"):
-        _tag(subject[key])
+        validate_identifier(subject[key])
     for key in ("runtime_sha256", "request_profile_sha256"):
         _digest(subject[key])
     if subject["protocol"] != "openai" or subject["runtime_profile"] != "managed-llama.v1":
@@ -67,7 +67,7 @@ def validate_evidence(value):
         if type(case) is not dict:
             raise ContractValidationError("invalid coding case")
         _exact_keys(case, {"case_id", "partition", "family", "task_sha256", "checks_sha256"})
-        _tag(case["case_id"])
+        validate_identifier(case["case_id"])
         _digest(case["task_sha256"])
         _digest(case["checks_sha256"])
         if (type(case["partition"]) is not str or case["partition"] not in {"development", "held_out"}
@@ -88,7 +88,7 @@ def validate_evidence(value):
             raise ContractValidationError("invalid coding outcome")
         _exact_keys(outcome, {"case_id", "baseline_exit_code", "checks_sha256", "implementation_changed", "patch_sha256",
                               "check_exit_code", "client_exit_code", "termination", "elapsed_ms"})
-        _tag(outcome["case_id"])
+        validate_identifier(outcome["case_id"])
         if outcome["case_id"] not in identifiers or outcome["case_id"] in observed:
             raise ContractValidationError("invalid coding outcome identity")
         observed.add(outcome["case_id"])

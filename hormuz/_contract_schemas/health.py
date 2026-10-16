@@ -16,6 +16,7 @@ from .common import (
     _value_string,
     _value_string_list,
 )
+from .local_coding import validate_identifier
 
 
 def _validate_health(value: Mapping[str, Any]) -> None:
@@ -96,19 +97,23 @@ def _validate_route_admission(value: Mapping[str, Any]) -> None:
                 if not isinstance(evidence, Mapping):
                     raise ContractValidationError("invalid local coding evidence")
                 _exact_keys(evidence, {"evidence_id", "plan_sha256", "receipt_sha256", "basis", "criteria_version", "planned", "evaluated", "passed"})
-                _value_string(evidence, "evidence_id")
+                validate_identifier(evidence["evidence_id"])
                 for field in ("plan_sha256", "receipt_sha256"):
                     _sha256_digest(_value_string(evidence, field), f"coding_evidence.{field}")
                 if (evidence["basis"] != "operator_attested_outcomes" or evidence["criteria_version"] != "local-repair.v1"
-                        or not 0 <= _value_integer(evidence, "passed") <= _value_integer(evidence, "evaluated") <= _value_integer(evidence, "planned") <= 64):
+                        or not 0 <= _value_integer(evidence, "passed") <= _value_integer(evidence, "evaluated") <= _value_integer(evidence, "planned", minimum=1) <= 64):
                     raise ContractValidationError("invalid local coding evidence")
             if (coding_readiness == "unknown") != (evidence is None):
                 raise ContractValidationError("invalid local coding evidence readiness")
             if coding_readiness == "qualified" and (evidence["planned"] < 16
                     or not evidence["passed"] == evidence["evaluated"] == evidence["planned"]):
                 raise ContractValidationError("invalid qualified coding outcomes")
+            if coding_readiness == "failed" and evidence["passed"] == evidence["evaluated"]:
+                raise ContractValidationError("invalid failed coding outcomes")
             automatic = _value_string_list(route, "automatic_task_types")
-            if any(kind not in route["task_types"] or kind == "code_review" or kind == "code_change" and coding_readiness != "qualified" for kind in automatic):
+            automatic_kinds = {"summarization", "translation", "structured_extraction", "code_change"}
+            if len(automatic) != len(set(automatic)) or any(kind not in automatic_kinds
+                    or kind not in route["task_types"] or kind == "code_change" and coding_readiness != "qualified" for kind in automatic):
                 raise ContractValidationError("invalid automatic task types")
         for field in ("model", "destination", "generation", "model_revision", "qualification_id"):
             _value_string(route, field)
