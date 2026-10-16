@@ -61,7 +61,7 @@ def inspect_cloud_readiness(home, config_path, *, executable, actor_id, surface)
             blockers.append("client_unavailable")
         else:
             try:
-                _qualify_client(program)
+                client["pinned_cli_version"] = _qualify_client(program)
                 client["version_check"] = "pinned"
             except (ConnectedClientError, OSError, subprocess.SubprocessError):
                 client["version_check"] = "unsupported"

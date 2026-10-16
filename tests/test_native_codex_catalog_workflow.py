@@ -309,6 +309,21 @@ class NativeCodexCatalogWorkflowTests(unittest.TestCase):
                 self.assertEqual(readiness["configuration"]["cloud_routes"], 0)
                 self.assertEqual(readiness["paths"][1]["status"], "not_implemented")
 
+    def test_generic_catalog_keeps_qualified_local_metadata_and_excludes_native_profiles(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            qualified = self.fixture.admission_configuration(local, cloud)
+            value["route_admission"] = qualified["route_admission"]
+            value["model_routes"]["local-code"] = qualified["model_routes"]["local-code"]
+            value["model_routes"]["local-code"]["capabilities"].extend(["streaming", "tools", "codex_http_0160"])
+            with self.fixture.connected_client(value) as submit:
+                result = submit(method="GET", path="/models")
+                self.assertEqual(result["status"], 200, result)
+                self.assertEqual({model["id"] for model in result["body"]["data"]}, {"local-code", "cloud-code"})
+                self.assertEqual([model["slug"] for model in result["body"]["models"]], ["local-code"])
+                self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_versioned_catalog_fixture_is_discoverable_through_the_public_manifest(self):
         fixture = json.loads((Path(__file__).parent / "fixtures/native-codex-catalog-v1.json").read_text())
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \

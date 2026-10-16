@@ -594,12 +594,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             allowed = snapshot.effective_policy.allowed_models
             clients = snapshot.effective_policy.allowed_clients
             can_use_openai = "codex" in identity.allowed_clients and (clients is None or "codex" in clients)
+            aliases = [alias for alias, route in sorted(self.server.config.model_routes.items())
+                       if can_use_openai and route.protocol == "openai" and (allowed is None or alias in allowed)
+                       and self.server.config.upstreams[route.destination_id].authentication != "codex_chatgpt"]
+            from .codex_catalog import qualified_models
             self._send_json(HTTPStatus.OK, {"object": "list", "data": [
                 {"id": alias, "object": "model", "created": 0, "owned_by": "hormuz-gateway"}
-                for alias, route in sorted(self.server.config.model_routes.items())
-                if can_use_openai and route.protocol == "openai" and (allowed is None or alias in allowed)
-                and self.server.config.upstreams[route.destination_id].authentication != "codex_chatgpt"
-            ]})
+                for alias in aliases
+            ], "models": qualified_models(self.server.config, aliases)})
             return
         if path == "/v1/gateway/whoami":
             self._send_contract_json(

@@ -13,7 +13,9 @@ hormuz --config hormuz.json client cloud-readiness codex --surface desktop
 Terminal and skill callers use the same command and
 `ConnectedClientLifetime.cloud_readiness` implementation. Installing a plugin
 does not activate routing. The pinned CLI version is read from the connection
-implementation; this snapshot pins Codex CLI 0.147.0. The desktop option does
+implementation, which supports exact versions 0.147.0 and 0.160.0. A `pinned`
+version check reports the actual qualified executable in `pinned_cli_version`;
+otherwise that field names the current reference version. The desktop option does
 not run a terminal binary or treat its version as desktop qualification.
 
 | Path | Current result | Remaining work |
