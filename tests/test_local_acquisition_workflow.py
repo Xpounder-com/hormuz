@@ -103,9 +103,14 @@ class LocalAcquisitionWorkflowTests(unittest.TestCase):
         self.root = self.client.root
         self.directory = self.root / "assets"
 
-    def acquire(self, *options, check=True):
-        result = subprocess.run([sys.executable, "-m", "hormuz", "client", "acquire", "codex",
-            "--directory", str(self.directory), "--catalog", str(self.root / "catalog.json"), *options],
+    def invocation(self, *options, bootstrap=None):
+        launcher = ([sys.executable, "-c", bootstrap] if bootstrap is not None else
+                    [sys.executable, "-m", "hormuz"])
+        return [*launcher, "client", "acquire", "codex",
+            "--directory", str(self.directory), "--catalog", str(self.root / "catalog.json"), *options]
+
+    def acquire(self, *options, check=True, bootstrap=None):
+        result = subprocess.run(self.invocation(*options, bootstrap=bootstrap),
             env=self.client.environment, capture_output=True, text=True, timeout=18)
         if check:
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -155,6 +160,10 @@ class LocalAcquisitionWorkflowTests(unittest.TestCase):
                 ready = json.loads(self.acquire("--download").stdout)
                 validate_contract(ready)
                 self.assertEqual((ready["operation"], ready["state"]), ("acquire", "ready"))
+                self.assertEqual(ready["storage"]["download_bytes"], 0)
+                self.assertEqual(ready["storage"]["required_free_bytes"], 0)
+                saved = json.loads((Path(ready["directory"]) / "receipt.json").read_text())
+                self.assertEqual(saved["storage"], ready["storage"])
                 self.assertEqual([item[0] for item in observed], ["/runtime", "/model"])
                 self.assertTrue(all("Authorization" not in headers for _, headers in observed))
                 self.assertEqual((self.client.home / "config.toml").read_text(), original)
@@ -192,6 +201,178 @@ class LocalAcquisitionWorkflowTests(unittest.TestCase):
             self.assertEqual([path for path, _ in observed], ["/runtime", "/runtime", "/model"])
             self.assertFalse(self.client.path.exists())
             self.assertEqual(self.client.client("inspect")["model"], "original-model")
+
+    def test_non_posix_import_and_dispatch_return_the_fixed_platform_error(self):
+        bootstrap = """
+import sys, os
+sys.modules['fcntl'] = None
+from hormuz.cli import main
+os.name = 'nt'
+raise SystemExit(main(sys.argv[1:]))
+"""
+        failed = self.acquire("--download", bootstrap=bootstrap, check=False)
+        self.assertEqual(failed.returncode, 2, failed.stderr)
+        validate_contract(json.loads(failed.stderr))
+        self.assertEqual(json.loads(failed.stderr)["error"]["code"], "platform_unsupported")
+        self.assertFalse(self.directory.exists())
+        self.assertFalse(self.client.path.exists())
+
+    def checksum_clock(self, size, elapsed):
+        # Simulate a slow disk at the external file/clock boundary without waiting
+        # or changing acquisition decisions, hashes, or the real payload bytes.
+        return f"""
+from hormuz.cli import main
+import os, sys, time
+original_fdopen, original_clock = os.fdopen, time.monotonic
+offset = 0
+class SlowFile:
+    def __init__(self, stream):
+        self.stream, self.delayed = stream, False
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        return self.stream.__exit__(*args)
+    def read(self, *args):
+        global offset
+        data = self.stream.read(*args)
+        if data and not self.delayed and os.fstat(self.stream.fileno()).st_size == {size!r}:
+            self.delayed = True
+            offset += {elapsed!r}
+        return data
+def fdopen(fd, *args, **kwargs):
+    stream = original_fdopen(fd, *args, **kwargs)
+    return SlowFile(stream)
+os.fdopen = fdopen
+time.monotonic = lambda: original_clock() + offset
+raise SystemExit(main(sys.argv[1:]))
+"""
+
+    def test_size_scaled_checksum_budget_accepts_slow_valid_bytes(self):
+        value, payloads = self.prepare()
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            bootstrap = self.checksum_clock(len(payloads["/model"]), 60.25)
+            ready = json.loads(self.acquire("--download", bootstrap=bootstrap).stdout)
+            self.assertEqual(ready["state"], "ready")
+            reused = json.loads(self.acquire("--offline", bootstrap=bootstrap).stdout)
+            self.assertEqual(reused["state"], "ready")
+            self.assertEqual([path for path, _ in observed], ["/runtime", "/model"])
+
+    def test_checksum_timeout_preserves_complete_partial_for_explicit_retry(self):
+        value, payloads = self.prepare()
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            preview = json.loads(self.acquire().stdout)
+            partial = Path(preview["artifacts"]["model"]["path"] + ".part")
+            failed = self.acquire("--download", check=False,
+                bootstrap=self.checksum_clock(len(payloads["/model"]), 120))
+            self.assertEqual(failed.returncode, 2, failed.stderr)
+            self.assertEqual(json.loads(failed.stderr)["error"]["code"], "download_unavailable")
+            self.assertEqual(partial.read_bytes(), payloads["/model"])
+            self.assertFalse(Path(preview["directory"], "receipt.json").exists())
+            ready = json.loads(self.acquire("--download").stdout)
+            self.assertEqual(ready["state"], "ready")
+            self.assertFalse(partial.exists())
+            self.assertEqual([path for path, _ in observed], ["/runtime", "/model"])
+
+    def test_active_extraction_is_busy_for_download_preview_and_offline(self):
+        value, payloads = self.prepare()
+        executable_size = Path(value["managed_llama"]["executable"]).stat().st_size
+        entered, release = self.root / "extracting", self.root / "release-extraction"
+        bootstrap = f"""
+from hormuz.cli import main
+import os, sys, time
+from pathlib import Path
+original_sync = os.fsync
+def fsync(fd):
+    original_sync(fd)
+    if os.fstat(fd).st_size == {executable_size!r}:
+        Path({str(entered)!r}).touch()
+        deadline = time.monotonic() + 6
+        while not Path({str(release)!r}).exists():
+            if time.monotonic() >= deadline:
+                raise OSError('fixture release timed out')
+            time.sleep(0.025)
+os.fsync = fsync
+raise SystemExit(main(sys.argv[1:]))
+"""
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            process = subprocess.Popen(self.invocation("--download", bootstrap=bootstrap),
+                env=self.client.environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                deadline = time.monotonic() + 3
+                while not entered.exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.025)
+                self.assertTrue(entered.exists(), "fixture must hold an extracted file before publication")
+                self.assertTrue(list(self.directory.glob("*/.runtime-*")))
+                for options in (("--download",), (), ("--offline",)):
+                    with self.subTest(options=options):
+                        failed = self.acquire(*options, check=False)
+                        self.assertEqual(failed.returncode, 2, failed.stderr)
+                        self.assertEqual(json.loads(failed.stderr)["error"]["code"], "busy")
+                self.assertEqual([path for path, _ in observed], ["/runtime", "/model"])
+                self.assertFalse(self.client.path.exists())
+            finally:
+                release.touch()
+                try:
+                    output, errors = process.communicate(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.terminate()
+                    process.communicate(timeout=2)
+                    raise
+            self.assertEqual(process.returncode, 0, errors)
+            self.assertEqual(json.loads(output)["state"], "ready")
+            self.assertEqual(json.loads(self.acquire("--offline").stdout)["state"], "ready")
+
+    def test_missing_or_unsafe_generation_lock_preserves_the_installation(self):
+        value, payloads = self.prepare()
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            ready = json.loads(self.acquire("--download").stdout)
+            lock = self.directory / (".acquire-" + ready["catalog_sha256"] + ".lock")
+            receipt = Path(ready["directory"], "receipt.json").read_bytes()
+            sentinel = self.root / "foreign-lock"
+            sentinel.write_bytes(b"preserve unrelated data")
+            for kind, code in (("missing", "installation_changed"), ("symlink", "directory_unsafe"),
+                               ("nonempty", "installation_changed")):
+                lock.unlink()
+                if kind == "symlink":
+                    lock.symlink_to(sentinel)
+                elif kind == "nonempty":
+                    lock.write_bytes(b"foreign lock data")
+                    lock.chmod(0o600)
+                for options in ((), ("--offline",), ("--download",)):
+                    with self.subTest(kind=kind, options=options):
+                        failed = self.acquire(*options, check=False)
+                        self.assertEqual(failed.returncode, 2, failed.stderr)
+                        self.assertEqual(json.loads(failed.stderr)["error"]["code"], code)
+                        self.assertEqual(Path(ready["directory"], "receipt.json").read_bytes(), receipt)
+                        self.assertEqual(sentinel.read_bytes(), b"preserve unrelated data")
+                if lock.exists() or lock.is_symlink():
+                    lock.unlink()
+                lock.touch(mode=0o600)
+            self.assertEqual(json.loads(self.acquire("--offline").stdout)["state"], "ready")
+            self.assertEqual([path for path, _ in observed], ["/runtime", "/model"])
+
+    def test_prior_v1_receipt_storage_is_accepted_without_rewriting_or_network(self):
+        value, payloads = self.prepare()
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            preview = json.loads(self.acquire().stdout)
+            ready = json.loads(self.acquire("--download").stdout)
+            receipt = Path(ready["directory"], "receipt.json")
+            ready["storage"] = preview["storage"]
+            old_bytes = json.dumps(ready).encode()
+            receipt.write_bytes(old_bytes)
+            reused = json.loads(self.acquire("--offline").stdout)
+            self.assertEqual(reused["state"], "ready")
+            self.assertEqual(reused["storage"]["download_bytes"], 0)
+            self.assertEqual(reused["storage"]["required_free_bytes"], 0)
+            self.assertEqual(receipt.read_bytes(), old_bytes)
+            self.assertEqual([path for path, _ in observed], ["/runtime", "/model"])
 
     def test_changed_published_installation_is_preserved_and_not_redownloaded(self):
         value, payloads = self.prepare()
@@ -491,6 +672,9 @@ class LocalAcquisitionWorkflowTests(unittest.TestCase):
                         env=self.client.environment, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
                     try:
                         self.assertTrue(entered.wait(3), "fixture download must start")
+                        for options in ((), ("--offline",), ("--download",)):
+                            failed = self.acquire(*options, check=False)
+                            self.assertEqual(json.loads(failed.stderr)["error"]["code"], "busy")
                         process.send_signal(termination)
                         output, errors = process.communicate(timeout=3)
                         self.assertTrue(closed.wait(2), "owned transfer must end when its parent exits")

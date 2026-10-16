@@ -47,6 +47,7 @@
     "license_url": "https://huggingface.co/Qwen/Qwen3-4B-GGUF/blob/bc640142c66e1fdd12af0bd68f40445458f3869b/README.md",
     "allowed_hosts": [
       "huggingface.co",
+      "us.aws.cdn.hf.co",
       "cdn-lfs.huggingface.co",
       "cdn-lfs-us-1.hf.co",
       "cas-bridge.xethub.hf.co"

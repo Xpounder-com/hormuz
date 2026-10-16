@@ -653,7 +653,8 @@ class ConnectedClientLifetime:
             process = subprocess.Popen([sys.executable, "-m", "hormuz.connected_client_runtime", str(self.record_path), generation],
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 start_new_session=True)
-            deadline = time.monotonic() + (managed.startup_timeout_seconds + 35 if managed is not None else 5)
+            deadline = time.monotonic() + (managed.verification_timeout_seconds() + managed.startup_timeout_seconds + 5
+                                         if managed is not None else 5)
             while _control(record, "status") != "ready":
                 if process.poll() is not None or time.monotonic() >= deadline:
                     if process.poll() is None:
