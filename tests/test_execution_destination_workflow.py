@@ -59,14 +59,23 @@ try:
         print(json.dumps({"status": "cancelled", "body": None, "headers": {}}))
         sys.exit(0)
     response = connection.getresponse()
+    if value.get("headers_signal"):
+        with open(value["headers_signal"], "w") as signal:
+            signal.write("client received headers")
     if value.get("stall_after_headers"):
-        time.sleep(1.8)
+        time.sleep(value.get("stall_seconds", 1.8))
         connection.close()
         print(json.dumps({"status": response.status,
                           "headers": dict((k.lower(), v) for k, v in response.getheaders()),
                           "body": None}))
         sys.exit(0)
-    data = response.readline() if value.get("cancel_after_event") else response.read()
+    if value.get("first_event_signal"):
+        data = response.readline()
+        with open(value["first_event_signal"], "w") as signal:
+            signal.write("client received first event")
+        data += response.read()
+    else:
+        data = response.readline() if value.get("cancel_after_event") else response.read()
     print(json.dumps({"status": response.status,
                       "headers": dict((k.lower(), v) for k, v in response.getheaders()),
                       "body": json.loads(data) if "application/json" in response.getheader("Content-Type", "") else data.decode()}))
@@ -76,7 +85,7 @@ finally:
 
 
 @contextmanager
-def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None):
+def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None, text_deltas=(), trailing_events=(), response_body=None):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -94,7 +103,7 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            received.append({"path": self.path, "body": body,
+            received.append({"path": self.path, "body": body, "wire_bytes": int(self.headers["Content-Length"]),
                              "headers": {k.lower(): v for k, v in self.headers.items()}})
             if hold_first and len(received) == 1:
                 hold_first[0].set()
@@ -109,8 +118,11 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
             if event_stream:
                 tool = {"type": "function_call", "call_id": "fixture-call", "name": "fixture_tool", "arguments": "{}"}
                 events = [{"type": "response.output_item.done", "item": tool},
-                          {"type": "response.completed", "response": result}]
+                          *({"type": "response.output_text.delta", "delta": delta} for delta in text_deltas),
+                          {"type": "response.completed", "response": result}, *trailing_events]
                 data = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
+            if response_body is not None:
+                data = response_body
             if backpressure_first and len(received) == 1:
                 data = b"data: " + b" " * (16 * 1024 * 1024) + b"\n\n" + data
             self.send_response(status(body) if callable(status) else status)
@@ -1233,7 +1245,7 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 entries = json.loads(manifest.stdout)["schemas"]
                 versions = {entry["schema_version"] for entry in entries
                             if entry["schema_id"] == "hormuz.relay-metadata"}
-                self.assertEqual(versions, {1, 2, 3})
+                self.assertEqual(versions, {1, 2, 3, 4})
                 frozen = json.loads((Path(__file__).parent / "fixtures/execution_destination/relay-v3.json").read_text())
                 self.assertEqual(next(entry for entry in entries if entry["schema_id"] == "hormuz.relay-metadata" and entry["schema_version"] == 3), frozen)
                 self.assertIn("hormuz_route_local_route_unavailable", json.loads(manifest.stdout)["error_codes"])

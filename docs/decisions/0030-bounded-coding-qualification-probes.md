@@ -1,4 +1,4 @@
-# ADR 0029: Collect coding outcomes through explicit bounded local probes
+# ADR 0030: Collect coding outcomes through explicit bounded local probes
 
 Ordinary unqualified coding must remain blocked, while a first honest outcome
 campaign needs an execution path. Add ephemeral, operator-invoked permission to

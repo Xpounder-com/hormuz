@@ -19,8 +19,15 @@ credentials and command-backed client authentication to shared setup.
 against existing attempts while retaining policy and conversation affinity.
 
 [ADR 0027](0027-native-codex-catalog.md) separates native ChatGPT credentials
-from gateway/API credentials for opt-in model discovery; inference and actual
-account/client qualification remain separate.
+from gateway/API credentials for opt-in model discovery.
+[ADR 0028](0028-native-codex-responses.md) extends that boundary with separately
+opted-in HTTP/SSE inference; actual account/client qualification remains separate.
+
+[ADR 0029](0029-personal-benchmark-scorecard-routing.md) records private personal
+benchmarks and explicit scorecard preferences within admitted local routes.
+
+[ADR 0030](0030-bounded-coding-qualification-probes.md) records explicit,
+ephemeral local coding probes without changing ordinary coding readiness.
 
 Earlier records remain historical evidence. Their enterprise/UI product scope
 is superseded by ADR 0018; retaining a record does not reactivate its product or

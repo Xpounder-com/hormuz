@@ -27,7 +27,7 @@ from hormuz.contracts import validate_contract_manifest
 
 
 @contextmanager
-def native_backend(body, *, status=200, headers=None, drip=False, certificate_host="chatgpt.com", dns_delay=0, workers=None):
+def native_backend(body, *, status=200, headers=None, drip=False, certificate_host="chatgpt.com", dns_delay=0, workers=None, response_handler=None):
     """A real TLS service standing in for the fixed native backend authority."""
     received = []
     stopped = threading.Event()
@@ -58,6 +58,11 @@ def native_backend(body, *, status=200, headers=None, drip=False, certificate_ho
             timeout = 3
             def log_message(self, *_args):
                 pass
+            def do_POST(self):
+                value = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                received.append({"path": self.path, "body": value,
+                    "headers": {key.lower(): value for key, value in self.headers.items()}})
+                response_handler(self, value, len(received))
             def do_GET(self):
                 received.append({"path": self.path, "headers": {key.lower(): value for key, value in self.headers.items()}})
                 data = body if isinstance(body, bytes) else json.dumps(body).encode()
@@ -94,7 +99,7 @@ def native_backend(body, *, status=200, headers=None, drip=False, certificate_ho
                 return original("127.0.0.1", server.server_port, *args, **kwargs)
             return original(host, port, *args, **kwargs)
         def launch(args, *positional, **options):
-            if isinstance(args, (list, tuple)) and Path(str(args[-1])).name == "_native_catalog_worker.py":
+            if isinstance(args, (list, tuple)) and Path(str(args[-1])).name in {"_native_catalog_worker.py", "_native_responses_worker.py"}:
                 # Supply the same external DNS fixture to a real isolated worker.
                 # Its HTTP/TLS implementation still runs unmodified; no router
                 # collaborator or provider reply is mocked.

@@ -53,6 +53,13 @@ The [first candidate setup](docs/CANDIDATE_SETUP.md) pins an experimental
 Codex 0.160.0/macOS arm64 combination and a sixteen-case preparation campaign.
 It has no new native coding outcomes or admission receipt.
 
+[Personal model scorecards](docs/MODEL_SCORECARDS.md) benchmark your own examples
+through the local router. Create a suite with reference checks and targets, compare
+quality, latency, streaming first-token timing, throughput, usage and configured
+cost estimates, then explicitly enable deterministic routing among already
+qualified local models. Scorecards stay local and preserve failed or unknown
+measurements. They do not grant coding qualification.
+
 ## Install in your agent
 
 The plugin manifests and shared CLI implementation are included in this source.
@@ -158,7 +165,9 @@ no automatic fallback to billable API usage. Unknown costs remain unknown.
 Inspect [cloud authorization readiness](docs/CLOUD_READINESS.md) before changing
 settings with `hormuz --config hormuz.json client cloud-readiness codex`.
 The opt-in [native Codex catalog](docs/NATIVE_CODEX_CATALOG.md) adds separate
-gateway/native authentication for discovery; native inference remains blocked.
+gateway/native authentication for discovery. Separately enabled
+[native Responses](docs/NATIVE_CODEX_RESPONSES.md) adds bounded HTTP/SSE inference,
+continuation isolation and process-scoped usage with unknown plan cost.
 The read-only receipt distinguishes declared API access from the two separately
 authorized ChatGPT plan paths and reports their remaining blockers.
 

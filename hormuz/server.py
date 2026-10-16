@@ -43,6 +43,8 @@ from .route_admission import RouteAdmission, RouteAdmissionError
 from .shadow_routing import ShadowRouter, ShadowClientCanceled
 from .local_transport import open_local_upstream as _owned_local_upstream
 from .native_codex_catalog import CATALOG_PATH, handle_native_catalog
+from .native_codex_responses import RESPONSES_PATH, handle_native_responses, handle_native_status
+from .native_codex_state import NativeCodexState
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
@@ -367,6 +369,7 @@ class GatewayServer(ThreadingHTTPServer):
                          model_routes=MappingProxyType(dict(config.model_routes)))
         self.config = config
         self.native_catalog_slots = threading.BoundedSemaphore(8)
+        self.native_codex_state = NativeCodexState()
         # The same copied upstream configuration drives credential resolution
         # and every later transport/reference selection. GatewayConfig is frozen
         # but its legacy upstream dictionary is not; do not retain that alias.
@@ -528,6 +531,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         self._attribution_result = None
         path = urlsplit(self.path).path
+        if path == "/v1/router/native-codex":
+            self.close_connection = True
+            self.connection.settimeout(3)
+            try:
+                handle_native_status(self)
+            except _STORAGE_FAILURES as error:
+                self._send_storage_failure(None, error)
+            except OSError:
+                pass
+            return
         if path == CATALOG_PATH:
             self.close_connection = True
             self.connection.settimeout(3)
@@ -540,11 +553,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 # thread or trigger a second response after partial output.
                 pass
             return
-        if path == "/v1/router/state":
+        if path in {"/v1/router/state", "/v1/router/benchmark-state"}:
             identity = self._authenticate()
             if identity is not None:
                 try:
-                    self._send_contract_json(HTTPStatus.OK, "hormuz.route-admission", self.server.route_admission.status(identity, self.server.policy_engine))
+                    if path == "/v1/router/benchmark-state":
+                        schema = "hormuz.benchmark-runtime"
+                        value = self.server.route_admission.benchmark_status(identity, self.server.policy_engine)
+                    else:
+                        schema = "hormuz.route-admission"
+                        value = self.server.route_admission.status(identity, self.server.policy_engine)
+                    self._send_contract_json(HTTPStatus.OK, schema, value)
                 except _STORAGE_FAILURES as error:
                     self._send_storage_failure(None, error)
             return
@@ -668,6 +687,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._response_started = False
         self._attribution_result = None
         path = urlsplit(self.path).path
+        if path == RESPONSES_PATH:
+            self.close_connection = True
+            self.connection.settimeout(3)
+            try:
+                handle_native_responses(self)
+            except _STORAGE_FAILURES as error:
+                self._send_storage_failure(None, error)
+            except OSError:
+                pass
+            return
         if handle_work_request(self):
             return
         routes = {
@@ -745,7 +774,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         requested_model = requested_model.strip()
         requested_route = self.server.config.model_routes.get(requested_model)
         if requested_route is not None and self.server.config.upstreams[requested_route.destination_id].authentication == "codex_chatgpt":
-            self._send_protocol_error(protocol, "Native Codex inference is not implemented; no alternate billing path was selected.",
+            self._send_protocol_error(protocol, "Native Codex inference requires the opt-in native Responses endpoint; no alternate billing path was selected.",
                                       HTTPStatus.FORBIDDEN, code="hormuz_policy_denied")
             return
         chat = urlsplit(self.path).path == "/v1/chat/completions"
@@ -919,7 +948,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         decision = self.server.route_admission.select(self, identity, decision, redaction.value,
             client=client, protocol=protocol, output_field=output_field)
         if self.server.destinations.resolve(decision.route).upstream.authentication == "codex_chatgpt":
-            self._send_protocol_error(protocol, "Native Codex inference is not implemented; no alternate billing path was selected.",
+            self._send_protocol_error(protocol, "Native Codex inference requires the opt-in native Responses endpoint; no alternate billing path was selected.",
                                       HTTPStatus.FORBIDDEN, code="hormuz_policy_denied")
             return
         decision = work_gateway.prepare(self, identity, decision, redaction.value,
@@ -948,6 +977,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if is_responses_create and not destination.upstream.allow_response_storage:
             redaction = replace(redaction, value={**redaction.value, "store": False})
         body = self._provider_body(redaction.value, decision.route)
+        if self.headers.get("X-Hormuz-Benchmark") == "1":
+            self._benchmark_forwarded = (len(body), redaction.value.get("max_output_tokens"))
         egress = self.server._egress_configuration
         upstream_key = destination.credential
         if destination.upstream.authentication != "none" and not upstream_key:
@@ -1008,6 +1039,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             failover_decision = None
         if (
             not account_usage
+            or self.headers.get("X-Hormuz-Benchmark") == "1"
             or self._request_precludes_failover(protocol, redaction.value)
         ):
             failover_decision = None
@@ -1805,7 +1837,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if self.headers.get_all("X-Gateway-Key", []) or self.headers.get_all("ChatGPT-Account-ID", []):
             self.close_connection = True
             self._send_error("hormuz_policy_denied",
-                "Native ChatGPT credentials are supported only by the opt-in native catalog; no alternate billing path was selected.",
+                "Native ChatGPT credentials require the opt-in native Codex endpoints; no alternate billing path was selected.",
                 HTTPStatus.FORBIDDEN)
             return None
         candidates: list[str] = []
@@ -1827,7 +1859,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._send_error("unauthorized", "Missing or invalid Hormuz identity credential", HTTPStatus.UNAUTHORIZED)
         return None
 
-    def _read_json_body(self) -> dict[str, Any] | None:
+    def _read_json_body(self, *, strict=False) -> dict[str, Any] | None:
         content_length_value = self.headers.get("Content-Length")
         if content_length_value is None:
             self._send_error("length_required", "Content-Length is required", HTTPStatus.LENGTH_REQUIRED)
@@ -1843,7 +1875,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         data = self.rfile.read(content_length)
         from .compaction_formats import finite_json_float, strict_json_loads
         try:
-            if (self.path == "/v1/responses" and self.server.work_runtime is not None
+            if strict or (self.path == "/v1/responses" and self.server.work_runtime is not None
                     and (self.headers.get_all("thread-id", []) or self.headers.get_all("session-id", []))):
                 value = strict_json_loads(data.decode("utf-8"))
             else:

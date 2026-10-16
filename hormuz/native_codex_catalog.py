@@ -1,8 +1,6 @@
 """Native account model discovery; credentials never select an API-key route."""
 import http.client
 from http import HTTPStatus
-import hmac
-from email.utils import parsedate_to_datetime
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -11,29 +9,7 @@ from ._contract_schemas.constants import ERROR_SCHEMA_ID, NATIVE_CATALOG_SCHEMA_
 from .compaction_formats import strict_json_loads
 from ._native_catalog_worker import CATALOG_PATH, NATIVE_ORIGIN
 from .native_catalog_transport import fetch_native_catalog
-
-
-def _retry_after(values):
-    if len(values) != 1 or len(values[0]) > 64 or any(not 32 <= ord(char) <= 126 for char in values[0]):
-        return {}
-    value = values[0]
-    if re.fullmatch(r"[0-9]{1,10}", value) is None:
-        try:
-            if parsedate_to_datetime(value).tzinfo is None:
-                return {}
-        except (TypeError, ValueError, OverflowError):
-            return {}
-    return {"Retry-After": value}
-
-
-def _one(headers, name, *, required=True, limit=16384):
-    values = headers.get_all(name, [])
-    if not values and not required:
-        return None
-    if len(values) != 1 or not 1 <= len(values[0]) <= limit or any(
-            not 32 <= ord(char) <= 126 for char in values[0]):
-        raise ValueError("invalid native credential header")
-    return values[0]
+from .native_codex_auth import native_credentials, retry_after_headers
 
 
 def handle_native_catalog(handler):
@@ -42,16 +18,8 @@ def handle_native_catalog(handler):
         handler._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
         return
     try:
-        key = _one(handler.headers, "X-Gateway-Key")
-        identity = server.authenticator.authenticate(key)
-        authorization = _one(handler.headers, "Authorization")
-        known_credentials = (*server.config.identities_by_token, *server.upstream_credentials.values(),
-                             server.config.ingress.credential)
-        if (re.fullmatch(r"(?i:Bearer) [A-Za-z0-9._~+/-]+=*", authorization) is None
-                or any(hmac.compare_digest(authorization[7:].encode(), credential.encode())
-                       for credential in known_credentials if credential)):
-            raise ValueError("invalid native credential")
-        account = _one(handler.headers, "ChatGPT-Account-ID", required=False, limit=256)
+        credentials = native_credentials(handler)
+        identity, authorization, account = credentials.identity, credentials.authorization, credentials.account
     except (AuthenticationError, ValueError):
         handler._send_error("unauthorized", "Separate gateway and native ChatGPT credentials are required.",
                             HTTPStatus.UNAUTHORIZED)
@@ -92,7 +60,7 @@ def handle_native_catalog(handler):
     try:
         response = fetch_native_catalog(authorization=authorization, account=account, query=urlencode(fields))
         status = response.status if response.status in {200, 401, 403, 429} else HTTPStatus.BAD_GATEWAY
-        retry_headers = _retry_after(response.retry_after) if status == 429 else None
+        retry_headers = retry_after_headers(response.retry_after) if status == 429 else None
         if status == 200:
             value = strict_json_loads(response.body.decode("utf-8"))
             if (type(value) is not dict or type(value.get("models")) is not list
