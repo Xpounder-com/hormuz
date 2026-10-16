@@ -1,6 +1,7 @@
 """Shadow recommendations observed through the approved connected workflow."""
 
 import json
+import os
 import unittest
 import threading
 import subprocess
@@ -206,8 +207,9 @@ class ShadowRoutingWorkflowTests(unittest.TestCase):
                     path.write_text(json.dumps(value))
                     result = subprocess.run([sys.executable, "-m", "hormuz", "--config", str(path),
                                              "client", "config", "codex"],
-                                            env=self.environment, capture_output=True, text=True, timeout=10)
-                    self.assertEqual(result.returncode, 2)
+                                            env={**self.environment, "PYTHONPATH": os.environ.get("PYTHONPATH", "")},
+                                            capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 2, result.stderr)
                     self.assertNotIn("Traceback", result.stderr)
             self.assertEqual((classifier_requests, local_requests, cloud_requests), ([], [], []))
 

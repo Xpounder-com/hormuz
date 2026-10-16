@@ -18,6 +18,8 @@ import subprocess
 import sys
 import tarfile
 import time
+import shutil
+import tempfile
 from urllib.parse import urlsplit
 import zlib
 
@@ -41,13 +43,13 @@ class ManagedLlamaProfile:
     alias: str
     output_tokens: int
 
-    def verify(self):
+    def verify(self, *, runtime_root=None):
         try:
-            self._verify_files()
+            self._verify_files(runtime_root=runtime_root)
         except (OSError, ValueError, EOFError, tarfile.TarError, zlib.error):
             raise ManagedLlamaError("runtime_invalid") from None
 
-    def _verify_files(self):
+    def _verify_files(self, *, runtime_root=None):
         deadline = time.monotonic() + 30
         if _digest(self.runtime_archive, 256 * 1024**2, deadline) != self.runtime_sha256:
             raise ManagedLlamaError("runtime_invalid")
@@ -102,6 +104,34 @@ class ManagedLlamaProfile:
                         raise ManagedLlamaError("runtime_invalid")
                 else:
                     raise ManagedLlamaError("runtime_invalid")
+            if runtime_root is not None:
+                runtime_root = Path(runtime_root)
+                expected_paths = {}
+                for member, _ in members:
+                    name = PurePosixPath(member.name)
+                    if name.is_absolute() or ".." in name.parts or len(name.parts) > 16:
+                        raise ManagedLlamaError("runtime_invalid")
+                    for parent in name.parents:
+                        if parent.parts:
+                            expected_paths[parent] = ("directory", 0o700)
+                    expected_paths[name] = (("directory", 0o700) if member.isdir() else
+                                            ("symlink", None) if member.issym() else
+                                            ("file", 0o700 if member.mode & 0o111 else 0o600))
+                observed_paths = {}
+                for parent, directories, files in os.walk(runtime_root, followlinks=False):
+                    for name in (*directories, *files):
+                        path = Path(parent) / name
+                        info = path.lstat()
+                        kind = ("directory" if stat.S_ISDIR(info.st_mode) else "symlink" if stat.S_ISLNK(info.st_mode)
+                                else "file" if stat.S_ISREG(info.st_mode) else "unsafe")
+                        if info.st_uid != os.getuid() or (kind != "directory" and info.st_nlink != 1):
+                            raise ManagedLlamaError("runtime_invalid")
+                        observed_paths[PurePosixPath(path.relative_to(runtime_root).as_posix())] = (
+                            kind, None if kind == "symlink" else stat.S_IMODE(info.st_mode))
+                        if len(observed_paths) > 256:
+                            raise ManagedLlamaError("runtime_invalid")
+                if observed_paths != expected_paths:
+                    raise ManagedLlamaError("runtime_invalid")
         if not os.access(self.executable, os.X_OK):
             raise ManagedLlamaError("runtime_invalid")
 
@@ -132,6 +162,72 @@ class _ArchiveBudget:
         if self.expanded > 1024**3 + 1024**2:
             raise ManagedLlamaError("runtime_invalid")
         return data
+
+
+def extract_runtime(archive_path, destination):
+    """Extract a bounded verified archive into a new private runtime directory."""
+    destination = Path(destination)
+    staged = Path(tempfile.mkdtemp(prefix=".runtime-", dir=destination.parent))
+    try:
+        deadline = time.monotonic() + 30
+        total, seen, links = 0, set(), []
+        with gzip.open(archive_path, "rb") as expanded, tarfile.open(
+                fileobj=_ArchiveBudget(expanded, deadline), mode="r|") as archive:
+            for member in archive:
+                name = PurePosixPath(member.name)
+                if (name.is_absolute() or ".." in name.parts or not name.parts or len(name.parts) > 16
+                        or len(member.name) > 4096 or any(ord(c) < 32 for c in member.name)
+                        or name in seen or len(seen) >= 256 or member.size < 0
+                        or time.monotonic() > deadline):
+                    raise ManagedLlamaError("runtime_invalid")
+                seen.add(name)
+                total += member.size
+                if total > 1024**3:
+                    raise ManagedLlamaError("runtime_invalid")
+                target = staged.joinpath(*name.parts)
+                target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                if member.isdir():
+                    target.mkdir(mode=0o700, exist_ok=True)
+                elif member.isfile():
+                    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                                         0o700 if member.mode & 0o111 else 0o600)
+                    with os.fdopen(descriptor, "wb") as stream, archive.extractfile(member) as source:
+                        remaining = member.size
+                        while remaining:
+                            if time.monotonic() > deadline:
+                                raise ManagedLlamaError("runtime_invalid")
+                            chunk = source.read(min(1024**2, remaining))
+                            if not chunk:
+                                raise ManagedLlamaError("runtime_invalid")
+                            stream.write(chunk)
+                            remaining -= len(chunk)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                elif member.issym():
+                    if (not member.linkname or len(member.linkname) > 4096
+                            or PurePosixPath(member.linkname).is_absolute()
+                            or any(ord(c) < 32 for c in member.linkname)):
+                        raise ManagedLlamaError("runtime_invalid")
+                    links.append((target, member.linkname))
+                else:
+                    raise ManagedLlamaError("runtime_invalid")
+        for parent, _, _ in os.walk(staged, followlinks=False):
+            os.chmod(parent, 0o700)
+        # Create links only after all writes so no archive path can redirect a write.
+        for target, link in links:
+            target.symlink_to(link)
+        root = staged.resolve(strict=True)
+        for target, _ in links:
+            if not target.resolve(strict=True).is_relative_to(root):
+                raise ManagedLlamaError("runtime_invalid")
+        if destination.exists() or destination.is_symlink():
+            raise ManagedLlamaError("runtime_invalid")
+        staged.rename(destination)
+    except (OSError, ValueError, RuntimeError, EOFError, tarfile.TarError, zlib.error):
+        raise ManagedLlamaError("runtime_invalid") from None
+    finally:
+        if staged.exists():
+            shutil.rmtree(staged)
 
 
 def _digest(path, limit, deadline):
