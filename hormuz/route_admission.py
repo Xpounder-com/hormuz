@@ -291,6 +291,11 @@ class RouteAdmission:
         if len(requested) > 1 or requested and requested[0] != "local_only":
             raise RouteAdmissionError("invalid_routing_mode")
         mode = "local_only" if requested else self.settings.mode
+        task_selection = handler.headers.get_all('X-Hormuz-Task-Selection', [])
+        if (len(task_selection) > 1 or task_selection and
+                (task_selection[0] not in {'model','router'} or mode != 'local_only')):
+            raise RouteAdmissionError('invalid_task_selection')
+        handler._route_admission_task_selection = task_selection[0] if task_selection else None
         handler._route_admission_mode = mode
         if mode == "configured":
             return decision
@@ -357,9 +362,9 @@ class RouteAdmission:
                     candidates[alias] = candidate
         if continuation and mode == "auto" and self.destinations.resolve(decision.route).locality == "cloud":
             candidates[decision.resolved_alias] = decision
-        if probes:
-            # A benchmark must observe the requested alias, including its
-            # failures, rather than credit another admitted model's reply.
+        if probes or handler._route_admission_task_selection == 'model':
+            # Benchmarks and explicit chat choices must observe the requested
+            # alias, including failures, before dispatch or scorecard selection.
             candidates = ({decision.requested_model: candidates[decision.requested_model]}
                           if decision.requested_model in candidates else {})
         if candidates:
@@ -377,7 +382,9 @@ class RouteAdmission:
             selection_candidates = candidates
         scorecard_headers = {}
         if self.settings.scorecard:
-            if continuation or probes:
+            if handler._route_admission_task_selection == 'model':
+                scorecard_headers['X-Hormuz-Scorecard-Status'] = 'explicit_model'
+            elif continuation or probes:
                 scorecard_headers["X-Hormuz-Scorecard-Status"] = "affinity_preserved" if continuation else "benchmark_probe"
             elif protocol != "openai" or endpoint != "/v1/responses":
                 scorecard_headers["X-Hormuz-Scorecard-Status"] = "no_target_match"
@@ -447,6 +454,8 @@ class RouteAdmission:
         headers.update({"X-Hormuz-Destination": destination.name,
                         "X-Hormuz-Destination-Locality": destination.locality,
                         "X-Hormuz-Destination-Generation": destination.generation})
+        if getattr(handler, '_route_admission_task_selection', None):
+            headers['X-Hormuz-Task-Selection'] = handler._route_admission_task_selection
         return headers
 
     def status(self, identity, policy_engine):

@@ -257,9 +257,8 @@ def run_lifetime(args: argparse.Namespace) -> int:
         else:
             result = None
             if args.command == "off":
-                from ..codex_app_bridge_control import disable_bridge
-                result = disable_bridge(Path(args.client_home or os.environ.get("CODEX_HOME", "~/.codex")),
-                                        generation=args.generation)
+                from ..chat_owner import disconnect_owner
+                result = disconnect_owner(lifetime.home, generation=args.generation)
             if result is None:
                 result = lifetime.disconnect(generation=args.generation)
         print(json.dumps(result, sort_keys=True))

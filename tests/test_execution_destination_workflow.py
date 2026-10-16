@@ -517,6 +517,24 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 self.assertEqual(loosened["status"], 403)
                 self.assertEqual((local_requests, cloud_requests), ([], []))
 
+    def test_chat_task_selection_requires_unambiguous_local_only_admission(self):
+        with provider('LOCAL_DESTINATION') as (local, local_requests), \
+             provider('CLOUD_DESTINATION') as (cloud, cloud_requests):
+            with self.connected_client(self.admission_configuration(local,cloud,mode='auto')) as submit:
+                state = submit(method='GET',path='/router/state')
+                self.assertEqual(state['headers'].get('x-hormuz-chat-tasks'),'v1')
+                for headers in (
+                    {'X-Hormuz-Task-Selection':'model'},
+                    {'X-Hormuz-Routing-Mode':'local_only','X-Hormuz-Task-Selection':'unsupported'},
+                    {'X-Hormuz-Routing-Mode':'local_only','X-Hormuz-Task-Selection':'model',
+                     'x-hormuz-task-selection':'router'},
+                ):
+                    with self.subTest(headers=headers):
+                        result = submit(headers=headers,request={'input':'Summarize this fixture.'})
+                        self.assertEqual((result['status'],result['body']['error']['code']),
+                                         (403,'hormuz_route_invalid_task_selection'))
+            self.assertEqual((local_requests,cloud_requests),([],[]))
+
     def test_auto_does_not_retarget_opaque_continuation_without_retained_affinity(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \
              provider("CLOUD_DESTINATION") as (cloud, cloud_requests):

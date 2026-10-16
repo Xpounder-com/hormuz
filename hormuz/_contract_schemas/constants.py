@@ -199,6 +199,7 @@ PUBLIC_ERROR_CODES_V2 = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unava
 
 ROUTE_ADMISSION_ERROR_CODES = frozenset({
     "hormuz_route_invalid_benchmark_mode",
+    "hormuz_route_invalid_task_selection",
     "hormuz_route_invalid_routing_mode", "hormuz_route_affinity_required",
     "hormuz_route_local_route_unavailable", "hormuz_route_local_capacity_busy",
     "hormuz_route_destination_not_admitted", "hormuz_route_policy_changed",
@@ -212,6 +213,7 @@ _CURRENT_SCHEMA_VERSIONS = {
     "hormuz.chat-task": 1,
     "hormuz.chat-models": 1,
     "hormuz.chat-error": 1,
+    "hormuz.chat-owner": 1,
     "hormuz.codex-app-bridge-install": 1,
     "hormuz.personal-model-scorecard": 1, "hormuz.benchmark-suite": 1,
     "hormuz.benchmark-routing-configuration": 1, "hormuz.benchmark-error": 1,

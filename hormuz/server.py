@@ -569,7 +569,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     else:
                         schema = "hormuz.route-admission"
                         value = self.server.route_admission.status(identity, self.server.policy_engine)
-                    self._send_contract_json(HTTPStatus.OK, schema, value)
+                    self._send_contract_json(HTTPStatus.OK, schema, value,
+                        extra_headers={'X-Hormuz-Chat-Tasks':'v1'} if path == '/v1/router/state' else None)
                 except _STORAGE_FAILURES as error:
                     self._send_storage_failure(None, error)
             return
@@ -1045,6 +1046,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             failover_decision = None
         if (
             not account_usage
+            or getattr(self, '_route_admission_task_selection', None) is not None
             or self.headers.get("X-Hormuz-Benchmark") == "1"
             or self._request_precludes_failover(protocol, redaction.value)
         ):

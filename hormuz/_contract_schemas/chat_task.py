@@ -1,14 +1,16 @@
 """V1 receipts for explicit, local-only Hormuz tasks in an existing chat."""
 import re
+from pathlib import Path
 from .common import ContractValidationError, _exact_keys
 
 TASK_FIELDS = {'schema_id', 'schema_version', 'text', 'model', 'routed_model', 'locality', 'destination',
                'generation', 'work_id', 'selection', 'reasoning_effort'}
 MODELS_FIELDS = {'schema_id', 'schema_version', 'default_model', 'models'}
 ERROR_FIELDS = {'schema_id', 'schema_version', 'error', 'submission', 'retried'}
+OWNER_FIELDS = {'schema_id', 'schema_version', 'normal_home', 'router_home', 'generation'}
 ERROR_CODES = {'prompt_limit', 'separate_router_home_required', 'router_unavailable', 'router_ownership_changed',
                'owned_loopback_router_required', 'router_request_rejected', 'response_limit', 'model_not_qualified',
-               'execution_selection_changed', 'task_incomplete', 'task_unavailable'}
+               'execution_selection_changed', 'task_incomplete', 'task_unavailable', 'router_upgrade_required'}
 
 
 def label(value):
@@ -40,3 +42,11 @@ def validate_error(value):
     if (value['error']['code'] not in ERROR_CODES or value['submission'] not in {'not_submitted', 'possibly_submitted'}
             or value['retried'] is not False):
         raise ContractValidationError('Invalid explicit chat failure receipt')
+
+
+def validate_owner(value):
+    _exact_keys(value, OWNER_FIELDS)
+    if (not all(label(value[key]) and Path(value[key]).is_absolute() for key in ('normal_home','router_home'))
+            or value['normal_home'] == value['router_home']
+            or not isinstance(value['generation'],str) or re.fullmatch('[a-f0-9]{32}',value['generation']) is None):
+        raise ContractValidationError('Invalid explicit chat owner')

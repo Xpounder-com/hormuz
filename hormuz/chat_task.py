@@ -12,6 +12,7 @@ from urllib.request import Request
 from .connected_client import ConnectedClientError, ConnectedClientLifetime
 from .contracts import validate_contract
 from .local_transport import open_local_upstream
+from .chat_owner import register_owner
 
 MAX_PROMPT = 65536
 MAX_RESPONSE = 2 * 1024 * 1024
@@ -67,6 +68,8 @@ def run(args):
                 or origin.query or origin.fragment or origin.username or origin.password):
             raise ChatTaskError('owned_loopback_router_required')
         token = lifetime.local_token(status['generation']) if 'auth' in provider else os.environ[provider['env_key']]
+        normal_home = Path(os.environ.get('CODEX_HOME', '~/.codex')).expanduser().resolve()
+        register_owner(normal_home, home, status['generation'])
         deadline = time.monotonic() + (args.timeout_seconds if args.chat_command == 'ask' else 6)
 
         def request(path, payload=None):
@@ -75,6 +78,8 @@ def run(args):
                 raise TimeoutError('chat_deadline')
             headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
                        'User-Agent': 'Hormuz explicit-chat-task', 'X-Hormuz-Routing-Mode': 'local_only'}
+            if payload is not None:
+                headers['X-Hormuz-Task-Selection'] = 'model' if args.model else 'router'
             message = Request(provider['base_url'] + path, headers=headers,
                               data=None if payload is None else json.dumps(payload).encode())
             with open_local_upstream(message, timeout=min(4, remaining), absolute_timeout=remaining,
@@ -89,7 +94,9 @@ def run(args):
         state, _ = request('/work/state')
         if state.get('schema_id') != 'hormuz.ai-work-state' or state.get('schema_version') != 3:
             raise ChatTaskError('router_ownership_changed')
-        admission, _ = request('/router/state')
+        admission, admission_headers = request('/router/state')
+        if admission_headers.get('X-Hormuz-Chat-Tasks') != 'v1':
+            raise ChatTaskError('router_upgrade_required')
         validate_contract(admission)
         qualified = {(route['model'], route['destination'], route['generation']) for route in admission['routes']
                      if {'responses', 'text', 'codex_http', 'codex_llama_v1'} <= set(route['capabilities'])}
@@ -104,17 +111,20 @@ def run(args):
             selected = [route for route in routes if route['model'] == model]
             if len(selected) != 1:
                 raise ChatTaskError('model_not_qualified')
-            route = selected[0]
             submitted = True
             body, headers = request('/responses', {'model': model, 'stream': False, 'store': False,
                 'input': prompt, 'max_output_tokens': args.max_output_tokens, 'reasoning': {'effort': args.effort}})
-            if (headers.get('X-Hormuz-Destination-Locality') != 'local'
-                    or headers.get('X-Hormuz-Destination') != route['destination']
-                    or headers.get('X-Hormuz-Destination-Generation') != route['generation']
+            executed = [route for route in routes
+                if (not args.model or route['model'] == model)
+                and headers.get('X-Hormuz-Destination') == route['destination']
+                and headers.get('X-Hormuz-Destination-Generation') == route['generation']
+                and headers.get('X-Hormuz-Routed-Model') == route['upstream_model']]
+            if (not executed or headers.get('X-Hormuz-Destination-Locality') != 'local'
                     or headers.get('X-Hormuz-Requested-Model') != model
-                    or headers.get('X-Hormuz-Routed-Model') != route['upstream_model']
+                    or headers.get('X-Hormuz-Task-Selection') != ('model' if args.model else 'router')
                     or headers.get('X-Hormuz-Failover') is not None):
                 raise ChatTaskError('execution_selection_changed')
+            route = executed[0]
             if body.get('status') != 'completed':
                 raise ChatTaskError('task_incomplete')
             text = ''.join(block['text'] for item in body.get('output', []) if item.get('type') == 'message'

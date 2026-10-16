@@ -127,7 +127,7 @@ def restore_launch_environment(home, manifest):
     Bridge.write_document(path, value)
 
 
-def disable_bridge(home, *, generation=None):
+def disable_bridge(home, *, generation=None, expected_owner=None):
     home = home.expanduser().resolve()
     path = home / 'hormuz-app-bridge-v1.json'
     if not path.exists() and not path.is_symlink():
@@ -137,11 +137,22 @@ def disable_bridge(home, *, generation=None):
         if Path(manifest['client_home']).resolve() != home:
             raise ConnectedClientError('state_invalid')
         lifetime = ConnectedClientLifetime(Path(manifest['control_home']))
+        if expected_owner is not None and lifetime.home == expected_owner[0]:
+            if generation is not None and generation != expected_owner[1]:
+                raise ConnectedClientError('generation_mismatch')
+            generation = expected_owner[1]
         status = lifetime.status()
         if generation is not None and status.get('generation') != generation:
             raise ConnectedClientError('generation_mismatch')
-        Bridge.write_document(path, {**manifest, 'enabled': False})
-        restore_launch_environment(home, manifest)
-        return lifetime.disconnect(generation=generation)
+        restoration_error = None
+        try:
+            Bridge.write_document(path, {**manifest, 'enabled': False})
+            restore_launch_environment(home, manifest)
+        except (ConnectedClientError,ValueError,KeyError,TypeError,OSError,RecursionError,subprocess.SubprocessError) as error:
+            restoration_error = error if isinstance(error,(ConnectedClientError,OSError)) else ConnectedClientError('state_invalid')
+        result = lifetime.disconnect(generation=generation)
+        if restoration_error is not None:
+            raise restoration_error
+        return result
     except (ValueError, KeyError, TypeError):
         raise ConnectedClientError('state_invalid') from None
