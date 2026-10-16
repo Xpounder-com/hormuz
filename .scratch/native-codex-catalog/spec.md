@@ -30,7 +30,11 @@ DNS/trust stores and the coding-client executable.
   metadata for allowed slugs, discard unconfigured models/root extras, reject
   duplicate/malformed records and over-limit bodies.
 - At most eight native outbound requests per server, three-second socket and
-  response deadlines, 1 MiB body and 256 model records. Close sockets/timers;
+  whole-fetch deadlines including DNS, 1 MiB body and 256 model records.
+  Bound non-cancellable resolution in an owned isolated worker, carry native
+  credentials only over a private stdin pipe and reap the worker on completion
+  or timeout (0.2-second graceful cleanup, then one-second forced reaping).
+  Close connections and pipes;
   no redirects, environment proxies, retries or alternate billing path. Return
   content-free errors; preserve native 401/403/429 status and safe Retry-After.
 - Native intent on generic endpoints or selecting a native profile for
@@ -39,6 +43,9 @@ DNS/trust stores and the coding-client executable.
   not create model-usage charges. Keep full native authorization readiness
   `not_implemented` until inference, client/host, consent and actual account
   qualification are complete.
+- Generated and persistent generic client defaults skip native profiles and
+  block before settings installation when none remain. AI-work candidates
+  exclude native profiles before route/exploration selection is persisted.
 - Publish the additive `hormuz.native-codex-catalog;v=1` HTTP header contract,
   compatibility fixture, migration/rollback instructions and skill guidance.
   Leave existing error/receipt/journal versions intact.

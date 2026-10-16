@@ -578,6 +578,7 @@ class ConnectedClientLifetime:
                     or (policy.allowed_clients is not None and "codex" not in policy.allowed_clients)):
                 raise ConnectedClientError("client_not_allowed")
             model = next((alias for alias, route in config.model_routes.items() if route.protocol == "openai"
+                          and config.upstreams[route.destination_id].authentication != "codex_chatgpt"
                           and (policy.allowed_models is None or alias in policy.allowed_models)), None)
             if model is None:
                 raise ConnectedClientError("model_unavailable")

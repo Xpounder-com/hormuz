@@ -5,21 +5,15 @@ import hmac
 from email.utils import parsedate_to_datetime
 import re
 from urllib.parse import parse_qsl, urlencode, urlsplit
-from urllib.request import Request
 
 from .auth import AuthenticationError
 from ._contract_schemas.constants import ERROR_SCHEMA_ID, NATIVE_CATALOG_SCHEMA_ID, NATIVE_CATALOG_SCHEMA_VERSION
 from .compaction_formats import strict_json_loads
-from .local_transport import open_local_upstream
-
-CATALOG_PATH = "/backend-api/codex/models"
-NATIVE_ORIGIN = "https://chatgpt.com/backend-api/codex"
-CATALOG_URL = NATIVE_ORIGIN + "/models"
-MAX_CATALOG_BYTES = 1024 * 1024
+from ._native_catalog_worker import CATALOG_PATH, NATIVE_ORIGIN
+from .native_catalog_transport import fetch_native_catalog
 
 
-def _retry_after(headers):
-    values = headers.get_all("Retry-After", [])
+def _retry_after(values):
     if len(values) != 1 or len(values[0]) > 64 or any(not 32 <= ord(char) <= 126 for char in values[0]):
         return {}
     value = values[0]
@@ -92,24 +86,18 @@ def handle_native_catalog(handler):
     except ValueError:
         handler._send_error("invalid_request", "The native catalog query is unsupported.", HTTPStatus.BAD_REQUEST)
         return
-    headers = {"Authorization": authorization, "Accept": "application/json"}
-    if account is not None:
-        headers["ChatGPT-Account-ID"] = account
     if not server.native_catalog_slots.acquire(blocking=False):
         handler._send_error("gateway_upstream_error", "Native catalog capacity is unavailable.", HTTPStatus.TOO_MANY_REQUESTS)
         return
     try:
-        request = Request(CATALOG_URL + ("?" + urlencode(fields) if fields else ""), headers=headers, method="GET")
-        with open_local_upstream(request, timeout=3, absolute_timeout=3) as response:
-            if response.status != 200:
-                status = response.status if response.status in {401, 403, 429} else HTTPStatus.BAD_GATEWAY
-                handler._send_contract_json(status, ERROR_SCHEMA_ID,
-                    {"error": {"code": "gateway_upstream_error", "message": "Native catalog access is unavailable; no alternate billing path was selected."}},
-                    extra_headers=_retry_after(response.headers) if status == 429 else None)
-                return
-            data = response.read(MAX_CATALOG_BYTES + 1)
-        if len(data) > MAX_CATALOG_BYTES:
-            raise ValueError()
+        response = fetch_native_catalog(authorization=authorization, account=account, query=urlencode(fields))
+        if response.status != 200:
+            status = response.status if response.status in {401, 403, 429} else HTTPStatus.BAD_GATEWAY
+            handler._send_contract_json(status, ERROR_SCHEMA_ID,
+                {"error": {"code": "gateway_upstream_error", "message": "Native catalog access is unavailable; no alternate billing path was selected."}},
+                extra_headers=_retry_after(response.retry_after) if status == 429 else None)
+            return
+        data = response.body
         value = strict_json_loads(data.decode("utf-8"))
         if (type(value) is not dict or type(value.get("models")) is not list
                 or len(value["models"]) > 256):

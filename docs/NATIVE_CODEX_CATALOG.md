@@ -45,6 +45,10 @@ counts only API-key routes for the API authorization path. Native profiles
 cannot execute inference, even when selected by route admission or a fallback.
 Existing CLI/plugin connect remains the existing API/local adapter; this slice
 does not generate native host configuration or change `requires_openai_auth`.
+Both generated configuration and persistent connection defaults skip native
+profiles. If no generic inference model is allowed, they fail before installing
+settings. AI-work selection also excludes native profiles before choosing or
+persisting an exploration route.
 
 ## Request boundary
 
@@ -68,10 +72,17 @@ the configured native model. Hard config-level and request-level
 endpoints reject native intent (`X-Gateway-Key` or `ChatGPT-Account-ID`) before
 authentication fallback can send a request to an API/local model.
 
-The owned transport uses a three-second socket timeout and absolute response
-deadline, closes its connection/timer and admits at most eight native requests
-per server. It reads at most 1 MiB plus an overflow byte and accepts at most
-256 unique nonempty model slugs. DNS uses the system resolver. A strict JSON
+An owned isolated Python worker performs each fetch with a three-second socket
+timeout and a parent-enforced three-second deadline covering system DNS,
+connection, TLS and response processing. Native credentials cross a private
+stdin pipe; they are absent from its command line, environment and stderr.
+The worker receives only TLS trust-store/system-root environment names, has
+no child processes, closes its connection on exit and is always reaped. On a
+deadline, cleanup allows 0.2 seconds after termination before killing the owned
+worker, then at most one second for reaping. No resolver thread survives a
+timeout. The server admits at most eight native requests/workers at once.
+It reads at most 1 MiB plus an overflow byte and accepts at most
+256 unique nonempty model slugs. A strict JSON
 `models` array is required; malformed/duplicate records fail. Allowed model
 objects retain provider-owned metadata; root extras and unconfigured models
 are discarded. No model-usage request is recorded for discovery.
@@ -104,7 +115,8 @@ no new persisted native-auth state to migrate or delete.
 
 ## Evidence boundary
 
-Workflow tests use disposable TLS services and synthetic credentials through
+Workflow tests use disposable TLS services, external DNS/trust-store fixtures
+(including in the real isolated worker) and synthetic credentials through
 the real CLI, gateway, policy and transport. They establish credential custody,
 filtering, denial, limits and cleanup. They do not establish subscription
 entitlement, native inference, OS/client support or release readiness.

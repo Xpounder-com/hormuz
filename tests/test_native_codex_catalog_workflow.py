@@ -21,11 +21,12 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from tests import test_execution_destination_workflow as workflow
+from tests import test_connected_client_lifetime_workflow as lifetime_workflow
 from hormuz.contracts import validate_contract_manifest
 
 
 @contextmanager
-def native_backend(body, *, status=200, headers=None, drip=False, certificate_host="chatgpt.com"):
+def native_backend(body, *, status=200, headers=None, drip=False, certificate_host="chatgpt.com", dns_delay=0, workers=None):
     """A real TLS service standing in for the fixed native backend authority."""
     received = []
     stopped = threading.Event()
@@ -84,14 +85,38 @@ def native_backend(body, *, status=200, headers=None, drip=False, certificate_ho
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         original = socket.getaddrinfo
+        original_process = subprocess.Popen
         def resolve(host, port, *args, **kwargs):
             if host == "chatgpt.com":
+                if dns_delay:
+                    time.sleep(dns_delay)
                 return original("127.0.0.1", server.server_port, *args, **kwargs)
             return original(host, port, *args, **kwargs)
+        def launch(args, *positional, **options):
+            if isinstance(args, (list, tuple)) and Path(str(args[-1])).name == "_native_catalog_worker.py":
+                # Supply the same external DNS fixture to a real isolated worker.
+                # Its HTTP/TLS implementation still runs unmodified; no router
+                # collaborator or provider reply is mocked.
+                prelude = ('import runpy,socket,sys,time\n'
+                    'original=socket.getaddrinfo\n'
+                    'def resolve(host,port,*args,**kwargs):\n'
+                    ' if host=="chatgpt.com":\n'
+                    '  time.sleep(float(sys.argv[3]))\n'
+                    '  return original("127.0.0.1",int(sys.argv[2]),*args,**kwargs)\n'
+                    ' return original(host,port,*args,**kwargs)\n'
+                    'socket.getaddrinfo=resolve\n'
+                    'runpy.run_path(sys.argv[1],run_name="__main__")\n')
+                args = [args[0], "-I", "-S", "-c", prelude, args[-1], str(server.server_port), str(dns_delay)]
+                process = original_process(args, *positional, **options)
+                if workers is not None:
+                    workers.append(process.pid)
+                return process
+            return original_process(args, *positional, **options)
         try:
             # DNS and the trust store are external system boundaries. The real
             # router still connects with TLS to its fixed chatgpt.com authority.
             with patch("socket.getaddrinfo", side_effect=resolve), \
+                 patch("subprocess.Popen", side_effect=launch), \
                  patch.dict(os.environ, {"SSL_CERT_FILE": str(cert_path)}):
                 yield received
         finally:
@@ -430,6 +455,88 @@ class NativeCodexCatalogWorkflowTests(unittest.TestCase):
                 self.assertEqual(receipt["effects"], {"settings_changed": False, "credentials_read": False,
                                                     "provider_requests": 0})
                 self.assertEqual(before, (path.read_bytes(), set(self.fixture.root.iterdir())))
+
+    def test_ai_work_selection_never_offers_catalog_only_routes_as_inference_candidates(self):
+        with workflow.provider("LOCAL_RESULT") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
+            value = self.configuration(local, cloud)
+            value["ai_work"] = {"enabled": True, "database": str(self.fixture.root / "work.sqlite3")}
+            with self.fixture.connected_client(value) as submit:
+                job = submit(control=True, path="/work/jobs", request={
+                    "repository": "example/repository", "task_type": "summarization"})
+                self.assertEqual(job["status"], 201, job)
+                result = submit(headers={"X-Hormuz-Work-Id": job["body"]["work_id"]})
+                self.assertEqual(result["status"], 200, result)
+                status = submit(method="GET", path="/work/jobs/" + job["body"]["work_id"])
+                self.assertEqual(status["status"], 200, status)
+                self.assertNotIn("native-code", [candidate["model"]
+                    for candidate in status["body"]["routing"]["candidates"]])
+                self.assertEqual((len(local_requests), cloud_requests, native_requests), (1, [], []))
+
+    def test_generated_and_persistent_client_defaults_skip_catalog_only_routes(self):
+        with workflow.provider("LOCAL_RESULT") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value["model_routes"] = {"native-code": value["model_routes"]["native-code"], **value["model_routes"]}
+            with self.fixture.connected_client(value) as submit:
+                result = submit()
+                self.assertEqual(result["status"], 200, result)
+            persistent = lifetime_workflow.ConnectedClientLifetimeWorkflowTests()
+            persistent.setUp()
+            self.addCleanup(persistent.doCleanups)
+            settings = persistent.home / "config.toml"
+            original = 'model = "original-model"\n'
+            settings.write_text(original)
+            persistent.path.write_text(json.dumps(value))
+            self.addCleanup(persistent.command, "disconnect", check=False)
+            persistent.command("connect")
+            result = persistent.client()
+            self.assertEqual((result["model"], result["status"]), ("local-code", 200), result)
+            persistent.command("disconnect")
+            self.assertEqual(settings.read_text(), original)
+            self.assertEqual((len(local_requests), cloud_requests), (2, []))
+
+    def test_only_catalog_routes_cannot_generate_or_install_generic_client_settings(self):
+        persistent = lifetime_workflow.ConnectedClientLifetimeWorkflowTests()
+        persistent.setUp()
+        self.addCleanup(persistent.doCleanups)
+        settings = persistent.home / "config.toml"
+        original = 'model = "original-model"\n'
+        settings.write_text(original)
+        value = self.configuration("http://127.0.0.1:1", "https://api.example.invalid/v1")
+        value["policies"]["organization"]["allowed_models"] = ["native-code"]
+        persistent.path.write_text(json.dumps(value))
+        result = subprocess.run([sys.executable, "-m", "hormuz", "--config", str(persistent.path),
+            "client", "config", "codex"], capture_output=True, text=True, timeout=10, env=persistent.environment)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(result.stdout, "")
+        self.addCleanup(persistent.command, "disconnect", check=False)
+        result = persistent.command("connect", "--dry-run", check=False)
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(settings.read_text(), original)
+
+    def test_catalog_deadline_includes_stalled_dns_and_capacity_recovers_after_cleanup(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                headers = {"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                           "X-Gateway-Key": "fixture-coding-client-credential"}
+                workers = []
+                with native_backend({"models": [{"slug": "fixture-cloud-model"}]}, dns_delay=4.4, workers=workers) as native_requests:
+                    started = time.monotonic()
+                    result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True, headers=headers)
+                    self.assertEqual(result["status"], 502, result)
+                    self.assertLess(time.monotonic() - started, 4)
+                    self.assertEqual(native_requests, [])
+                    for pid in workers:
+                        with self.assertRaises(ProcessLookupError):
+                            os.kill(pid, 0)
+                with native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
+                    result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True, headers=headers)
+                    self.assertEqual(result["status"], 200, result)
+                    self.assertEqual(len(native_requests), 1)
+                self.assertEqual((local_requests, cloud_requests), ([], []))
 
 
 if __name__ == "__main__":

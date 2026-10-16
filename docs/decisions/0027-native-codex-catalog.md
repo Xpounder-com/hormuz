@@ -18,6 +18,12 @@ select another billing path. The cost is an intentionally incomplete native
 path until inference and actual client/account qualification are implemented;
 catalog success alone cannot advance cloud-readiness status.
 
+Use an isolated, parent-owned fetch worker because the system resolver cannot
+be cancelled by a Python socket timeout. A deadline terminates and reaps that
+worker rather than leaving lookup threads alive. Native credentials use only
+its private stdin pipe; one catalog request costs one short-lived worker, capped
+at eight, in exchange for a deadline that covers DNS and bounded cleanup.
+
 The additive version-1 header contract leaves provider model JSON intact and
 existing errors/stores unchanged. Disabling the feature is reversible; config
 rollback removes native profiles and references before downgrade. The boundary
