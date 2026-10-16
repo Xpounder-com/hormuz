@@ -2,7 +2,7 @@
 
 This implements connected-client lifetime from [router spec #523](https://github.com/Xpounder-com/hormuz/issues/523), alongside [execution destinations](EXECUTION_DESTINATIONS.md) and [local route admission](LOCAL_ROUTE_ADMISSION.md). The CLI connects Codex's user defaults to one generation-owned router and can restore the settings it owns. A plugin can invoke the same commands rather than maintaining another installer.
 
-The implemented workflow is tested with disposable Codex-compatible executables, temporary configuration and loopback providers. It uses POSIX file locks, private files and Unix-domain process control. The pinned version check is Codex CLI `0.147.0`; it does not qualify the Codex desktop app's separately bundled engine. These synthetic checks do not establish installed operating-system support, real model quality, subscription eligibility or plugin marketplace acceptance. Persistent Claude configuration, model installation, startup registration and native subscription adapters remain separate work.
+The implemented workflow is tested with disposable Codex-compatible executables, temporary configuration and loopback providers. It uses POSIX file locks, private files and Unix-domain process control. Exact supported CLI versions are `0.147.0` and `0.160.0`; see the [qualified 0.160.0 HTTP profile](CODEX_0160.md). This does not qualify the Codex desktop app's separately bundled engine. Synthetic checks do not establish installed operating-system support, real model quality, subscription eligibility or plugin marketplace acceptance. Persistent Claude configuration, model installation, startup registration and native subscription adapters remain separate work.
 
 ## Preview and connect
 

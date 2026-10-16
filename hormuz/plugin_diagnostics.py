@@ -10,13 +10,14 @@ def diagnose(lifetime, path: Path, executable: str | None, project: str | None =
     config = GatewayConfig.load(path)
     status, binding = lifetime.diagnosis_context(path)
     compatibility = "unobserved"
+    client_version = status.get("client_version", SUPPORTED_CODEX_VERSION)
     if executable:
         from .connected_client import _qualify_client
         import shutil
         program = shutil.which(executable)
         if program:
             try:
-                _qualify_client(program)
+                client_version = _qualify_client(program)
                 compatibility = "supported"
             except ConnectedClientError:
                 compatibility = "unsupported"
@@ -37,7 +38,10 @@ def diagnose(lifetime, path: Path, executable: str | None, project: str | None =
         action = "select_owned_configuration"
     from .client_overrides import ROUTING_KEYS, OverrideInspectionError, inspect_overrides
     try:
-        overrides = inspect_overrides(lifetime.home, Path(project or Path.cwd()).expanduser().absolute(), launch_arguments)
+        if compatibility in {"unsupported", "unavailable"}:
+            raise OverrideInspectionError('launch')
+        overrides = inspect_overrides(lifetime.home, Path(project or Path.cwd()).expanduser().absolute(), launch_arguments,
+                                      client_version=client_version)
         if overrides["conflicts"] and action in {"none", "preview_connection"}:
             source = overrides["conflicts"][-1]["source"]
             action = "inspect_" + source + "_overrides"
@@ -46,7 +50,7 @@ def diagnose(lifetime, path: Path, executable: str | None, project: str | None =
     except (ValueError, OSError, RuntimeError, ConnectedClientError) as error:
         source = error.source if isinstance(error, OverrideInspectionError) else "project"
         overrides = {"schema_id": "hormuz.client-overrides", "schema_version": 1,
-                     "supported_client_version": SUPPORTED_CODEX_VERSION,
+                     "supported_client_version": client_version,
                      "scope": "selected_project_and_supplied_launch", "project_state": "invalid",
                      "layers": [], "conflicts": [], "launch_state": "unobserved",
                      "effective_routing": {key: "unobserved" for key in ROUTING_KEYS},
@@ -55,7 +59,7 @@ def diagnose(lifetime, path: Path, executable: str | None, project: str | None =
             action = "inspect_" + source + "_configuration"
     return {"schema_id": "hormuz.client-diagnosis", "schema_version": 1,
             "connection": status, "client_compatibility": compatibility,
-            "supported_client_version": SUPPORTED_CODEX_VERSION,
+            "supported_client_version": client_version,
             "configuration_binding": binding,
             "routing_mode": config.route_admission.mode if binding != "different" else "unobserved",
             "qualified_local_routes": len(config.route_admission.local_routes) if binding != "different" else None,

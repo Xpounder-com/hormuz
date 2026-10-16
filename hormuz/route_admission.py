@@ -88,6 +88,7 @@ def _text_envelope(value, protocol, endpoint):
     required = {"text"}
     native_fields = {"client_metadata", "prompt_cache_key", "reasoning", "include"}
     if native_fields.intersection(value):
+        codex_capability = "codex_http"
         # The pinned Codex HTTP profile requests optional encrypted reasoning
         # output but supplies no reasoning state. Nonempty reasoning controls
         # and actual opaque input remain unsupported, even with this capability.
@@ -102,11 +103,13 @@ def _text_envelope(value, protocol, endpoint):
         if "client_metadata" in value:
             tags = value["client_metadata"]
             allowed_tags = {"thread_id", "session_id", "turn_id", "x-codex-window-id",
-                            "x-codex-installation-id", "x-codex-turn-metadata"}
+                            "x-codex-installation-id", "x-codex-turn-metadata", "root_turn_id"}
             if (type(tags) is not dict or not tags or set(tags) - allowed_tags
                     or any(not bounded_tag(item, 2048) for item in tags.values())):
                 return None
-        required.add("codex_http")
+            if "root_turn_id" in tags:
+                codex_capability = "codex_http_0160"
+        required.add(codex_capability)
     if value.get("stream"):
         required.add("streaming")
     if request_characteristics(value)["structured_output"]:

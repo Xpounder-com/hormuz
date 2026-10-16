@@ -18,6 +18,10 @@ def main():
     wheel = args.wheel.resolve()
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
+        required = {'hormuz/codex-0160-base-instructions.json', 'hormuz/codex-0160-LICENSE.txt',
+                    'hormuz/local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json'}
+        if not required <= set(names):
+            raise SystemExit('Wheel is missing Codex 0.160.0 compatibility assets')
         if any('/migrations/postgresql/' in name or name.startswith(('clients/', 'apps/', 'deploy/'))
                or name.endswith('.css') or name in {'hormuz/postgres.py', 'hormuz/work_billing.py',
                'hormuz/hosted.py', 'hormuz/commands/agent.py'} for name in names):
@@ -35,9 +39,10 @@ def main():
                        cwd=temporary, env=environment, check=True, timeout=10)
         subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
                         '-p', 'test_*workflow.py', '-f', '-q'],
-                       # Leave bounded room for the expanded workflow suite and
-                       # runner variation inside the ten-minute packaging job.
-                       cwd=temporary, env=environment, check=True, timeout=480)
+                       # The prior 200-test CI run took up to 463 seconds;
+                       # retain room for the additional native-adapter fixtures
+                       # within the ten-minute packaging job.
+                       cwd=temporary, env=environment, check=True, timeout=540)
     print('Installed-wheel workflow passed outside the source checkout')
 
 

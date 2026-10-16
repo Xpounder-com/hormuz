@@ -50,7 +50,11 @@ matching staging-link cleanup described below.
 
 ## Qualification and files
 
-The bundled [version-1 profile](../hormuz/local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json)
+Setup chooses a bundled profile using the actual target version. The
+[0.160.0 HTTP profile](CODEX_0160.md) has its own version-matched row; explicit
+qualification documents must match the executable at both preflight and connect.
+
+The historical [0.147.0 version-1 profile](../hormuz/local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json)
 contains the exact digests, client/platform row and bounded request envelope
 from the [Codex 0.147.0 / llama.cpp b11617 / Qwen3-4B macOS arm64 experiment](qualifications/codex-0147-llama-b11617-qwen3-4b.md).
 It retains that record's limitations: supplied-script execution passed;

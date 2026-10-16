@@ -1,0 +1,10 @@
+{
+  "schema_id": "hormuz.codex-model-catalog",
+  "schema_version": 1,
+  "client_version": "0.160.0",
+  "required_fields": ["object", "data", "models"],
+  "model_required_fields": ["slug", "display_name", "description", "base_instructions", "supported_reasoning_levels", "shell_type", "visibility", "supported_in_api", "priority", "supports_reasoning_summary_parameter", "default_reasoning_summary", "support_verbosity", "default_verbosity", "apply_patch_tool_type", "truncation_policy", "experimental_supported_tools", "input_modalities"],
+  "base_instructions_sha256": "ac8ae107a0d72fe3476b430afb161ea4e67da2e446d778aefc44828160559807",
+  "migration": "GET /v1/models retains OpenAI object/data and adds the Codex models catalog for actor-visible local qualifications declaring codex_http_0160 and native streaming. The default model instructions match the pinned upstream fallback prompt. No stored state is rewritten.",
+  "rollback": "Older OpenAI clients may ignore models. Disconnect 0.160.0 lifetimes with the current binary before downgrading; older binaries cannot restore the new version-specific provider block. The 0.147.0 row remains available."
+}
