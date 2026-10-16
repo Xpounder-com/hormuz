@@ -28,18 +28,7 @@ def validate_identifier(value):
         raise ContractValidationError("invalid coding evidence identifier")
 
 
-def validate_evidence(value):
-    _exact_keys(value, EVIDENCE_FIELDS)
-    if value["schema_id"] != "hormuz.local-coding-evidence" or type(value["schema_version"]) is not int or value["schema_version"] != 1:
-        raise ContractValidationError("invalid coding evidence version")
-    validate_identifier(value["evidence_id"])
-    plan = value["plan"]
-    if type(plan) is not dict:
-        raise ContractValidationError("invalid coding evidence plan")
-    _exact_keys(plan, {"criteria_version", "subject", "cases"})
-    if plan["criteria_version"] != "local-repair.v1":
-        raise ContractValidationError("unsupported coding criteria")
-    subject = plan["subject"]
+def validate_subject(subject):
     if type(subject) is not dict:
         raise ContractValidationError("invalid coding evidence subject")
     _exact_keys(subject, SUBJECT_FIELDS)
@@ -59,6 +48,20 @@ def validate_evidence(value):
     for key, maximum in (("max_request_bytes", 65536), ("max_output_tokens", 512), ("upstream_timeout_seconds", 90)):
         if type(subject[key]) is not int or not 1 <= subject[key] <= maximum:
             raise ContractValidationError("invalid coding evidence limit")
+
+
+def validate_evidence(value):
+    _exact_keys(value, EVIDENCE_FIELDS)
+    if value["schema_id"] != "hormuz.local-coding-evidence" or type(value["schema_version"]) is not int or value["schema_version"] != 1:
+        raise ContractValidationError("invalid coding evidence version")
+    validate_identifier(value["evidence_id"])
+    plan = value["plan"]
+    if type(plan) is not dict:
+        raise ContractValidationError("invalid coding evidence plan")
+    _exact_keys(plan, {"criteria_version", "subject", "cases"})
+    if plan["criteria_version"] != "local-repair.v1":
+        raise ContractValidationError("unsupported coding criteria")
+    validate_subject(plan["subject"])
     cases = plan["cases"]
     if type(cases) is not list or not 1 <= len(cases) <= 64:
         raise ContractValidationError("invalid coding case inventory")

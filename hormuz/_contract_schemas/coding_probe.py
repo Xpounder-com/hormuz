@@ -2,7 +2,7 @@
 import re
 
 from .common import ContractValidationError, _exact_keys
-from .local_coding import SUBJECT_FIELDS, _digest, validate_identifier
+from .local_coding import _digest, validate_identifier, validate_subject
 
 PLAN_FIELDS = {"schema_id", "schema_version", "campaign_id", "plan_sha256", "case_id", "task_sha256",
                "checks_sha256", "model", "first_input_sha256", "max_requests", "max_elapsed_seconds", "subject"}
@@ -23,25 +23,7 @@ def validate_plan(value):
     for key, maximum in (("max_requests", 32), ("max_elapsed_seconds", 90)):
         if type(value[key]) is not int or not 1 <= value[key] <= maximum:
             raise ContractValidationError("invalid coding probe budget")
-    subject = value["subject"]
-    if type(subject) is not dict:
-        raise ContractValidationError("invalid coding probe subject")
-    _exact_keys(subject, SUBJECT_FIELDS)
-    for key in ("client_version", "system", "machine", "runtime_profile", "model_revision", "upstream_model"):
-        validate_identifier(subject[key])
-    for key in ("runtime_sha256", "request_profile_sha256"):
-        _digest(subject[key])
-    if (subject["protocol"] != "openai" or subject["runtime_profile"] != "managed-llama.v1"
-            or re.fullmatch(r"sha256:[a-f0-9]{64}", subject["model_revision"]) is None):
-        raise ContractValidationError("unsupported coding probe subject")
-    caps = subject["capabilities"]
-    if (type(caps) is not list or any(type(cap) is not str or cap not in {
-            "responses", "text", "streaming", "tools", "codex_http", "codex_http_0160", "structured_output"} for cap in caps)
-            or not {"responses", "text"}.issubset(caps) or len(caps) != len(set(caps))):
-        raise ContractValidationError("invalid coding probe capabilities")
-    for key, maximum in (("max_request_bytes", 65536), ("max_output_tokens", 512), ("upstream_timeout_seconds", 90)):
-        if type(subject[key]) is not int or not 1 <= subject[key] <= maximum:
-            raise ContractValidationError("invalid coding probe subject limit")
+    validate_subject(value["subject"])
 
 
 def validate_status(value):
@@ -79,5 +61,5 @@ def validate_error(value):
     _exact_keys(value, {"schema_id", "schema_version", "error"})
     if value["schema_id"] != "hormuz.coding-probe-error" or type(value["schema_version"]) is not int or value["schema_version"] != 1:
         raise ContractValidationError("unsupported coding probe error")
-    if type(value["error"]) is not dict or set(value["error"]) != {"code"} or value["error"]["code"] not in ERRORS:
+    if type(value["error"]) is not dict or set(value["error"]) != {"code"} or type(value["error"]["code"]) is not str or value["error"]["code"] not in ERRORS:
         raise ContractValidationError("invalid coding probe error")

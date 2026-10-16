@@ -47,6 +47,22 @@ def request_profile_digest(value):
     return canonical_digest(profile)
 
 
+def matches_coding_subject(subject, config, route, qualification):
+    managed = config.managed_llama
+    # Adapter upgrades may retain several qualified wire versions. Match the
+    # receipt's exact supported version, independently of the current default.
+    supported_versions = getattr(client_versions, "SUPPORTED_CODEX_VERSIONS", (client_versions.SUPPORTED_CODEX_VERSION,))
+    expected = {"client_version": subject["client_version"], "system": platform.system(), "machine": platform.machine(),
+                "runtime_profile": "managed-llama.v1", "runtime_sha256": managed.runtime_sha256 if managed else None,
+                "model_revision": route.model_revision, "upstream_model": route.upstream_model, "protocol": route.protocol,
+                "capabilities": sorted(route.capabilities), "max_request_bytes": qualification.max_request_bytes,
+                "max_output_tokens": qualification.max_output_tokens, "upstream_timeout_seconds": config.upstream_timeout_seconds,
+                "request_profile_sha256": subject["request_profile_sha256"]}
+    declared = {**subject, "capabilities": sorted(subject["capabilities"])}
+    return (subject["client_version"] in supported_versions and managed is not None
+               and managed.route == route.alias and declared == expected)
+
+
 def assess_coding_evidence(serialized, config, route, qualification):
     if serialized is None:
         return CodingQualification()
@@ -75,19 +91,7 @@ def assess_coding_evidence(serialized, config, route, qualification):
                    or outcome["elapsed_ms"] is not None and outcome["elapsed_ms"] > subject["upstream_timeout_seconds"] * 1000)
     covered = all(sum(case["partition"] == partition and case["family"] == family for case in plan["cases"]) >= count
                   for family in FAMILIES for partition, count in (("development", 1), ("held_out", 3)))
-    managed = config.managed_llama
-    # Adapter upgrades may retain several qualified wire versions. Match the
-    # receipt's exact supported version, independently of the current default.
-    supported_versions = getattr(client_versions, "SUPPORTED_CODEX_VERSIONS", (client_versions.SUPPORTED_CODEX_VERSION,))
-    expected = {"client_version": subject["client_version"], "system": platform.system(), "machine": platform.machine(),
-                "runtime_profile": "managed-llama.v1", "runtime_sha256": managed.runtime_sha256 if managed else None,
-                "model_revision": route.model_revision, "upstream_model": route.upstream_model, "protocol": route.protocol,
-                "capabilities": sorted(route.capabilities), "max_request_bytes": qualification.max_request_bytes,
-                "max_output_tokens": qualification.max_output_tokens, "upstream_timeout_seconds": config.upstream_timeout_seconds,
-                "request_profile_sha256": subject["request_profile_sha256"]}
-    declared = {**subject, "capabilities": sorted(subject["capabilities"])}
-    matched = (subject["client_version"] in supported_versions and managed is not None
-               and managed.route == route.alias and declared == expected)
+    matched = matches_coding_subject(subject, config, route, qualification)
     readiness = ("subject_mismatch" if not matched else "failed" if failed else
                  "qualified" if covered and passed == len(plan["cases"]) else "incomplete")
     return CodingQualification(readiness, evidence["evidence_id"], evidence["plan_sha256"], canonical_digest(evidence),

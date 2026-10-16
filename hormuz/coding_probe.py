@@ -1,13 +1,11 @@
 """One bounded operator-authorized local experiment; never a coding receipt."""
 import json
-import platform
 import secrets
 import threading
 import time
 
 from ._contract_schemas.local_coding import canonical_digest
-from .client_versions import SUPPORTED_CODEX_VERSIONS
-from .coding_qualification import request_profile_digest
+from .coding_qualification import matches_coding_subject, request_profile_digest
 from .contracts import ContractValidationError, validate_contract
 from .work_learning import contains_provider_state
 
@@ -42,6 +40,8 @@ class CodingProbe:
 
     def control(self, identity, plan=None, revoke=False):
         with self.lock:
+            if type(revoke) is not bool or revoke and plan is not None:
+                raise ProbeError("probe_invalid_plan")
             if revoke:
                 self.revoked = True
             elif plan is not None:
@@ -63,22 +63,11 @@ class CodingProbe:
                 route = config.model_routes.get(plan["model"])
                 qualification = self.admission.qualifications.get(plan["model"])
                 managed = config.managed_llama
-                subject = plan["subject"]
                 if route is None or qualification is None or managed is None:
                     raise ProbeError("probe_subject_mismatch")
-                expected = {"client_version": subject["client_version"], "system": platform.system(),
-                    "machine": platform.machine(), "runtime_profile": "managed-llama.v1",
-                    "runtime_sha256": managed.runtime_sha256, "model_revision": route.model_revision,
-                    "upstream_model": route.upstream_model, "protocol": route.protocol,
-                    "capabilities": sorted(route.capabilities), "max_request_bytes": qualification.max_request_bytes,
-                    "max_output_tokens": qualification.max_output_tokens,
-                    "upstream_timeout_seconds": config.upstream_timeout_seconds,
-                    "request_profile_sha256": subject["request_profile_sha256"]}
                 destination = self.admission.destinations.resolve(route)
-                if (subject["client_version"] not in SUPPORTED_CODEX_VERSIONS
-                        or {**subject, "capabilities": sorted(subject["capabilities"])} != expected
-                        or managed.route != route.alias or destination.locality != "local"
-                        or "code_change" not in qualification.task_types):
+                if (not matches_coding_subject(plan["subject"], config, route, qualification)
+                        or destination.locality != "local" or "code_change" not in qualification.task_types):
                     raise ProbeError("probe_subject_mismatch")
                 self.plan = json.loads(json.dumps(plan))
                 self.probe_id = secrets.token_hex(16)
