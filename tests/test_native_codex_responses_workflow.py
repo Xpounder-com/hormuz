@@ -207,6 +207,26 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
             self.assertNotIn("NATIVE_CHATGPT_SENTINEL", json.dumps(native_requests[0]["body"]))
 
+    def test_native_marker_overlap_covers_all_configured_protected_literals(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            self.fixture.environment["NATIVE_CUSTOM_SECRET"] = "HORMUZ_SECRET"
+            value = self.configuration(local, cloud)
+            value["egress_controls"] = {"secrets": {"mode": "redact", "custom_secret_envs": ["NATIVE_CUSTOM_SECRET"]}}
+            with self.fixture.connected_client(value) as submit:
+                for prompt in ("Protect HORMUZ_SECRET", "A clean prompt still has an unsafe configured marker."):
+                    with self.subTest(prompt=prompt):
+                        denied = self.native(submit, request={"input": prompt})
+                        self.assertEqual(denied["status"], 403, denied)
+                        self.assertEqual(len(native_requests), 0)
+            self.fixture.environment["NATIVE_CUSTOM_SECRET"] = "SAFE_CUSTOM_SECRET_SENTINEL"
+            with self.fixture.connected_client(value) as submit:
+                accepted = self.native(submit, request={"input": "Protect SAFE_CUSTOM_SECRET_SENTINEL"})
+                self.assertEqual(accepted["status"], 200, accepted)
+                self.assertEqual(native_requests[0]["body"]["input"], "Protect [REDACTED:HORMUZ_SECRET]")
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
+
     def test_native_protected_member_names_are_denied_without_rewriting_schema_keys(self):
         token = "NATIVE_CHATGPT_SENTINEL"
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \

@@ -51,9 +51,10 @@ slug selects one immutable destination. Policy fallback and operational failover
 Identity, organization, team and actor Codex/model restrictions apply; hard or
 request-level local-only blocks before egress. Shared output caps and compacted
 context/secret redaction or denial apply before transport. Native credentials
-are also protected during request redaction. Redact mode rejects native grants
-contained in the replacement marker, since replacing such a grant could retain
-the credential. Redact and deny modes also reject protected JSON member names,
+are also protected during request redaction. Redact mode rejects configured
+protected literals, including the native grant, contained in the replacement
+marker, since replacement could retain the protected value. Redact and deny
+modes also reject protected JSON member names,
 including metadata and schema keys, rather than changing their meaning by
 renaming them. The same guard applies during reconstructed compact inspection.
 Requests with monthly token/dollar limits or per-actor dollar caps fail closed:

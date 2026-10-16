@@ -129,9 +129,6 @@ def _dispatch_native_responses(handler, credentials):
                    for field in ("monthly_token_limit", "monthly_budget_usd", "per_actor_monthly_budget_usd"))):
         handler._send_error("hormuz_policy_denied", "Native execution is not permitted by the selected policy or budget controls.", 403)
         return
-    if decision.snapshot.secret_mode == "redact" and authorization[7:] in REPLACEMENT:
-        handler._send_error("hormuz_secret_detected", "The native credential cannot be safely protected by the configured redaction marker.", 403)
-        return
     value = {**value, "model": route.upstream_model}
     if decision.max_output_tokens is not None:
         value["max_output_tokens"] = min(value.get("max_output_tokens", decision.max_output_tokens), decision.max_output_tokens)
@@ -148,6 +145,9 @@ def _dispatch_native_responses(handler, credentials):
         redactor = SecretRedactor(server.config.secret_controls,
             server.secret_redactor.protected_values + (("native_chatgpt_credential", authorization[7:]),),
             max_output_bytes=25 * 1024 * 1024, reject_protected_keys=True)
+        if decision.snapshot.secret_mode == "redact" and any(secret in REPLACEMENT for _, secret in redactor.protected_values):
+            handler._send_error("hormuz_secret_detected", "Configured protected values cannot be safely protected by the redaction marker.", 403)
+            return
         redaction = inspect_request(value, protocol="openai", redactor=redactor,
             mode=decision.snapshot.secret_mode, declared_version=context,
             inspection_max_bytes=MAX_COMPACT_INSPECTION_BYTES).redaction
