@@ -13,6 +13,7 @@ from ._native_responses_worker import RESPONSES_PATH
 from .native_responses_transport import NativeClientCanceled, stream_native_response
 from .compaction_contract import CONTEXT_FORMAT_HEADER
 from .compaction_enforcement import inspect_request
+from .compaction_formats import MAX_REQUEST_BYTES as MAX_COMPACT_INSPECTION_BYTES
 from .redaction import RedactionLimitError, SecretRedactor
 from .native_codex_stream import NativeCodexStream
 from .native_codex_state import NativeConversationBusy
@@ -135,7 +136,11 @@ def _dispatch_native_responses(handler, credentials):
             server.secret_redactor.protected_values + (("native_chatgpt_credential", authorization[7:]),),
             max_output_bytes=min(server.config.max_request_bytes, 25 * 1024 * 1024))
         redaction = inspect_request(value, protocol="openai", redactor=redactor,
-            mode=decision.snapshot.secret_mode, declared_version=context).redaction
+            mode=decision.snapshot.secret_mode, declared_version=context,
+            inspection_max_bytes=MAX_COMPACT_INSPECTION_BYTES).redaction
+        body = json.dumps(redaction.value, separators=(",", ":"), allow_nan=False).encode()
+        if len(body) > min(server.config.max_request_bytes, 25 * 1024 * 1024):
+            raise RedactionLimitError("Selected native egress exceeds its byte limit")
     except RedactionLimitError:
         handler._send_error("request_too_large", "Native request exceeds its egress byte limit.", 413)
         return
@@ -165,7 +170,7 @@ def _dispatch_native_responses(handler, credentials):
     outcome = "outcome_unknown"
     try:
         with closing(stream_native_response(authorization=authorization, account=account,
-                body=json.dumps(value, separators=(",", ":")).encode(),
+                body=body,
                 timeout=server.config.upstream_timeout_seconds, connection=handler.connection)) as response:
             metadata = next(response)
             upstream_status = metadata["status"]

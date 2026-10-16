@@ -103,7 +103,10 @@ of `upstream_timeout_seconds` and 600 seconds. The whole deadline wins over
 phase deadlines. Requests are bounded by the smaller of the configured limit
 and 25 MiB, including transformed egress JSON. Secret replacements reserve
 their exact serialized expansion before allocating replacement strings, and
-exceeding that byte limit returns 413 before egress. Streams are bounded by
+exceeding that byte limit returns 413 before egress.
+For recognized compacted tool results, reconstructed inspection has its own
+1 MiB request ceiling; the configured egress cap applies to the representation
+selected for forwarding after inspection. Streams are bounded by
 64 MiB; each SSE line/event by 1 MiB. Downstream writes
 have a separate three-second timeout. Cancellation is checked while awaiting
 headers or stream data. Every exit closes pipes/connections and reaps its owned

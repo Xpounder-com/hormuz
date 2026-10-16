@@ -204,6 +204,40 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                 self.assertLessEqual(len(json.dumps(native_requests[0]["body"], separators=(",", ":")).encode()), 1024)
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
 
+    def test_compact_native_tool_results_use_the_selected_egress_size_after_bounded_inspection(self):
+        call = {"id": "compact-tool", "type": "function_call", "call_id": "compact-call",
+                "name": "fixture_tool", "arguments": "{}"}
+        compact = json.dumps({"format": "hormuz-line-runs-v1", "runs": [["plain fixture output", 200]]},
+                             separators=(",", ":"))
+        data = ("data: " + json.dumps(completed(output=[call])) + "\n\n").encode()
+        def reply(handler, value, number):
+            if number != 1:
+                return stream_reply(handler, value, number)
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            value = self.configuration(local, cloud)
+            value["max_request_bytes"] = 1024
+            with self.fixture.connected_client(value) as submit:
+                self.assertEqual(self.native(submit)["body"], data.decode())
+                replay = self.native(submit, headers={"X-Hormuz-Context-Format": "structural-v1"},
+                    request={"input": [call, {"type": "function_call_output", "call_id": "compact-call", "output": compact}]})
+                self.assertEqual(replay["status"], 200, replay)
+                self.assertEqual(native_requests[1]["body"]["input"][1]["output"], compact)
+                self.assertLessEqual(len(json.dumps(native_requests[1]["body"], separators=(",", ":")).encode()), 1024)
+                secret_compact = json.dumps({"format": "hormuz-line-runs-v1", "runs": [["NATIVE_CHATGPT_SENTINEL", 100]]},
+                                            separators=(",", ":"))
+                denied = self.native(submit, headers={"X-Hormuz-Context-Format": "structural-v1"},
+                    request={"input": [call, {"type": "function_call_output", "call_id": "compact-call", "output": secret_compact}]})
+                self.assertEqual(denied["status"], 413, denied)
+                self.assertEqual(len(native_requests), 2, "expanded redacted egress exceeded its byte limit")
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
+
     def test_native_status_counts_completed_execution_and_observed_usage_with_unknown_cost(self):
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
