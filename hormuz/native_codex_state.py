@@ -11,6 +11,26 @@ class NativeConversationBusy(Exception):
     """A native conversation already owns one provider attempt."""
 
 
+def _tool_execution(item):
+    namespace, caller, asynchronous = (item.get(field) for field in ("namespace", "caller", "async"))
+    if (namespace is not None and type(namespace) is not str
+            or asynchronous is not None and type(asynchronous) is not bool):
+        raise ValueError("native_tool_execution_invalid")
+    if caller is not None:
+        if (type(caller) is not dict or type(caller.get("type")) is not str
+                or caller["type"] not in {"direct", "program"}):
+            raise ValueError("native_tool_execution_invalid")
+        fields = {"type", "caller_id"} if caller["type"] == "program" else {"type"}
+        if set(caller) != fields:
+            raise ValueError("native_tool_execution_invalid")
+        if caller["type"] == "program":
+            identifier = caller["caller_id"]
+            if (type(identifier) is not str or not 1 <= len(identifier) <= 256
+                    or any(not 33 <= ord(c) <= 126 for c in identifier)):
+                raise ValueError("native_tool_execution_invalid")
+    return [namespace, caller, asynchronous]
+
+
 def continuation_tags(items):
     tags = []
     if not isinstance(items, list):
@@ -21,21 +41,43 @@ def continuation_tags(items):
         kind = item.get("type")
         if kind is not None and type(kind) is not str:
             raise ValueError("native_item_invalid")
+        if (kind not in {None, "message", "reasoning", "compaction", "function_call", "custom_tool_call",
+                         "function_call_output", "custom_tool_call_output"}
+                or "type" in item and kind is None):
+            raise ValueError("native_item_unsupported")
         if "role" in item and type(item["role"]) is not str:
             raise ValueError("native_item_invalid")
         message = kind in {None, "message"}
         if "role" in item and not message:
             raise ValueError("native_item_invalid")
+        if message and (item.get("role") not in {"user", "developer", "system", "assistant"}
+                        or type(item.get("content")) not in {str, list}):
+            raise ValueError("native_item_invalid")
+        if kind in {"reasoning", "compaction"} and "id" not in item:
+            raise ValueError("native_item_invalid")
+        if kind == "reasoning" and type(item.get("summary")) is not list:
+            raise ValueError("native_item_invalid")
+        if kind == "compaction" and "encrypted_content" not in item:
+            raise ValueError("native_item_invalid")
         if kind in {"function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"}:
             call = item.get("call_id")
             if type(call) is not str or not 1 <= len(call) <= 256 or any(not 33 <= ord(c) <= 126 for c in call):
                 raise ValueError("native_call_invalid")
-            tags.append(("call", call))
+            call_kind = kind.removesuffix("_output")
+            tags.append(("call", [call_kind, call]))
+            execution = _tool_execution(item)
+            context = (("tool_namespace", execution[0]), ("tool_caller", execution[1]), ("tool_name", item.get("name")))
             if kind in {"function_call", "custom_tool_call"}:
                 field = "arguments" if kind == "function_call" else "input"
                 if type(item.get("name")) is not str or type(item.get(field)) is not str:
                     raise ValueError("native_call_invalid")
-                tags.append(("tool", [kind, call, item["name"], item[field]]))
+                tags.append(("tool", [kind, call, item["name"], item[field], execution]))
+                tags.extend((field, [call_kind, call, value]) for field, value in context)
+            else:
+                if (type(item.get("output")) not in {str, list} or execution[2] is not None
+                        or item.get("name") is not None and type(item["name"]) is not str):
+                    raise ValueError("native_tool_result_invalid")
+                tags.extend((field, [call_kind, call, value]) for field, value in context if value is not None)
         if "encrypted_content" in item and not (kind == "reasoning" and item["encrypted_content"] is None):
             opaque = item["encrypted_content"]
             if type(opaque) is not str or not 1 <= len(opaque) <= 1024 * 1024:
@@ -48,7 +90,7 @@ def continuation_tags(items):
             if (type(item["id"]) is not str or not 1 <= len(item["id"]) <= 256
                     or any(not 33 <= ord(c) <= 126 for c in item["id"])):
                 raise ValueError("native_item_invalid")
-            tags.append(("item", item["id"]))
+            tags.append(("item", ["message" if message else kind, item["id"]]))
         if len(tags) > 256:
             raise ValueError("native_continuation_oversized")
     return tags

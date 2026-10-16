@@ -502,6 +502,110 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                         self.assertEqual(len(native_requests), 2)
             self.assertEqual((local_requests, cloud_requests), ([], []))
 
+    def test_native_tool_execution_metadata_is_validated_and_bound_to_the_issued_call(self):
+        metadata = {"namespace": "functions", "caller": {"type": "program", "caller_id": "issued-program"}, "async": True}
+        malformed = [{"namespace": 17}, {"caller": {}}, {"caller": {"type": "program"}},
+            {"caller": {"type": "program", "caller_id": []}}, {"caller": {"type": "unknown"}}, {"async": "true"}]
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for kind in ("function_call", "custom_tool_call"):
+                field = "arguments" if kind == "function_call" else "input"
+                call = {"type": kind, "call_id": "metadata-call", "name": "fixture_tool", field: "{}"}
+                for options in ({}, metadata, *malformed):
+                    with self.subTest(kind=kind, options=options):
+                        issued = {**call, **options}
+                        valid = options in ({}, metadata)
+                        data = ("data: " + json.dumps(completed(output=[issued])) + "\n\n").encode()
+                        def reply(handler, value, number):
+                            if number != 1:
+                                return stream_reply(handler, value, number)
+                            handler.send_response(200)
+                            handler.send_header("Content-Type", "text/event-stream")
+                            handler.send_header("Content-Length", str(len(data)))
+                            handler.end_headers()
+                            handler.wfile.write(data)
+                        with native_backend({}, response_handler=reply) as native_requests:
+                            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                                self.native(submit)
+                                status = submit(method="GET", path="/v1/router/native-codex", absolute_path=True,
+                                    headers={"X-Gateway-Key": NATIVE_HEADERS["X-Gateway-Key"]})["body"]
+                                self.assertEqual((status["succeeded"], status["outcome_unknown"]),
+                                                 (1, 0) if valid else (0, 1), status)
+                                result = {"type": kind + "_output", "call_id": "metadata-call", "output": "result"}
+                                if valid:
+                                    for changed in ({"namespace": "other"}, {"caller": {"type": "direct"}},
+                                            {"caller": {"type": "program", "caller_id": "other-program"}}, {"async": False}):
+                                        with self.subTest(changed=changed):
+                                            denied = self.native(submit, request={"input": [{**issued, **changed}, result]})
+                                            self.assertEqual(denied["status"], 403, denied)
+                                    replayed = issued if options else {**call, "namespace": None, "caller": None, "async": None}
+                                    replay = self.native(submit, request={"input": [replayed, result]})
+                                    self.assertEqual(replay["status"], 200, replay)
+                                else:
+                                    replay = self.native(submit, request={"input": [call, result]})
+                                    self.assertEqual(replay["status"], 403, replay)
+                            self.assertEqual(len(native_requests), 2 if valid else 1)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_unqualified_or_disguised_native_input_variants_are_blocked_before_egress(self):
+        items = [{"type": "computer_call_output", "call_id": "foreign-call", "output": {}},
+            {"type": "mcp_approval_response", "approval_request_id": "foreign-approval", "approve": True},
+            {"type": "tool_search_output", "call_id": "foreign-call", "tools": []},
+            {"type": "unknown_native_variant"}, {"call_id": "foreign-call", "output": "result"},
+            {"type": None, "role": "user", "content": "hello"},
+            {"type": "message", "role": "tool", "content": "result"},
+            {"type": "reasoning", "summary": []}, {"type": "compaction"}]
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                for item in items:
+                    with self.subTest(item=item):
+                        result = self.native(submit, request={"input": [item]})
+                        self.assertEqual(result["status"], 403, result)
+                        self.assertEqual((local_requests, cloud_requests, native_requests), ([], [], []))
+                for role in ("user", "assistant"):
+                    fresh = self.native(submit, request={"input": [{"role": role, "content": "fresh plain text"}]})
+                    self.assertEqual(fresh["status"], 200, fresh)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
+
+    def test_native_results_must_match_the_issued_tool_kind_and_execution_context(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for kind in ("function_call", "custom_tool_call"):
+                with self.subTest(kind=kind):
+                    field = "arguments" if kind == "function_call" else "input"
+                    call = {"id": "context-tool", "type": kind, "call_id": "context-call", "name": "fixture_tool",
+                            "namespace": "functions", "caller": {"type": "direct"}, field: "{}"}
+                    data = ("data: " + json.dumps(completed(output=[call])) + "\n\n").encode()
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                            self.assertEqual(self.native(submit)["body"], data.decode())
+                            result = {"type": kind + "_output", "call_id": "context-call", "output": "result"}
+                            other = "custom_tool_call_output" if kind == "function_call" else "function_call_output"
+                            invalid = [{**result, "type": other}, {**result, "name": "other_tool"},
+                                {**result, "namespace": "other"}, {**result, "caller": {"type": "program", "caller_id": "foreign-program"}},
+                                {k: v for k, v in result.items() if k != "output"}, {**result, "output": 17},
+                                {"type": "reasoning", "id": "context-tool", "summary": []}]
+                            for item in invalid:
+                                with self.subTest(item=item):
+                                    denied = self.native(submit, request={"input": [item]})
+                                    self.assertEqual(denied["status"], 403, denied)
+                                    self.assertEqual(len(native_requests), 1)
+                            for item in (result, {**result, "name": "fixture_tool", "namespace": "functions", "caller": {"type": "direct"}}):
+                                replay = self.native(submit, request={"input": [item]})
+                                self.assertEqual(replay["status"], 200, replay)
+                        self.assertEqual(len(native_requests), 3)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_unsupported_or_ambiguous_native_request_envelopes_never_reach_a_provider(self):
         cases = [
             {"request": {"stream": False}}, {"request": {"store": True}}, {"request": {"background": True}},

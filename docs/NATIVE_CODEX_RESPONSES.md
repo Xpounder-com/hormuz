@@ -31,7 +31,10 @@ handles, queries, duplicate framing headers, transfer encodings and upgrades
 are unsupported. The accepted request fields are the explicit `REQUEST_FIELDS`
 profile in `native_codex_responses.py`; tools, reasoning, text options and
 client metadata retain their native JSON after shared secret enforcement.
-Native compaction endpoints and WebSockets remain unsupported.
+Native compaction endpoints and WebSockets remain unsupported. Input items are
+limited to messages, reasoning, compaction, function/custom calls and their
+results. Unqualified computer/MCP/shell/reference or other provider-state types
+are blocked before egress; a role-less object cannot masquerade as fresh text.
 
 A configured alias takes precedence over native catalog slugs; aliases owned by
 other destinations are blocked. Without an exact alias, an unambiguous native
@@ -72,7 +75,11 @@ HTTP continuation uses replayed input. Function/custom tool calls, matching tool
 results and encrypted reasoning/compaction content require retained successful
 native affinity. It binds the Hormuz identity, exact native credential/account,
 model/destination generation, body thread/session/cache identity and any
-`thread-id`/`session-id` headers. Those session headers constrain affinity and
+`thread-id`/`session-id` headers. Tool kind, namespace, direct/program caller and
+async execution mode retain their validated issued values. Absent/null optional
+values are equivalent. Supplied result names/namespaces/callers must match the
+issued call; results and provider item IDs cannot change their item type.
+Those session headers constrain affinity and
 are consumed locally. Changed arguments or opaque bytes, unknown provider IDs,
 failed turns, restart, expiry or another owner block before egress. Native
 credential refresh invalidates old opaque/tool affinity; it does not silently
