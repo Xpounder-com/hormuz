@@ -39,10 +39,11 @@ def main():
                        cwd=temporary, env=environment, check=True, timeout=10)
         subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
                         '-p', 'test_*workflow.py', '-f', '-v'],
-                       # The 276-test installed suite took 628 seconds on CI.
-                       # Keep a finite thirteen-minute allowance for the growing
-                       # suite and one minute for build/artifacts in the job.
-                       cwd=temporary, env=environment, check=True, timeout=780)
+                       # A 318-test CI source run passed in 831 seconds; the
+                       # wheel's former 780-second limit cut off passing tests.
+                       # Bound the expanded suite to eighteen minutes, leaving
+                       # two minutes for build, artifacts and job cleanup.
+                       cwd=temporary, env=environment, check=True, timeout=1080)
     print('Installed-wheel workflow passed outside the source checkout')
 
 

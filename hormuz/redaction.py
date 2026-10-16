@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -13,6 +14,38 @@ MAX_JSON_DEPTH = 100
 
 class RedactionError(ValueError):
     pass
+
+
+class RedactionLimitError(RedactionError):
+    pass
+
+
+class RedactionKeyError(RedactionError):
+    pass
+
+
+class _RedactionBudget:
+    """Track the exact ASCII JSON size before allocating replacements."""
+
+    def __init__(self, value: dict[str, Any], limit: int):
+        self.limit = limit
+        self.size = len(json.dumps(value, separators=(",", ":"), allow_nan=False))
+        # Existing bounded input may shrink during redaction. Do not allocate
+        # growth beyond either that existing size or the inspection ceiling.
+        self.ceiling = max(limit, self.size)
+
+    def resize(self, delta: int) -> None:
+        if self.size + delta > self.ceiling:
+            raise RedactionLimitError("Redacted request exceeds its byte limit")
+        self.size += delta
+
+    def finish(self) -> None:
+        if self.size > self.limit:
+            raise RedactionLimitError("Redacted request exceeds its byte limit")
+
+    @staticmethod
+    def string_size(value: str) -> int:
+        return len(json.dumps(value)) - 2
 
 
 @dataclass(frozen=True)
@@ -48,11 +81,17 @@ class SecretRedactor:
         self,
         controls: SecretControls,
         protected_values: tuple[tuple[str, str], ...] = (),
+        *,
+        max_output_bytes: int | None = None,
+        reject_protected_keys: bool = False,
     ):
         self.controls = controls
         self.protected_values = controls.custom_secret_values + protected_values
+        self.max_output_bytes = max_output_bytes
+        self.reject_protected_keys = reject_protected_keys
 
-    def inspect(self, value: dict[str, Any], *, mode: str | None = None) -> RedactionResult:
+    def inspect(self, value: dict[str, Any], *, mode: str | None = None,
+                max_output_bytes: int | None = None) -> RedactionResult:
         """Inspect a request with an optional immutable policy action override.
 
         Detector configuration and protected values remain process-local; the
@@ -62,23 +101,29 @@ class SecretRedactor:
         effective_mode = self.controls.mode if mode is None else mode
         if effective_mode not in {"off", "redact", "deny"}:
             raise RedactionError("Secret enforcement mode is unsupported")
+        limit = self.max_output_bytes if max_output_bytes is None else max_output_bytes
+        budget = None if limit is None else _RedactionBudget(value, limit)
         if effective_mode == "off":
+            if budget is not None:
+                budget.finish()
             return RedactionResult(value=value)
-        transformed, count, rules = self._transform(value, depth=0)
+        transformed, count, rules = self._transform(value, depth=0, budget=budget)
+        if budget is not None:
+            budget.finish()
         assert isinstance(transformed, dict)
         return RedactionResult(value=transformed, count=count, rules=tuple(sorted(rules)))
 
-    def _transform(self, value: Any, *, depth: int) -> tuple[Any, int, set[str]]:
+    def _transform(self, value: Any, *, depth: int, budget: _RedactionBudget | None) -> tuple[Any, int, set[str]]:
         if depth > MAX_JSON_DEPTH:
             raise RedactionError(f"Request JSON exceeds the maximum nesting depth of {MAX_JSON_DEPTH}")
         if isinstance(value, str):
-            return self._transform_string(value)
+            return self._transform_string(value, budget)
         if isinstance(value, list):
             transformed_items: list[Any] = []
             total = 0
             rules: set[str] = set()
             for item in value:
-                transformed, count, item_rules = self._transform(item, depth=depth + 1)
+                transformed, count, item_rules = self._transform(item, depth=depth + 1, budget=budget)
                 transformed_items.append(transformed)
                 total += count
                 rules.update(item_rules)
@@ -88,25 +133,35 @@ class SecretRedactor:
             total = 0
             rules: set[str] = set()
             for key, item in value.items():
-                transformed, count, item_rules = self._transform(item, depth=depth + 1)
+                if self.reject_protected_keys and (any(secret in key for _, secret in self.protected_values)
+                        or self.controls.builtins and any(pattern.search(key) for _, pattern in _BUILTIN_PATTERNS)):
+                    # Member names carry schema meaning; do not rewrite them or
+                    # allocate a replacement merely to detect protected content.
+                    raise RedactionKeyError("Request member name contains protected secret material")
+                transformed, count, item_rules = self._transform(item, depth=depth + 1, budget=budget)
                 transformed_object[key] = transformed
                 total += count
                 rules.update(item_rules)
             return transformed_object, total, rules
         return value, 0, set()
 
-    def _transform_string(self, value: str) -> tuple[str, int, set[str]]:
+    def _transform_string(self, value: str, budget: _RedactionBudget | None) -> tuple[str, int, set[str]]:
         transformed = value
         total = 0
         rules: set[str] = set()
         for rule_name, secret in self.protected_values:
             count = transformed.count(secret)
             if count:
+                if budget is not None:
+                    budget.resize(count * (len(REPLACEMENT) - budget.string_size(secret)))
                 transformed = transformed.replace(secret, REPLACEMENT)
                 total += count
                 rules.add(rule_name)
         if self.controls.builtins:
             for name, pattern in _BUILTIN_PATTERNS:
+                if budget is not None:
+                    budget.resize(sum(len(REPLACEMENT) - budget.string_size(match.group())
+                        for match in pattern.finditer(transformed)))
                 transformed, count = pattern.subn(REPLACEMENT, transformed)
                 if count:
                     total += count
