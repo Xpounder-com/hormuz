@@ -61,13 +61,14 @@ def _routing(config):
             'openai_base_url': config.get('openai_base_url') if provider == 'openai' else None}
 
 
-def _launch(arguments):
+def _launch(arguments, client_version):
     if arguments is None:
-        return {}, {}, None, None, False
+        return {}, {}, None, None, False, False
     if len(arguments) > 128 or sum(len(value.encode()) for value in arguments) > 16384:
         raise ValueError('launch_limit')
     generic, dedicated = {}, {}
     profile, cwd, remote, oss, local_provider = None, None, False, False, None
+    ignore_user = False
     index = 0
     takes_value = {'-m': 'model', '--model': 'model', '-p': 'profile', '--profile': 'profile',
                    '-C': 'cwd', '--cd': 'cwd', '-c': 'config', '--config': 'config',
@@ -85,6 +86,11 @@ def _launch(arguments):
         if token == '--':
             break
         if token in {'exec', 'e', 'resume', 'review'}:
+            continue
+        if token == '--ignore-user-config' and client_version == '0.160.0':
+            ignore_user = True
+            continue
+        if token == '--ignore-rules' and client_version == '0.160.0':
             continue
         if token == '--search':
             dedicated['web_search'] = 'live'
@@ -145,7 +151,7 @@ def _launch(arguments):
         if local_provider is not None and local_provider not in {'ollama', 'lmstudio'}:
             raise ValueError('local_provider_invalid')
         dedicated['model_provider'] = local_provider or 'oss_default_unresolved'
-    return generic, dedicated, profile, cwd, remote
+    return generic, dedicated, profile, cwd, remote, ignore_user
 
 
 def _repository_root(project):
@@ -163,20 +169,20 @@ def _repository_root(project):
     return (directory / common.strip()).resolve().parent if common else root
 
 
-def inspect_overrides(home, project, arguments=None):
+def inspect_overrides(home, project, arguments=None, *, client_version=SUPPORTED_CODEX_VERSION):
     """Inspect selected files/flags only; values stay in this local calculation."""
     baseline = _document(home / 'config.toml')
     try:
-        generic, dedicated, profile, cwd, remote = _launch(arguments)
+        generic, dedicated, profile, cwd, remote, ignore_user = _launch(arguments, client_version)
     except (ValueError, RecursionError):
         raise OverrideInspectionError('launch') from None
     if cwd:
         project = (project / Path(cwd).expanduser()).resolve()
     if not project.is_dir():
         raise ValueError('project_unavailable')
-    effective = copy.deepcopy(baseline)
-    layers, owners = [], {}
-    if profile:
+    effective = {} if ignore_user else copy.deepcopy(baseline)
+    layers, owners = [], {key: 'launch' for key in ROUTING_KEYS} if ignore_user else {}
+    if profile and not ignore_user:
         legacy = baseline.get('profiles', {})
         if baseline.get('profile') == profile or isinstance(legacy, dict) and profile in legacy:
             raise OverrideInspectionError('profile')
@@ -193,6 +199,7 @@ def inspect_overrides(home, project, arguments=None):
         layers.append({'source': 'profile', 'state': 'applied', 'keys': keys, 'ignored_keys': []})
     context = copy.deepcopy(effective)
     _merge(context, generic)
+    project_denied = PROJECT_DENIED | {'responses_api_metadata'} if client_version == '0.160.0' else PROJECT_DENIED
     root = _root(project, context)
     repository = _repository_root(project)
     directories = [project, *project.parents]
@@ -226,9 +233,9 @@ def inspect_overrides(home, project, arguments=None):
             document = _document(path)
         except (ValueError, OSError, RecursionError, ConnectedClientError):
             raise OverrideInspectionError('project') from None
-        ignored = sorted(set(document) & PROJECT_DENIED)
-        keys = sorted(set(document) & set(ROUTING_KEYS) - PROJECT_DENIED)
-        layer = {key: value for key, value in document.items() if key not in PROJECT_DENIED}
+        ignored = sorted(set(document) & project_denied)
+        keys = sorted(set(document) & set(ROUTING_KEYS) - project_denied)
+        layer = {key: value for key, value in document.items() if key not in project_denied}
         _merge(effective, layer)
         for key in keys:
             owners[key] = 'project'
@@ -248,7 +255,7 @@ def inspect_overrides(home, project, arguments=None):
              else 'inactive' if project_layers and all(item['state'] == 'inactive' for item in project_layers)
              else 'none')
     return {'schema_id': 'hormuz.client-overrides', 'schema_version': 1,
-            'supported_client_version': SUPPORTED_CODEX_VERSION,
+            'supported_client_version': client_version,
             'scope': 'selected_project_and_supplied_launch', 'project_state': state,
             'layers': layers, 'conflicts': conflicts,
             'launch_state': 'not_supplied' if arguments is None else 'remote' if remote else 'detected' if any(item['source'] == 'launch' for item in conflicts) else 'none',

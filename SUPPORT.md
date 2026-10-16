@@ -7,7 +7,7 @@ No uptime, support, security certification or broad compatibility SLA is offered
 | Surface | Current evidence boundary |
 | --- | --- |
 | Python | CI targets CPython 3.11–3.14 on Ubuntu; local results are reported separately |
-| Persistent connection | Codex CLI version pin `0.147.0`; routine tests use a disposable executable with its configuration/version contract |
+| Persistent connection | Exact CLI versions `0.147.0` and [the 0.160.0 HTTP profile](docs/CODEX_0160.md); routine tests use disposable executables and native qualification is separate |
 | Destination and admission behavior | Real router against bounded loopback local/cloud provider fixtures |
 | Client/platform support | Synthetic success does not qualify an installed Codex desktop engine, every client version or operating system |
 | Local engine/model | Real llama.cpp/model/task quality and exact capabilities still require qualification |
