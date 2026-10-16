@@ -1,5 +1,6 @@
 """Rich coding-client requests observed through the approved router workflow."""
 import json
+from importlib.resources import files
 import unittest
 
 from tests import test_execution_destination_workflow as destination
@@ -31,6 +32,46 @@ class CodexAppWorkflowTests(unittest.TestCase):
                 self.assertEqual(model['apply_patch_tool_type'], 'freeform')
                 self.assertEqual(model['context_window'], 32768)
             self.assertEqual((requests, cloud_requests), ([], []))
+
+    def test_bundled_app_profile_accepts_native_automatic_review_without_dropping_parent_tags(self):
+        profile = json.loads(files('hormuz').joinpath(
+            'local-setup-codex-app-0162-llama-b11617-qwen3-4b-v2.json').read_text())
+        thread = '11111111-1111-4111-8111-111111111111'
+        parent = '22222222-2222-4222-8222-222222222222'
+        tags = {'thread_id': thread, 'session_id': thread, 'turn_id': 'synthetic-review-turn',
+                'root_turn_id': 'synthetic-parent-turn', 'parent_turn_id': 'synthetic-parent-turn',
+                'x-codex-parent-thread-id': parent, 'x-openai-subagent': 'auto_review'}
+        output = [{'type': 'message', 'role': 'assistant', 'content': [
+            {'type': 'output_text', 'text': '{"decision":"deny"}'}]}]
+        request = {'input': 'Assess this synthetic read-only command approval.', 'client_metadata': tags,
+                   'reasoning': {'effort': 'low', 'summary': 'auto'},
+                   'text': {'format': {'type': 'json_schema', 'name': 'approval', 'strict': True,
+                       'schema': {'type': 'object', 'properties': {'decision': {'enum': ['allow', 'deny']}},
+                                  'required': ['decision'], 'additionalProperties': False}}}}
+        with destination.provider('LOCAL', response_fields={'output': output}) as (local, requests), \
+             destination.provider('UNUSED_CLOUD') as (cloud, cloud_requests):
+            value = self.configuration(local, cloud)
+            value['model_routes']['local-code']['capabilities'] = profile['capabilities']
+            value['route_admission']['local_routes']['local-code']['task_types'] = profile['task_types']
+            value['ai_work'] = {'enabled': True, 'database': str(self.fixture.root / 'work.sqlite3')}
+            headers = {'thread-id': thread, 'session-id': thread}
+            with self.fixture.connected_client(value) as submit:
+                response = submit(headers=headers, request=request)
+                self.assertEqual(response['status'], 200, response)
+                self.assertEqual(json.loads(response['body']['output'][0]['content'][0]['text']), {'decision': 'deny'})
+                none = submit(headers=headers, request={**request, 'reasoning': {'effort': 'none'}})
+                self.assertEqual(none['status'], 200, none)
+                for invalid in ({'parent_turn_id': {}}, {'x-openai-subagent': 'x' * 2049}, {'unknown-parent-tag': 'invalid'}):
+                    rejected = submit(headers=headers, request={**request, 'client_metadata': {**tags, **invalid}})
+                    self.assertEqual(rejected['status'], 503, rejected)
+                work = submit(method='GET', path='/work/jobs/' + response['headers']['x-hormuz-work-id'])['body']
+                self.assertEqual([attempt['state'] for attempt in work['attempts']], ['succeeded', 'succeeded'])
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(requests[0]['body']['client_metadata'], tags)
+            self.assertEqual(requests[0]['body']['text'], request['text'])
+            self.assertEqual(requests[0]['body']['reasoning']['effort'], 'low')
+            self.assertIs(requests[1]['body']['chat_template_kwargs']['enable_thinking'], False)
+            self.assertEqual(cloud_requests, [])
 
     def test_large_namespaced_tool_request_and_response_keep_the_client_tool_identity(self):
         tool = {'type': 'namespace', 'name': 'mcp__fixture', 'description': 'Local fixture tools.',

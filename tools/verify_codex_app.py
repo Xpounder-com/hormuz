@@ -39,8 +39,10 @@ def main():
     parser.add_argument('--project', type=Path, help='Use an existing project without writing verification files into it')
     parser.add_argument('--leave-connected', action='store_true')
     parser.add_argument('--normal-mcp', action='store_true', help='Verify the existing node_repl MCP instead of a private fixture')
+    parser.add_argument('--discover-first', action='store_true', help='Discover the MCP tool in one turn, then invoke it in a second turn')
     parser.add_argument('--capture-wire', action='store_true', help='Private synthetic request capture; isolated homes only')
-    parser.add_argument('--task', choices=('script', 'mcp', 'both'), default='both')
+    parser.add_argument('--capture-shapes', action='store_true', help='Record only content-free request shapes and response statuses')
+    parser.add_argument('--task', choices=('script', 'mcp', 'both', 'approval'), default='both')
     args = parser.parse_args()
     if args.capture_wire and args.client_home:
         parser.error('Wire capture is limited to synthetic isolated homes')
@@ -59,7 +61,7 @@ def main():
         home.mkdir(mode=0o700, parents=True)
         mcp = root / 'fixture_mcp.py'
         mcp.write_text(MCP)
-        (home / 'config.toml').write_text('model_reasoning_effort = "max"\n'
+        (home / 'config.toml').write_text('model_reasoning_effort = "max"\napprovals_reviewer = "auto_review"\n'
             '[features]\nplugins = true\napps = true\nmulti_agent = true\n'
             '[mcp_servers.routing_fixture]\ncommand = ' + json.dumps(sys.executable) +
             '\nargs = [' + json.dumps(str(mcp)) + ']\nenabled = true\n')
@@ -122,6 +124,20 @@ def main():
                 if 'error' in value:
                     raise RuntimeError(json.dumps(value['error']))
                 return value['result']
+    def work_state(settings):
+        auth = settings['model_providers'][settings['model_provider']]['auth']
+        token = subprocess.run([auth['command'], *auth['args']], env=env, capture_output=True,
+                               text=True, check=True, timeout=6).stdout.strip()
+        gateway = json.loads(config.read_text())
+        transport = http.client.HTTPConnection('127.0.0.1', gateway['listen']['port'], timeout=4)
+        try:
+            transport.request('GET', '/v1/work/state', headers={'Authorization': 'Bearer ' + token})
+            response = transport.getresponse()
+            raw = response.read(2 * 1024 * 1024 + 1)
+            assert response.status == 200 and len(raw) <= 2 * 1024 * 1024
+            return json.loads(raw)
+        finally:
+            transport.close()
     try:
         setup = ['client', 'setup', 'codex', '--client-home', str(home), '--executable', str(args.codex),
                  '--runtime-archive', str(args.runtime_archive), '--llama-executable', str(args.llama_executable),
@@ -134,8 +150,10 @@ def main():
         assert all(settings.get('features', {}).get(key, True) for key in ('plugins', 'apps', 'multi_agent'))
         proof['codex_version'] = connection['connection']['client_version']
         proof['saved_reasoning_effort'] = settings['model_reasoning_effort']
+        before_state = work_state(settings)
+        prior_attempts = {attempt['request_id'] for work in before_state['works'] for attempt in work['attempts']}
         native_arguments = [str(args.codex), 'app-server', '--stdio']
-        if args.capture_wire:
+        if args.capture_wire or args.capture_shapes:
             gateway = json.loads(config.read_text())
             class Capture(BaseHTTPRequestHandler):
                 timeout = 190
@@ -149,7 +167,17 @@ def main():
                         self.send_error(413)
                         return
                     body = self.rfile.read(length)
-                    (root / ('request-' + str(Capture.requests) + '.json')).write_bytes(body)
+                    if args.capture_wire:
+                        (root / ('request-' + str(Capture.requests) + '.json')).write_bytes(body)
+                    else:
+                        value = json.loads(body)
+                        shape = {'bytes': len(body), 'keys': sorted(value), 'model': value.get('model'),
+                            'max_output_tokens': value.get('max_output_tokens'), 'reasoning': value.get('reasoning'),
+                            'include': value.get('include'), 'tool_types': dict(Counter(tool.get('type') for tool in value.get('tools', []))),
+                            'input_types': dict(Counter(item.get('type') for item in value.get('input', []) if isinstance(item, dict))),
+                            'text_format': value.get('text', {}).get('format', {}).get('type'),
+                            'metadata_keys': sorted(value.get('client_metadata', {}))}
+                        (root / ('request-' + str(Capture.requests) + '-shape.json')).write_text(json.dumps(shape, indent=2))
                     upstream = http.client.HTTPConnection('127.0.0.1', gateway['listen']['port'], timeout=185)
                     try:
                         headers = {key: value for key, value in self.headers.items()
@@ -203,11 +231,19 @@ def main():
                              if args.normal_mcp else 'Invoke the discovered probe function with {}. ')
                           + 'Wait for the discovery result before invoking the MCP function. '
                           + 'Use direct tool calls; do not run shell commands. Report its result. Reason briefly.')
+            elif args.task == 'approval':
+                prompt = ('Review this local command approval integration. Use exec_command once with '
+                    '{"cmd":"printf APPROVAL_ROUTING_OK", "sandbox_permissions":"require_escalated", '
+                    '"justification":"Verify the existing automatic approval reviewer with one read-only print command."}. '
+                    'Keep the existing approval settings. Report the actual command result. Reason briefly.')
+            discovery_prompt = ('Discover the MCP tools for ' + target + ' using tool_search with limit 1. '
+                                'Report the discovered function names. This turn only discovers tools; invoke no other tools.')
             send({'id': 3, 'method': 'turn/start', 'params': {'threadId': thread['thread']['id'],
-                  'input': [{'type': 'text', 'text': prompt}], 'effort': 'max', 'summary': 'auto'}})
+                  'input': [{'type': 'text', 'text': discovery_prompt if args.discover_first else prompt}], 'effort': 'max', 'summary': 'auto'}})
             result(3, 15)
             deadline = time.monotonic() + 480
             completed_items = []
+            discovery_done = False
             while True:
                 value = receive(deadline)
                 if 'id' in value and 'method' in value:
@@ -237,6 +273,17 @@ def main():
                 if value.get('method') == 'turn/completed':
                     proof['turn'] = value['params']['turn']
                     assert proof['turn']['status'] == 'completed', 'Native turn failed'
+                    if args.discover_first and not discovery_done:
+                        proof['discovery_turn'] = proof['turn']
+                        discovery_done = True
+                        namespace = 'mcp__node_repl.js' if args.normal_mcp else 'mcp__routing_fixture.probe'
+                        invocation = ('Invoke the discovered MCP function ' + namespace + ' directly with ' +
+                            ('{"code":"console.log(\\"MCP_ROUTING_OK\\")"}' if args.normal_mcp else '{}') +
+                            '. Report its actual returned output. Reason briefly.')
+                        send({'id': 4, 'method': 'turn/start', 'params': {'threadId': thread['thread']['id'],
+                            'input': [{'type': 'text', 'text': invocation}], 'effort': 'max', 'summary': 'auto'}})
+                        result(4, 15)
+                        continue
                     break
             commands = [item for item in completed_items if item['type'] == 'commandExecution']
             mcp_calls = [item for item in completed_items if item['type'] == 'mcpToolCall']
@@ -245,32 +292,29 @@ def main():
             proof['reasoning_notifications'] = sum('reasoning' in value.get('method', '').lower() for value in messages)
             proof['reasoning_items'] = sum(item['type'] == 'reasoning' and bool(item.get('content') or item.get('summary')) for item in completed_items)
             proof['notification_counts'] = dict(Counter(value.get('method') for value in messages if 'method' in value))
-            if args.task != 'mcp':
+            if args.task in {'script', 'both'}:
                 assert any(item.get('exitCode') == 0 and 'ROUTING_OK' in item.get('aggregatedOutput', '') for item in commands), 'Supplied script did not complete'
-            if args.task != 'script':
-                assert any('MCP_ROUTING_OK' in json.dumps(item) and item.get('status') == 'completed' for item in mcp_calls), 'MCP round trip did not complete'
+            if args.task in {'mcp', 'both'}:
+                server, tool = ('node_repl', 'js') if args.normal_mcp else ('routing_fixture', 'probe')
+                assert any(item.get('server') == server and item.get('tool') == tool and item.get('status') == 'completed'
+                    and item.get('error') is None and any(part.get('type') == 'text'
+                        and 'MCP_ROUTING_OK' in part.get('text', '').splitlines()
+                        for part in (item.get('result') or {}).get('content', []))
+                    for item in mcp_calls), 'MCP round trip did not complete on the selected server'
+            if args.task == 'approval':
+                assert any(item.get('exitCode') == 0 and 'APPROVAL_ROUTING_OK' in item.get('aggregatedOutput', '')
+                           for item in commands), 'The native automatic approval round trip did not complete'
             assert proof['reasoning_notifications'] > 0 or proof['reasoning_items'] > 0, 'No actual model reasoning was observed'
         finally:
             stderr.close()
-        auth = settings['model_providers'][settings['model_provider']]['auth']
-        token = subprocess.run([auth['command'], *auth['args']], env=env, capture_output=True,
-                               text=True, check=True, timeout=6).stdout.strip()
-        gateway = json.loads(config.read_text())
-        transport = http.client.HTTPConnection('127.0.0.1', gateway['listen']['port'], timeout=4)
-        try:
-            transport.request('GET', '/v1/work/state', headers={'Authorization': 'Bearer ' + token})
-            response = transport.getresponse()
-            raw = response.read(2 * 1024 * 1024 + 1)
-            assert response.status == 200 and len(raw) <= 2 * 1024 * 1024
-            state = json.loads(raw)
-        finally:
-            transport.close()
+        state = work_state(settings)
         proof['work_state'] = state
-        attempts = [attempt for work in state['works'] for attempt in work['attempts']]
-        assert (2 if args.task == 'script' else 3) <= len(attempts) <= 8 and all(attempt['state'] == 'succeeded' for attempt in attempts), \
+        attempts = [attempt for work in state['works'] for attempt in work['attempts'] if attempt['request_id'] not in prior_attempts]
+        proof['probe_attempts'] = attempts
+        assert (2 if args.task in {'script', 'approval'} else 3) <= len(attempts) <= 8 and all(attempt['state'] == 'succeeded' for attempt in attempts), \
             'Provider attempts did not settle successfully: ' + str([attempt['state'] for attempt in attempts])
         assert any(attempt['reason'] == 'session_affinity' for attempt in attempts)
-        assert all(state['totals'][key] == 0 for key in ('unknown_attempts', 'retry_attempts', 'failover_attempts'))
+        assert all(state['totals'][key] == before_state['totals'][key] for key in ('unknown_attempts', 'retry_attempts', 'failover_attempts'))
         proof['passed'] = True
     except Exception as error:
         proof['failure'] = str(error)

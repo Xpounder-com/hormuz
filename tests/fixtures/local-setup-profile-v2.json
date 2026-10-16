@@ -14,7 +14,8 @@
     "streaming",
     "tools",
     "codex_http_0160",
-    "codex_llama_v1"
+    "codex_llama_v1",
+    "structured_output"
   ],
   "max_request_bytes": 2097152,
   "max_output_tokens": 8192,

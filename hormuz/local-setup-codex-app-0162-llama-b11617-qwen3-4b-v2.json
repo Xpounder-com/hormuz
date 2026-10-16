@@ -1,7 +1,7 @@
 {
   "schema_id": "hormuz.local-setup-profile",
   "schema_version": 2,
-  "qualification_id": "codex-app0162-llamab11617-qwen3-4b-interactive-http-v2",
+  "qualification_id": "codex-app0162-llamab11617-qwen3-4b-interactive-review-http-v2",
   "client_version": "0.162.0-alpha.17.2",
   "system": "Darwin",
   "machine": "arm64",
@@ -15,7 +15,8 @@
     "tools",
     "codex_http",
     "codex_http_0160",
-    "codex_llama_v1"
+    "codex_llama_v1",
+    "structured_output"
   ],
   "max_request_bytes": 2097152,
   "max_output_tokens": 8192,

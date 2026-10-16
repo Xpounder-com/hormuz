@@ -6,6 +6,7 @@ import re
 
 CAPABILITY = 'codex_llama_v1'
 MAX_FRAME = 2 * 1024 * 1024
+PARENT_TAGS = {'parent_turn_id', 'x-codex-parent-thread-id', 'x-openai-subagent'}
 
 
 class CodexLlamaError(ValueError):
@@ -16,6 +17,7 @@ def needs_adapter(value):
     tools = value.get('tools', [])
     history = value.get('input', [])
     return (value.get('reasoning', {}) not in ({}, {'effort': 'none'})
+            or isinstance(value.get('client_metadata'), dict) and bool(PARENT_TAGS.intersection(value['client_metadata']))
             or isinstance(tools, list) and any(isinstance(tool, dict) and tool.get('type') in ('namespace', 'custom', 'tool_search', 'web_search') for tool in tools)
             or isinstance(history, list) and any(isinstance(item, dict) and ('namespace' in item
                 or item.get('type') in ('custom_tool_call', 'custom_tool_call_output', 'tool_search_call', 'tool_search_output', 'reasoning')) for item in history))
@@ -28,6 +30,11 @@ class CodexLlamaRequest:
         self.declarations = {}
         self.buffer = bytearray()
         self.stream_kinds = {}
+        tags = value.get('client_metadata', {})
+        if isinstance(tags, dict) and any(key in tags and (not isinstance(tags[key], str)
+                or not 0 < len(tags[key]) <= 2048 or any(ord(c) < 32 or ord(c) > 126 for c in tags[key]))
+                for key in PARENT_TAGS):
+            raise CodexLlamaError('invalid_parent_metadata')
         reasoning = value.get('reasoning', {})
         if ('chat_template_kwargs' in value or type(reasoning) is not dict
                 or set(reasoning) - {'effort', 'summary'}
@@ -171,6 +178,9 @@ class CodexLlamaRequest:
         result = {key: value for key, value in self.value.items() if key != 'chat_template_kwargs'}
         if 'reasoning' in result:
             result['reasoning'] = {}
+        if isinstance(result.get('client_metadata'), dict):
+            result['client_metadata'] = {key: value for key, value in result['client_metadata'].items()
+                                         if key not in PARENT_TAGS}
         if isinstance(result.get('input'), list):
             result['input'] = [{'type': 'message', 'role': 'assistant', 'content': item['content'][0]['text']}
                                if isinstance(item, dict) and item.get('type') == 'reasoning' else

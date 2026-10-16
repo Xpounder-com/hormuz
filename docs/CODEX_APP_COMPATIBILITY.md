@@ -37,6 +37,10 @@ runtime's inline function interface and reverses tool identities in output:
 - Plain reasoning and completed tool history replay on the pinned destination.
   Opaque encrypted reasoning, undeclared calls and unsupported request forms
   fail closed. Malformed provider frames settle ambiguous work as unknown.
+- Native automatic approval review retains its JSON-schema response format,
+  low-effort reasoning and bounded parent/subagent metadata. The app profile
+  declares structured output for this path. Legacy profiles still reject these
+  additional tags. Review and execution remain owned by Codex.
 - A live web-search declaration discovers the client's existing search MCP.
   The model must subsequently call that client tool to obtain results. There
   is no provider-hosted search implementation; cached-only and restricted-domain
@@ -99,6 +103,12 @@ read-only probe through Codex's normal approval mechanism. `--normal-mcp` uses
 the existing node_repl MCP; `--client-home` targets an explicitly selected home.
 Wire capture is restricted to synthetic isolated homes. Use `--leave-connected`
 only for the requested persistent installation.
+`--capture-shapes` records only request structure and statuses; it can diagnose
+normal-home failures without retaining request prompts or credentials.
+`--task approval` exercises the existing automatic reviewer with a harmless
+print command. `--discover-first` separates MCP discovery and invocation into
+two native turns. MCP acceptance checks the selected server and returned
+result, excluding arguments and the model's final claims.
 
 Native app-server evidence proves the bundled engine's transport and tool
 round trips. Visible app selection and interaction require separate evidence.
@@ -115,3 +125,9 @@ their client settings after disconnect. Earlier diagnostic episodes exposed
 the deferred-tool and expanded-byte defects fixed here; others exposed wrong
 tool choices or claimed results without tool execution. Verification requires
 actual command/MCP completion items, not the model's final text.
+
+The automatic-review follow-up also completed an isolated native episode with
+the saved automatic reviewer enabled: the parent request, JSON-schema review
+subagent and parent continuation all succeeded locally, and the reviewed
+read-only print command exited zero. Bounded parent tags were retained on the
+provider request. No review/approval policy was relaxed.
