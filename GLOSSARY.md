@@ -28,3 +28,9 @@
   responses and usage, kept on their device for review, export and deletion.
 - **Spending estimate:** A calculation from observed usage and configured
   prices; it is distinct from an invoice or provider-confirmed charge.
+- **Gateway credential:** Credential authorizing a coding client as a Hormuz
+  identity, separate from that client's provider or native account credential.
+- **Native ChatGPT credential:** Client-owned account credential for the native
+  ChatGPT backend; its validity and permitted account scope belong to that backend.
+- **Native catalog:** Account-scoped model metadata available through the native
+  Codex path; discovery is separate from permission to execute model requests.

@@ -70,6 +70,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "route_admission",
         "managed_llama",
         "shadow_router",
+        "native_codex_catalog",
     }
 )
 _LISTEN_FIELDS = frozenset({"host", "port"})
