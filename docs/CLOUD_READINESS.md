@@ -31,6 +31,11 @@ overrides and subscription allowance remain unverified. It is never an
 authorization grant. A stored API key is not ChatGPT plan authorization; the
 subscription paths never prescribe adding an API key or a paid API route.
 
+The opt-in [native Codex catalog](NATIVE_CODEX_CATALOG.md) now implements the
+discovery/authentication boundary only. Native profiles are excluded from API
+route counts. Catalog success does not implement inference or qualify a native
+host/account, so the complete native path remains `not_implemented` here.
+
 Hard local-only mode appears as a blocker on all paths, including when the
 selected actor is unknown. Missing or invalid configuration, denied client or
 model policy, a missing or unsupported CLI, desktop qualification and managed

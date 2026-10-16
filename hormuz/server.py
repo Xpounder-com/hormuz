@@ -735,7 +735,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         requested_route = self.server.config.model_routes.get(requested_model)
         if requested_route is not None and self.server.config.upstreams[requested_route.destination_id].authentication == "codex_chatgpt":
             self._send_protocol_error(protocol, "Native Codex inference is not implemented; no alternate billing path was selected.",
-                                      HTTPStatus.FORBIDDEN, code="hormuz_provider_policy_denied")
+                                      HTTPStatus.FORBIDDEN, code="hormuz_policy_denied")
             return
         chat = urlsplit(self.path).path == "/v1/chat/completions"
         if chat and "max_tokens" in request_body and "max_completion_tokens" in request_body:
@@ -909,7 +909,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             client=client, protocol=protocol, output_field=output_field)
         if self.server.destinations.resolve(decision.route).upstream.authentication == "codex_chatgpt":
             self._send_protocol_error(protocol, "Native Codex inference is not implemented; no alternate billing path was selected.",
-                                      HTTPStatus.FORBIDDEN, code="hormuz_provider_policy_denied")
+                                      HTTPStatus.FORBIDDEN, code="hormuz_policy_denied")
             return
         decision = work_gateway.prepare(self, identity, decision, redaction.value,
             client=client, protocol=protocol, output=requested_output,
@@ -1793,7 +1793,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     def _authenticate(self) -> Identity | None:
         if self.headers.get_all("X-Gateway-Key", []) or self.headers.get_all("ChatGPT-Account-ID", []):
             self.close_connection = True
-            self._send_error("hormuz_provider_policy_denied",
+            self._send_error("hormuz_policy_denied",
                 "Native ChatGPT credentials are supported only by the opt-in native catalog; no alternate billing path was selected.",
                 HTTPStatus.FORBIDDEN)
             return None

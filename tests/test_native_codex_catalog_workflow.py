@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import patch
 
@@ -20,22 +21,24 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 from tests import test_execution_destination_workflow as workflow
+from hormuz.contracts import validate_contract_manifest
 
 
 @contextmanager
-def native_backend(body, *, status=200, headers=None):
+def native_backend(body, *, status=200, headers=None, drip=False, certificate_host="chatgpt.com"):
     """A real TLS service standing in for the fixed native backend authority."""
     received = []
+    stopped = threading.Event()
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "chatgpt.com")])
+        subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, certificate_host)])
         now = datetime.now(timezone.utc)
         certificate = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject)
             .public_key(key.public_key()).serial_number(42)
             .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=1))
             .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
-            .add_extension(x509.SubjectAlternativeName([x509.DNSName("chatgpt.com")]), critical=False)
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName(certificate_host)]), critical=False)
             .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False,
                 key_encipherment=True, data_encipherment=False, key_agreement=False,
                 key_cert_sign=True, crl_sign=True, encipher_only=False, decipher_only=False), critical=True)
@@ -62,7 +65,17 @@ def native_backend(body, *, status=200, headers=None):
                 for name, value in (headers or {}).items():
                     self.send_header(name, value)
                 self.end_headers()
-                self.wfile.write(data)
+                try:
+                    if drip:
+                        for byte in data:
+                            if stopped.wait(0.15):
+                                return
+                            self.wfile.write(bytes([byte]))
+                            self.wfile.flush()
+                    else:
+                        self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError, ssl.SSLEOFError):
+                    pass
 
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.load_cert_chain(cert_path, key_path)
@@ -82,6 +95,7 @@ def native_backend(body, *, status=200, headers=None):
                  patch.dict(os.environ, {"SSL_CERT_FILE": str(cert_path)}):
                 yield received
         finally:
+            stopped.set()
             server.shutdown()
             server.server_close()
             thread.join(timeout=2)
@@ -117,7 +131,7 @@ class NativeCodexCatalogWorkflowTests(unittest.TestCase):
                         "X-Api-Key": "UNRELATED_API_KEY_SENTINEL", "Cookie": "unrelated=COOKIE_SENTINEL"})
                 self.assertEqual(result["status"], 200, result)
                 self.assertEqual(result["body"], {"models": [visible]})
-                self.assertEqual(result["headers"].get("x-hormuz-native-catalog-version"), "1")
+                self.assertEqual(result["headers"].get("x-hormuz-contract"), "hormuz.native-codex-catalog;v=1")
                 self.assertEqual(result["headers"].get("cache-control"), "no-store")
                 usage = submit(method="GET", path="/gateway/usage")
                 self.assertEqual(usage["body"]["requests"], 1)
@@ -142,7 +156,7 @@ class NativeCodexCatalogWorkflowTests(unittest.TestCase):
                     with self.subTest(options=options):
                         response = submit(headers=headers, **options)
                         self.assertEqual(response["status"], 403, response)
-                        self.assertEqual(response["body"]["error"]["code"], "hormuz_provider_policy_denied")
+                        self.assertEqual(response["body"]["error"]["code"], "hormuz_policy_denied")
                         self.assertNotIn("SENTINEL", json.dumps(response))
                         self.assertEqual((local_requests, cloud_requests), ([], []))
                 response = submit(headers={"ChatGPT-Account-ID": "fixture-workspace"})
@@ -268,6 +282,154 @@ class NativeCodexCatalogWorkflowTests(unittest.TestCase):
                 readiness = json.loads(preflight.stdout)
                 self.assertEqual(readiness["configuration"]["cloud_routes"], 0)
                 self.assertEqual(readiness["paths"][1]["status"], "not_implemented")
+
+    def test_versioned_catalog_fixture_is_discoverable_through_the_public_manifest(self):
+        fixture = json.loads((Path(__file__).parent / "fixtures/native-codex-catalog-v1.json").read_text())
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend(fixture["response"]):
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                result = submit(method="GET", path=fixture["request"]["path"], absolute_path=True,
+                    headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                             "X-Gateway-Key": "fixture-coding-client-credential"})
+                self.assertEqual(result["status"], 200)
+                self.assertEqual(result["headers"].get("x-hormuz-contract"), fixture["contract"])
+                self.assertEqual(result["body"], fixture["response"])
+                self.assertEqual((local_requests, cloud_requests), ([], []))
+        result = subprocess.run([sys.executable, "-m", "hormuz", "contract", "manifest"],
+                                capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = json.loads(result.stdout)
+        validate_contract_manifest(manifest)
+        entries = [entry for entry in manifest["schemas"] if entry["schema_id"] == "hormuz.native-codex-catalog"]
+        self.assertEqual(entries, [{"schema_id": "hormuz.native-codex-catalog", "schema_version": 1,
+            "delivery": "http-headers", "ownership": "hormuz", "legacy": False, "fields": ["X-Hormuz-Contract"]}])
+
+    def test_ambiguous_or_missing_authentication_never_reaches_the_native_backend(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                cases = {
+                    "missing_gateway": {"X-Gateway-Key": ""},
+                    "wrong_gateway": {"X-Gateway-Key": "wrong-gateway", "X-Api-Key": "fixture-coding-client-credential"},
+                    "duplicate_gateway": {"x-gateway-key": "another-gateway"},
+                    "duplicate_native": {"authorization": "Bearer SECOND_NATIVE_SENTINEL"},
+                    "duplicate_account": {"ChatGPT-Account-ID": "first", "chatgpt-account-id": "second"},
+                    "oversized_account": {"ChatGPT-Account-ID": "x" * 257},
+                    "wrong_scheme": {"Authorization": "Basic NATIVE_CHATGPT_SENTINEL"},
+                    "empty_native": {"Authorization": "Bearer "},
+                    "multiple_tokens": {"Authorization": "Bearer first second"},
+                    "combined_tokens": {"Authorization": "Bearer first,second"},
+                }
+                for case, changed in cases.items():
+                    with self.subTest(case=case):
+                        result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                            headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                                     "X-Gateway-Key": "fixture-coding-client-credential", **changed})
+                        self.assertEqual(result["status"], 401, result)
+                        self.assertNotIn("SENTINEL", json.dumps(result))
+                        self.assertEqual((local_requests, cloud_requests, native_requests), ([], [], []))
+
+    def test_catalog_size_and_slow_body_are_bounded_and_the_next_request_can_recover(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                for case in ("oversized", "slow_body"):
+                    with self.subTest(case=case), native_backend({"models": [{"slug": "fixture-cloud-model",
+                        "description": "x" * (1024 * 1024 if case == "oversized" else 8)}]},
+                        drip=case == "slow_body") as native_requests:
+                        started = time.monotonic()
+                        result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                            headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                                     "X-Gateway-Key": "fixture-coding-client-credential"})
+                        self.assertLess(time.monotonic() - started, 5)
+                        self.assertEqual(result["status"], 502, result)
+                        self.assertEqual(len(native_requests), 1)
+                with native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
+                    result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                        headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                                 "X-Gateway-Key": "fixture-coding-client-credential"})
+                    self.assertEqual(result["status"], 200, result)
+                    self.assertEqual(len(native_requests), 1)
+                self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_native_credentials_are_not_sent_when_tls_does_not_match_the_fixed_authority(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({"models": [{"slug": "fixture-cloud-model"}]},
+                            certificate_host="unrelated.example.invalid") as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                    headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                             "X-Gateway-Key": "fixture-coding-client-credential"})
+                self.assertEqual(result["status"], 502, result)
+                self.assertNotIn("SENTINEL", json.dumps(result))
+                self.assertEqual((local_requests, cloud_requests, native_requests), ([], [], []))
+
+    def test_empty_identity_client_list_uses_the_existing_unrestricted_identity_semantics(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
+            value = self.configuration(local, cloud)
+            value["identities"][0]["allowed_clients"] = []
+            with self.fixture.connected_client(value) as submit:
+                result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                    headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                             "X-Gateway-Key": "fixture-coding-client-credential"})
+                self.assertEqual(result["status"], 200, result)
+                self.assertEqual((len(native_requests), local_requests, cloud_requests), (1, [], []))
+
+    def test_native_catalog_is_disabled_by_default_and_rejects_unrecognized_queries_before_egress(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
+            headers = {"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                       "X-Gateway-Key": "fixture-coding-client-credential"}
+            value = self.configuration(local, cloud)
+            del value["native_codex_catalog"]
+            with self.fixture.connected_client(value) as submit:
+                result = submit(method="GET", path="/backend-api/codex/models", absolute_path=True, headers=headers)
+                self.assertEqual(result["status"], 404)
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                for query in ("base_url=https://unrelated.example.invalid", "client_version=unexpected",
+                              "client_version=0.147.0&client_version=0.160.0", "token=PRIVATE_QUERY_SENTINEL",
+                              "client_version=" + "1" * 129):
+                    with self.subTest(query_kind=query.split("=")[0]):
+                        result = submit(method="GET", path="/backend-api/codex/models?" + query,
+                                        absolute_path=True, headers=headers)
+                        self.assertEqual(result["status"], 400, result)
+                        self.assertNotIn("SENTINEL", json.dumps(result))
+            self.assertEqual((local_requests, cloud_requests, native_requests), ([], [], []))
+
+    def test_read_only_preflight_rejects_unsafe_native_profile_declarations(self):
+        path = self.fixture.root / "gateway.json"
+        cases = ({"base_url": "http://chatgpt.com/backend-api/codex"},
+                 {"base_url": "https://unrelated.example.invalid/backend-api/codex"},
+                 {"base_url": "https://chatgpt.com:443/backend-api/codex"},
+                 {"base_url": "https://chatgpt.com/backend-api/codex?secret=PRIVATE_QUERY_SENTINEL"},
+                 {"protocol": "anthropic"}, {"locality": "local"},
+                 {"api_key_env": "DO_NOT_READ_SENTINEL"}, {"api_key_envelope": "DO_NOT_OPEN_SENTINEL"},
+                 {"allow_response_storage": True}, {"allow_background": True})
+        for changes in (*cases, None):
+            with self.subTest(field=next(iter(changes)) if changes else "non_boolean_opt_in"):
+                value = self.configuration("http://127.0.0.1:1", "https://api.example.invalid/v1")
+                if changes:
+                    value["upstreams"]["native-codex"].update(changes)
+                else:
+                    value["native_codex_catalog"] = "true"
+                path.write_text(json.dumps(value))
+                before = path.read_bytes(), set(self.fixture.root.iterdir())
+                result = subprocess.run([sys.executable, "-m", "hormuz", "--config", str(path), "client",
+                    "cloud-readiness", "codex", "--surface", "desktop", "--client-home",
+                    str(self.fixture.root / "absent-home")], capture_output=True, text=True, timeout=10)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                receipt = json.loads(result.stdout)
+                self.assertEqual(receipt["configuration"]["status"], "invalid", receipt)
+                self.assertNotIn("SENTINEL", result.stdout + result.stderr)
+                self.assertEqual(receipt["effects"], {"settings_changed": False, "credentials_read": False,
+                                                    "provider_requests": 0})
+                self.assertEqual(before, (path.read_bytes(), set(self.fixture.root.iterdir())))
 
 
 if __name__ == "__main__":

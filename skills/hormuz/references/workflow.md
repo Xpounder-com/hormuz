@@ -117,6 +117,12 @@ credentials, actual request eligibility and provider qualification need a
 separately authorized flow. Both ChatGPT plan paths remain `not_implemented`
 and require their own adapter, native consent and account eligibility.
 
+An administrator-selected [native catalog configuration](../../../docs/NATIVE_CODEX_CATALOG.md)
+provides discovery only. Keep that distinction in diagnosis: a catalog response
+does not establish native inference, account eligibility or a supported host.
+Do not read native login caches, generate native provider settings or reuse a
+gateway/API credential as native auth to clear the remaining blockers.
+
 Keep hard local-only policy and existing settings intact. Finish the preflight
 by reporting unresolved blockers and the next action; preflight does not
 authorize connection or billable fallback. For project/profile/launch conflicts,

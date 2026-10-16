@@ -8,7 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 from urllib.request import Request
 
 from .auth import AuthenticationError
-from ._contract_schemas.constants import ERROR_SCHEMA_ID
+from ._contract_schemas.constants import ERROR_SCHEMA_ID, NATIVE_CATALOG_SCHEMA_ID, NATIVE_CATALOG_SCHEMA_VERSION
 from .compaction_formats import strict_json_loads
 from .local_transport import open_local_upstream
 
@@ -53,8 +53,7 @@ def handle_native_catalog(handler):
         authorization = _one(handler.headers, "Authorization")
         known_credentials = (*server.config.identities_by_token, *server.upstream_credentials.values(),
                              server.config.ingress.credential)
-        if (authorization[:7].lower() != "bearer " or not authorization[7:]
-                or any(char.isspace() for char in authorization[7:])
+        if (re.fullmatch(r"(?i:Bearer) [A-Za-z0-9._~+/-]+=*", authorization) is None
                 or any(hmac.compare_digest(authorization[7:].encode(), credential.encode())
                        for credential in known_credentials if credential)):
             raise ValueError("invalid native credential")
@@ -68,10 +67,10 @@ def handle_native_catalog(handler):
     if len(requested_mode) > 1 or requested_mode and requested_mode[0] != "local_only":
         handler._send_error("invalid_request", "The routing mode is unsupported.", HTTPStatus.BAD_REQUEST)
         return
-    if ("codex" not in identity.allowed_clients
+    if (identity.allowed_clients and "codex" not in identity.allowed_clients
             or policy.allowed_clients is not None and "codex" not in policy.allowed_clients
             or server.config.route_admission.mode == "local_only" or requested_mode):
-        handler._send_error("hormuz_provider_policy_denied", "Native cloud discovery is not permitted by the selected policy.",
+        handler._send_error("hormuz_policy_denied", "Native cloud discovery is not permitted by the selected policy.",
                             HTTPStatus.FORBIDDEN)
         return
     allowed = {route.upstream_model for alias, route in server.config.model_routes.items()
@@ -79,7 +78,7 @@ def handle_native_catalog(handler):
                and server.config.upstreams[route.destination_id].authentication == "codex_chatgpt"
                and (policy.allowed_models is None or alias in policy.allowed_models)}
     if not allowed:
-        handler._send_error("hormuz_provider_policy_denied", "No configured cloud model is permitted for native discovery.",
+        handler._send_error("hormuz_policy_denied", "No configured cloud model is permitted for native discovery.",
                             HTTPStatus.FORBIDDEN)
         return
     try:
@@ -125,7 +124,8 @@ def handle_native_catalog(handler):
             seen.add(slug)
             if slug in allowed:
                 models.append(model)
-        handler._send_json(HTTPStatus.OK, {"models": models}, extra_headers={"X-Hormuz-Native-Catalog-Version": "1"})
+        handler._send_json(HTTPStatus.OK, {"models": models},
+                          contract_header_value=f"{NATIVE_CATALOG_SCHEMA_ID};v={NATIVE_CATALOG_SCHEMA_VERSION}")
     except (OSError, http.client.HTTPException, ValueError, RecursionError):
         handler._send_error("gateway_upstream_error", "Native catalog access is unavailable; no alternate billing path was selected.",
                             HTTPStatus.BAD_GATEWAY)
