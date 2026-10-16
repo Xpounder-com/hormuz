@@ -109,6 +109,8 @@ try:
         headers = DuplicateAgent(headers)
     if "local-only" in sys.argv:
         headers["X-Hormuz-Routing-Mode"] = "local_only"
+    if "work-id" in sys.argv:
+        headers["X-Hormuz-Work-Id"] = sys.argv[sys.argv.index("work-id") + 1]
     if "coding-tools" in sys.argv:
         request["tools"] = [{"type":"function","name":"fixture_tool","parameters":{"type":"object"}}]
     if "bound-conversation" in sys.argv:
@@ -131,7 +133,9 @@ try:
     body = json.dumps(request)
     if "numeric-control" in sys.argv:
         body = body[:-1] + ',"temperature":' + sys.argv[sys.argv.index("numeric-control") + 1] + '}'
-    connection.request("GET" if control else "POST", origin.path.rstrip("/") + ("/router/state" if "router-state" in sys.argv else "/work/state" if control else "/responses"),
+    request_path = ("/work/jobs" if "create-work" in sys.argv else "/router/state" if "router-state" in sys.argv
+                    else "/work/state" if control else "/responses")
+    connection.request("GET" if control else "POST", origin.path.rstrip("/") + request_path,
                        None if control else body, headers)
     response = connection.getresponse()
     view.update(status=response.status, body=json.loads(response.read()),
@@ -546,6 +550,19 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 self.assertEqual(second["status"], 200, second)
                 self.assertEqual(second["headers"]["x-hormuz-routing-reason"], "session_affinity")
                 self.assertEqual(second["headers"]["x-hormuz-work-id"], first["headers"]["x-hormuz-work-id"])
+                history_path = self.root / "stateful-task-switch.json"
+                for task in ("Fix the arithmetic function in this Python code.", "Review this code diff."):
+                    with self.subTest(stateful_task_switch=task):
+                        history_path.write_text(json.dumps({"model": "local-code", "max_output_tokens": 8,
+                            "input": [{"role": "assistant", "content": "The previous summary is complete."},
+                                      {"role": "user", "content": task}]}))
+                        denied = self.client("request-file", str(history_path), "coding-tools",
+                                             "bound-conversation", "input-developer-pinned")
+                        self.assertEqual(denied["status"], 503, denied)
+                        self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"] * 3)
+                        works = self.client("work-state")["body"]["works"]
+                        observed = next(work for work in works if work["work_id"] == first["headers"]["x-hormuz-work-id"])
+                        self.assertEqual(observed["task_characteristics"]["task_hint"], "summarization")
                 coding = self.client("code-change", "coding-tools", "bound-conversation", "input-developer-pinned")
                 self.assertEqual(coding["status"], 200, coding)
                 for options in (("missing-client-version",), ("instruction-drift",)):
@@ -558,7 +575,17 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 self.assertEqual(continued["headers"]["x-hormuz-routing-reason"], "session_affinity")
                 self.assertEqual(continued["headers"]["x-hormuz-work-id"], coding["headers"]["x-hormuz-work-id"])
                 self.assertEqual(self.client("code-review")["status"], 503)
-                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"] * 5)
+                declared_path = self.root / "declared-review-work.json"
+                declared_path.write_text(json.dumps({"repository": "example/repository", "task_type": "code_review"}))
+                declared = self.client("create-work", "request-file", str(declared_path))
+                self.assertEqual(declared["status"], 201, declared)
+                declared_id = declared["body"]["work_id"]
+                self.assertEqual(self.client("coding-tools", "work-id", declared_id)["status"], 200)
+                for options in ((), ("input-developer-pinned",)):
+                    with self.subTest(declared_review_controls=options):
+                        denied = self.client("tool-continuation", "coding-tools", "work-id", declared_id, *options)
+                        self.assertEqual(denied["status"], 503, denied)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"] * 6)
                 self.assertEqual(requests, [])
             finally:
                 self.command("disconnect")

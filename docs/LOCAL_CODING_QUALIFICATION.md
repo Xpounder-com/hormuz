@@ -115,6 +115,10 @@ Only an observed noncoding context exempts a continuation from coding checks.
 Declared coding work and unknown contexts remain gated. Changed or unqualified
 coding instruction/tool controls block rather than migrate. Existing
 policy, credential, cancellation, helper and no-replay rules remain authoritative.
+An explicit task in a history-bearing request must still be permitted for the
+route; `code_review` stays unsupported. Moving a noncoding work to coding requires
+a self-contained matching request so its new context can be recorded before any
+coding continuation. Inherited provider state cannot establish that transition.
 
 The bundled Qwen3-4B experiment remains **unknown for automatic coding admission**.
 Its recorded 0/3 original and 0/4 later repairs, including an unevaluable timeout,

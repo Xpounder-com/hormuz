@@ -274,7 +274,13 @@ class RouteAdmission:
         work_headers = handler.headers.get_all("X-Hormuz-Work-Id", [])
         if continuation and (handler.server.work_runtime is None
                              or not (len(work_headers) == 1 or getattr(handler, "_work_id", None))
+                             or not getattr(handler, "_work_context_bound", False)
+                             or not getattr(handler, "_work_pinned_model", None)
                              or handler.path.split("?", 1)[0] == "/v1/messages/count_tokens"):
+            raise RouteAdmissionError("affinity_required", 409)
+        pinned = self.config.model_routes.get(getattr(handler, "_work_pinned_model", None))
+        if (continuation and mode == "local_only" and pinned is not None
+                and self.destinations.resolve(pinned).locality == "cloud"):
             raise RouteAdmissionError("affinity_required", 409)
         from .policy import PolicyEngine
         endpoint = handler.path.split("?", 1)[0]
@@ -288,13 +294,20 @@ class RouteAdmission:
             required.add(capability)
         limit = 0 if endpoint == "/v1/messages/count_tokens" else value.get(output_field)
         hint = request_characteristics(value)["task_hint"]
+        inherited_task = getattr(handler, "_work_task_hint", "unknown")
         handler._route_admission_coding_required = (hint == "code_change"
-            or continuation and getattr(handler, "_work_requires_coding_evidence", True))
+            or continuation and inherited_task == "code_change")
+        # Inherited state cannot establish a new coding context: the work
+        # retains its prior task until a self-contained request is admitted.
+        stateful_coding_switch = (continuation and hint == "code_change"
+            and inherited_task != "code_change")
         engine = PolicyEngine(self.config, handler.server.store,
             policy_runtime=handler.server.policy_engine.policy_runtime)
         candidates = {}
         for alias, qualification in self.qualifications.items():
             route = self.config.model_routes[alias]
+            if stateful_coding_switch:
+                continue
             if route.protocol != protocol or required is None or not required.issubset(route.capabilities):
                 continue
             destination = self.destinations.resolve(route)
@@ -303,7 +316,9 @@ class RouteAdmission:
             if not self._within_envelope(handler, route, qualification, value, output_field):
                 continue
             automatic_tasks = qualification.automatic_task_types(self.coding[alias])
-            if not automatic_tasks or not continuation and hint not in automatic_tasks:
+            task_admitted = hint in automatic_tasks or continuation and hint == "unknown"
+            if (not automatic_tasks or not task_admitted
+                    or continuation and inherited_task not in automatic_tasks):
                 continue
             if handler._route_admission_coding_required and (
                     "code_change" not in automatic_tasks or not self._coding_request_matches(handler, alias, value, client)):
