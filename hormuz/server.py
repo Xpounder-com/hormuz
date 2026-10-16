@@ -19,6 +19,7 @@ from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from . import __version__
+from .codex_llama import CAPABILITY as CODEX_LLAMA_CAPABILITY, CodexLlamaError, CodexLlamaRequest
 from .auth import AuthenticationError, Authenticator
 from .attribution_admission import (
     Admission,
@@ -212,7 +213,7 @@ def _openai_namespace_tools_bounded(tool: Mapping[str, Any]) -> bool:
 
 
 def _provider_input_tokens_bounded(
-    protocol: str, request: Mapping[str, Any], *, text_only: bool = False
+    protocol: str, request: Mapping[str, Any], *, text_only: bool = False, codex_llama: bool = False
 ) -> bool:
     """Recognize request inputs whose billed content is self-contained.
 
@@ -223,6 +224,11 @@ def _provider_input_tokens_bounded(
     inspects content.
     """
 
+    if codex_llama:
+        try:
+            request = CodexLlamaRequest(request).admission_value()
+        except (ValueError, TypeError, RecursionError):
+            return False
     if text_only and not work_gateway.pricing_request_bounded(protocol, request):
         return False
     if protocol == "openai":
@@ -1087,6 +1093,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         request_url = self._upstream_url(selected_upstream.upstream)
         destination = selected_upstream.destinations.resolve(route)
         headers = self._upstream_headers(destination.protocol, destination.credential)
+        codex_adapter = None
+        if (CODEX_LLAMA_CAPABILITY in route.capabilities and destination.locality == 'local'
+                and urlsplit(self.path).path == '/v1/responses'):
+            codex_adapter = CodexLlamaRequest(request_value)
+            body = json.dumps(codex_adapter.value, separators=(',', ':')).encode()
         if selected_upstream.upstream.authentication == "none":
             headers.pop("Authorization", None)
             headers.pop("X-Api-Key", None)
@@ -1365,11 +1376,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     # ledger operations and downstream writes. It is not the
                     # provider's internal GPU execution time.
                     self._work_provider_ms += (time.monotonic_ns() - read_started_ns) / 1_000_000
-                if not chunk:
-                    break
-                if first_body_byte_us is None:
+                provider_eof = not chunk
+                if chunk and first_body_byte_us is None:
                     first_body_byte_us = self._elapsed_us(started_ns)
                 provider_bytes_read += len(chunk)
+                if codex_adapter is not None:
+                    chunk = codex_adapter.feed(chunk, event_stream=is_event_stream, final=provider_eof)
+                if not chunk:
+                    if provider_eof:
+                        break
+                    continue
                 if attempt is not None and time.monotonic() >= refresh_at:
                     self.server.store.refresh_budget_reservation(
                         attempt.reservation_id,
@@ -1390,6 +1406,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     self.connection.settimeout(self.server.route_admission.remaining_timeout(self))
                 self._write_downstream_chunk(chunk)
                 downstream_bytes_sent += len(chunk)
+                if provider_eof:
+                    break
         except (BrokenPipeError, ConnectionResetError):
             downstream_ok = False
         except http.client.IncompleteRead as error:
@@ -1411,7 +1429,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 decision.requested_model,
                 type(error).__name__,
             )
-        except (http.client.HTTPException, TimeoutError, OSError) as error:
+        except (http.client.HTTPException, TimeoutError, OSError, CodexLlamaError) as error:
             downstream_ok = False
             LOGGER.warning(
                 "upstream_stream_failed actor=%s team=%s client=%s protocol=%s requested_model=%s error=%s",
@@ -1432,6 +1450,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             first_body_byte_us=first_body_byte_us,
             provider_bytes_read=provider_bytes_read,
             downstream_bytes_sent=downstream_bytes_sent,
+            body_transformed=codex_adapter is not None,
         )
         parsed_usage = parser.finish_with_finance()
         usage = parsed_usage.usage
@@ -1596,7 +1615,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             reserved_output_tokens = 0
         reserved_input_tokens = len(body)
         input_tokens_bounded = _provider_input_tokens_bounded(
-            protocol, request_value, text_only=self.server.work_runtime is not None
+            protocol, request_value, text_only=self.server.work_runtime is not None,
+            codex_llama=CODEX_LLAMA_CAPABILITY in route.capabilities
         )
         reserved_cost_microusd = route.estimate_reservation_cost_microusd(
             input_tokens=reserved_input_tokens,
@@ -1738,6 +1758,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     def _provider_body(request_value: dict[str, Any], route: ModelRoute) -> bytes:
         routed = dict(request_value)
         routed["model"] = route.upstream_model
+        if CODEX_LLAMA_CAPABILITY in route.capabilities:
+            routed = CodexLlamaRequest(routed).value
         return json.dumps(routed, separators=(",", ":")).encode("utf-8")
 
     @staticmethod
@@ -1760,6 +1782,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         first_body_byte_us: int | None,
         provider_bytes_read: int,
         downstream_bytes_sent: int,
+        body_transformed: bool = False,
     ) -> ProviderAttemptMetrics:
         return ProviderAttemptMetrics(
             provider_status=provider_status,
@@ -1768,6 +1791,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             total_us=cls._elapsed_us(started_ns),
             provider_bytes_read=provider_bytes_read,
             downstream_bytes_sent=downstream_bytes_sent,
+            body_transformed=body_transformed,
         )
 
     def _write_downstream_chunk(self, chunk: bytes) -> None:

@@ -25,6 +25,7 @@ from .local_credentials import LocalCredentialError, read_local_credential
 DEFAULT_PROFILES = {
     "0.147.0": "local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json",
     "0.160.0": "local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json",
+    "0.162.0-alpha.17.2": "local-setup-codex-app-0162-llama-b11617-qwen3-4b-v2.json",
 }
 
 
@@ -156,8 +157,8 @@ def _configuration(path, profile, managed, credential_env, listen_port, *, crede
             "qualification_id": profile["qualification_id"], "model_revision": revision,
             "max_request_bytes": profile["max_request_bytes"], "max_output_tokens": profile["max_output_tokens"],
             "task_types": profile["task_types"]}}},
-        "managed_llama": {"schema_version": 1, **{key: value for key, value in asdict(managed).items()
-                                               if key not in {"port", "alias", "output_tokens"}}},
+        "managed_llama": {"schema_version": managed.schema_version, **{key: value for key, value in asdict(managed).items()
+                                               if key not in {"port", "alias", "output_tokens", "schema_version"}}},
         "ai_work": {"enabled": True, "database": str(state / "work.sqlite3"),
                     "tool_capable_aliases": [profile["model"]] if "tools" in profile["capabilities"] else []},
     }
@@ -229,6 +230,7 @@ def setup_local(lifetime, args):
         model_file=_absolute(args.model_file), model_sha256=profile["model_sha256"],
         startup_timeout_seconds=profile["startup_timeout_seconds"], port=1,
         alias=profile["model"], output_tokens=profile["max_output_tokens"],
+        schema_version=profile["schema_version"],
     )
     try:
         managed.verify()

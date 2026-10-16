@@ -25,7 +25,7 @@ import time
 import tomllib
 from urllib.parse import urlsplit
 
-from .client_versions import SUPPORTED_CODEX_VERSIONS
+from .client_versions import CODEX_VERSION_PATTERN, SUPPORTED_CODEX_VERSIONS
 from .config import GatewayConfig
 from .compaction_formats import strict_json_loads
 from .contracts import (
@@ -70,7 +70,7 @@ def _provider_block(provider, origin, credential_env=None, *, helper=None, gener
     block = ('\n[model_providers.' + provider + ']\nname = "Hormuz"\n'
             + 'base_url = ' + json.dumps(origin + '/v1') + '\n'
             + 'wire_api = "responses"\n')
-    if client_version == "0.160.0":
+    if client_version != "0.147.0":
         block += ('supports_websockets = false\nrequest_max_retries = 0\nstream_max_retries = 0\n'
                   + 'model_catalog_url = ' + json.dumps(origin + '/v1/models') + '\n')
     if helper is None:
@@ -101,7 +101,7 @@ def _parse_record(text):
                 or ("managed_llama" in record and record["managed_llama"] is not True)
                 or not isinstance(record["generation"], str) or not re.fullmatch("[a-f0-9]{32}", record["generation"])
                 or record["phase"] not in {"prepared", "connected", "disconnecting", "restore_required", "disconnected"}
-                or not isinstance(record["client_version"], str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", record["client_version"])
+                or not isinstance(record["client_version"], str) or not re.fullmatch(CODEX_VERSION_PATTERN, record["client_version"])
                 or not isinstance(record["gateway_config"], str) or not Path(record["gateway_config"]).is_absolute()
                 or not isinstance(record["gateway_digest"], str) or not re.fullmatch("[a-f0-9]{64}", record["gateway_digest"])
                 or not isinstance(record["actor_id"], str) or not 1 <= len(record["actor_id"]) <= 256
@@ -503,8 +503,18 @@ class ConnectedClientLifetime:
             record = self._record()
             if (record is None or record.get("credential_helper") is None
                     or record["generation"] != generation or record["phase"] != "connected"
-                    or self._configuration_state(record) != "installed" or _control(record, "status") != "ready"):
+                    or _control(record, "status") != "ready"):
                 raise ConnectedClientError("authentication_unsupported")
+            # App model selections are preferences, not credential authority.
+            # The exact generation-owned provider/auth table must still match.
+            try:
+                document = _document(_read(self.config_path) or "")
+                provider = record["installed"]["model_provider"]
+                expected = _document(record["provider_block"])["model_providers"][provider]
+                if document.get("model_providers", {}).get(provider) != expected:
+                    raise ConnectedClientError("authentication_unsupported")
+            except (ConnectedClientError, OSError, AttributeError):
+                raise ConnectedClientError("authentication_unsupported") from None
             path = Path(record["gateway_config"])
             text = _read(path)
             if text is None or hashlib.sha256(text.encode()).hexdigest() != record["gateway_digest"]:

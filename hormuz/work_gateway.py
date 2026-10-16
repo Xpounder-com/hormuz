@@ -409,7 +409,8 @@ def prepare(handler, identity, decision, request_value, *, client, protocol, out
     quotes = {}
     if output_field:
         from .server import _provider_input_tokens_bounded
-        if _provider_input_tokens_bounded(protocol, request_value, text_only=True):
+        if _provider_input_tokens_bounded(protocol, request_value, text_only=True,
+                codex_llama='codex_llama_v1' in decision.route.capabilities):
             # Serialize the potentially large sanitized request once, then
             # account exactly for JSON model/limit substitutions per alias.
             quote_body = dict(request_value)

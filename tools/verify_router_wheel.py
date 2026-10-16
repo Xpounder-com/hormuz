@@ -19,9 +19,10 @@ def main():
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
         required = {'hormuz/codex-0160-base-instructions.json', 'hormuz/codex-0160-LICENSE.txt',
-                    'hormuz/local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json'}
+                    'hormuz/local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json',
+                    'hormuz/local-setup-codex-app-0162-llama-b11617-qwen3-4b-v2.json'}
         if not required <= set(names):
-            raise SystemExit('Wheel is missing Codex 0.160.0 compatibility assets')
+            raise SystemExit('Wheel is missing Codex CLI/app compatibility assets')
         if any('/migrations/postgresql/' in name or name.startswith(('clients/', 'apps/', 'deploy/'))
                or name.endswith('.css') or name in {'hormuz/postgres.py', 'hormuz/work_billing.py',
                'hormuz/hosted.py', 'hormuz/commands/agent.py'} for name in names):

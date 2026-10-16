@@ -89,7 +89,7 @@ if "idle" in sys.argv:
 try:
     control = "work-state" in sys.argv
     connection.request("GET" if control else "POST", origin.path.rstrip("/") + ("/work/state" if control else "/responses"),
-        None if control else json.dumps({"model": view["model"],
+        None if control else json.dumps({"model": "local-code" if "request-local-model" in sys.argv else view["model"],
                     "input": "Consider this fixture." if "unknown-task" in sys.argv else "Summarize this fixture.",
                     "max_output_tokens": 8}),
         {"Content-Type": "application/json", "Authorization": "Bearer " + credential,
@@ -551,7 +551,7 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             profile_path = Path(options[1])
             original = json.loads(profile_path.read_text())
             for change, code in (
-                ({"schema_version": 2}, "router_configuration_unsupported"),
+                ({"schema_version": 3}, "router_configuration_unsupported"),
                 ({"runtime_sha256": "a" * 63}, "router_configuration_unsupported"),
                 ({"system": "unsupported-platform"}, "platform_unsupported"),
                 ({"client_version": "0.0.0"}, "version_unsupported"),

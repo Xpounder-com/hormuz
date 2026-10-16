@@ -45,7 +45,7 @@ def build_route_admission(raw, routes, upstreams):
         raise ConfigError("route_admission.local_routes is invalid")
     result = []
     fields = {"qualification_id", "model_revision", "max_request_bytes", "max_output_tokens", "task_types"}
-    tasks = {"summarization", "translation", "structured_extraction", "code_change", "code_review"}
+    tasks = {"summarization", "translation", "structured_extraction", "code_change", "code_review", "interactive"}
     for alias, record in local.items():
         route = routes.get(alias)
         if route is None or upstreams[route.destination_id].locality != "local":
@@ -65,6 +65,8 @@ def build_route_admission(raw, routes, upstreams):
         kinds = record["task_types"]
         if type(kinds) is not list or not kinds or any(type(k) is not str or k not in tasks for k in kinds) or len(kinds) != len(set(kinds)):
             raise ConfigError("local qualification task types are invalid")
+        if "interactive" in kinds and "codex_llama_v1" not in route.capabilities:
+            raise ConfigError("interactive qualification requires the Codex local transport")
         result.append((alias, LocalQualification(record["qualification_id"], record["model_revision"],
             record["max_request_bytes"], record["max_output_tokens"], tuple(kinds))))
     return RouteAdmissionConfig(mode, tuple(result))
@@ -72,6 +74,13 @@ def build_route_admission(raw, routes, upstreams):
 
 def _text_envelope(value, protocol, endpoint):
     """Only self-contained text and inline function tools are qualified here."""
+    from .codex_llama import CAPABILITY, CodexLlamaRequest, needs_adapter
+    if protocol == 'openai' and endpoint == '/v1/responses' and needs_adapter(value):
+        try:
+            required = _text_envelope(CodexLlamaRequest(value).admission_value(), protocol, endpoint)
+        except (ValueError, TypeError, RecursionError):
+            return None
+        return required | {CAPABILITY} if required is not None else None
     common = {"model", "stream", "temperature", "top_p", "tools", "tool_choice", "metadata"}
     fields = {
         "/v1/responses": {"input", "instructions", "max_output_tokens", "text", "store", "parallel_tool_calls", "service_tier",
@@ -269,7 +278,9 @@ class RouteAdmission:
                 continue
             if not self._within_envelope(handler, route, qualification, value, output_field):
                 continue
-            if not continuation and hint not in qualification.task_types:
+            explicitly_selected = (alias == decision.requested_model and
+                                   "interactive" in qualification.task_types)
+            if not continuation and hint not in qualification.task_types and not explicitly_selected:
                 continue
             candidate = engine.evaluate(identity=identity, client=client, protocol=protocol,
                 requested_model=alias, requested_output_tokens=limit, snapshot=decision.snapshot)

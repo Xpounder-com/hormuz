@@ -10,9 +10,9 @@ restoration. Read [the shared workflow](references/workflow.md) before running
 commands. These instructions travel with this skill across agent hosts.
 
 1. Identify the requested operation and target coding client. The implemented
-   persistent adapter supports exact **Codex CLI 0.147.0 and 0.160.0** versions.
-   For 0.160.0 execution, use the qualified single-agent HTTP launch profile in
-   the shared workflow. Gemini CLI, Copilot, Claude Code,
+   persistent adapter supports exact **Codex CLI 0.147.0 and 0.160.0**, plus the
+   app engine **0.162.0-alpha.17.2**. For the Codex app, select its bundled
+   executable and follow the app profile in the shared workflow. Gemini CLI, Copilot, Claude Code,
    Cursor and OpenCode can load these instructions and manage that Codex
    connection; their own routing adapters remain unimplemented. For another
    target, report that limit before changing configuration.

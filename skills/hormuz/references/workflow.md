@@ -20,9 +20,10 @@ The skills bundle's version is independent of the router package version. Do not
 substitute an older package with the same name from a package index or mutate
 an unrelated virtual environment.
 
-The persistent adapter supports exact Codex CLI **0.147.0 and 0.160.0** versions;
-the plugin host can have a different version. Detect the selected target instead
-of downgrading a supported 0.160.0 installation. Unknown versions remain blocked.
+The persistent adapter supports exact Codex CLI **0.147.0 and 0.160.0**, plus
+the app engine **0.162.0-alpha.17.2**. Detect the executable used by the target
+surface; on macOS the app may bundle a different engine from the terminal CLI.
+Use that installed executable without downgrading. Unknown versions remain blocked.
 Ask for a target executable only if it cannot be determined safely. Keep
 existing client settings behind the CLI's validation and restoration journal;
 do not bypass its version checks or hand-edit those settings.
@@ -54,7 +55,7 @@ existing verified assets. Check `hormuz client setup --help` first: development
 builds share a version number, so a version string alone cannot establish this
 command. If it is missing, use the reviewed source-install path above and
 check again before proceeding. The bundled profile pins the documented Codex
-0.147.0 or 0.160.0 / llama.cpp b11617 / Qwen3-4B macOS arm64 experiment, selected
+version / llama.cpp b11617 / Qwen3-4B macOS arm64 experiment, selected
 by the actual executable version. Preserve each row's limits and historical
 quality failures. An explicitly selected reviewed qualification
 file may be passed with `--qualification`; use existing evidence and trusted
@@ -155,14 +156,33 @@ follow [override inspection](capabilities.md#diagnose-and-explain). See
    `phase: connected`, `router: ready` and `configuration: installed`. This is
    connection readiness, not proof of local model quality or completed work.
 4. When the user has requested a coding task, submit it through the connected
-   target and inspect its result/status. For 0.160.0, use the qualified launch
-   profile below. Otherwise report connection readiness
+   target and inspect its result/status. Use the app profile below for
+   `codex_llama_v1`; the legacy 0.160.0 row has its own launch profile.
+   Otherwise report connection readiness
    and leave task execution to the user's coding client. Project overrides,
    desktop engines and unrelated tools may have different routing scope.
 
-### Codex 0.160.0 launch profile
+### Codex app profile
 
-The local llama.cpp qualification covers inline function tools over HTTP.
+Use shared setup with the app's bundled executable and the version-2 app
+qualification. Its `codex_llama_v1` transport preserves plugins, MCP discovery,
+custom tools and reasoning. Launch the app normally, select the connected
+local model, and keep existing feature flags, effort, sandbox and approvals.
+The app may save a new default model; the owned provider's auth helper still
+works when that provider is selected for a thread. Inspect public work receipts
+for the actual destination and continuation outcome.
+
+The app profile permits explicit interactive model selection. It does not
+qualify automatic redirection of arbitrary cloud requests or model coding
+quality. Search tools execute in the client through its existing MCP tools;
+Hormuz keeps local-only model inference. Read
+[app compatibility](../../../docs/CODEX_APP_COMPATIBILITY.md) for exact bounds,
+verification and rollback. App-server verification and visible app verification
+are separate evidence; report which one completed.
+
+### Legacy Codex 0.160.0 launch profile
+
+The version-1 local llama.cpp qualification covers inline function tools over HTTP.
 Launch the selected target with `-c agents.enabled=false --disable multi_agent_v2
 -c 'model_reasoning_summary="none"' -c 'model_reasoning_effort="none"'`, keeping the user's requested command,
 project and sandbox. For example:

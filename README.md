@@ -100,7 +100,9 @@ The skill checks the installed router, client version and route qualification
 before using shared setup. Plugin installation installs instructions; the
 router runtime and a qualified local model are separate prerequisites. The
 implemented persistent connection supports Codex CLI 0.147.0 and the
-[0.160.0 single-agent HTTP profile](docs/CODEX_0160.md). Other agents can
+[0.160.0 single-agent HTTP profile](docs/CODEX_0160.md), plus the
+[Codex app engine 0.162.0-alpha.17.2](docs/CODEX_APP_COMPATIBILITY.md) with
+plugins, MCP discovery and reasoning enabled. Other agents can
 use the skill to manage that connection; their own inference-routing adapters
 are not implemented. See [installation, updates, removal and compatibility](docs/AGENT_INSTALLATION.md).
 

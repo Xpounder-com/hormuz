@@ -62,6 +62,7 @@ from ._contract_schemas.connected_client import (
 )
 from ._contract_schemas.cloud_readiness import FIELDS as CLOUD_READINESS_FIELDS, validate_readiness as _validate_cloud_readiness
 from ._contract_schemas.local_setup import (validate_profile as _validate_local_setup_profile,
+    validate_profile_v2 as _validate_local_setup_profile_v2,
     validate_setup as _validate_local_setup, validate_setup_v2 as _validate_local_setup_v2,
     validate_setup_v3 as _validate_local_setup_v3)
 from ._contract_schemas.local_acquisition import (CATALOG_FIELDS as ACQUISITION_CATALOG_FIELDS,
@@ -533,6 +534,10 @@ def contract_manifest() -> dict[str, object]:
                 ["schema_id", "schema_version", "qualification_id", "client_version", "system", "machine",
                  "runtime_sha256", "model_sha256", "model", "capabilities", "max_request_bytes",
                  "max_output_tokens", "task_types", "upstream_timeout_seconds", "startup_timeout_seconds"]),
+            _manifest_schema(LOCAL_SETUP_PROFILE_SCHEMA_ID, 2, "durable-evidence", "hormuz",
+                ["schema_id", "schema_version", "qualification_id", "client_version", "system", "machine",
+                 "runtime_sha256", "model_sha256", "model", "capabilities", "max_request_bytes",
+                 "max_output_tokens", "task_types", "upstream_timeout_seconds", "startup_timeout_seconds"]),
         ],
         "policy_action_semantics": {
             "allowed": "The requested route was allowed without a route substitution or output cap.",
@@ -580,6 +585,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         ("hormuz.ai-work-attempt-history", 1): _validate_attempt_history,
         ("hormuz.ai-work-attempt-history", 2): _validate_attempt_history,
         (LOCAL_SETUP_PROFILE_SCHEMA_ID, 1): _validate_local_setup_profile,
+        (LOCAL_SETUP_PROFILE_SCHEMA_ID, 2): _validate_local_setup_profile_v2,
         (CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_STATUS_SCHEMA_VERSION): _validate_connected_client_status,
         (CONNECTED_CLIENT_PREVIEW_SCHEMA_ID, CONNECTED_CLIENT_PREVIEW_SCHEMA_VERSION): _validate_connected_client_preview,
         (CONNECTED_CLIENT_STATUS_SCHEMA_ID, 2): _validate_connected_client_status_v2,
