@@ -448,6 +448,8 @@ class RouterClient:
                             event = strict_json_loads(event_data.decode())
                             if type(event) is not dict:
                                 raise BenchmarkError("benchmark_stream_invalid")
+                            if event.get("type") in ("error", "response.error", "response.failed", "response.incomplete"):
+                                raise BenchmarkError("benchmark_stream_invalid")
                             if event.get("type") == "response.output_text.delta" and event.get("delta") and ttft_ms is None:
                                 ttft_ms = elapsed
                             if event.get("type") == "response.completed":
@@ -632,7 +634,8 @@ def run_benchmark(args):
                             or headers.get("x-hormuz-requested-model") != route.alias
                             or headers.get("x-hormuz-routed-model") != route.upstream_model):
                         error = "execution_mismatch"
-                    elif type(value) is not dict or value.get("status") != "completed":
+                    elif (type(value) is not dict or value.get("status") != "completed"
+                            or value.get("error") is not None):
                         error = "incomplete_response"
                 except (OSError, http.client.HTTPException, ValueError, RecursionError) as failure:
                     client.close()

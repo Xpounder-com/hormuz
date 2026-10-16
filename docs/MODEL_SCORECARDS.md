@@ -118,6 +118,8 @@ complete execution evidence, sufficient held-out coverage, the minimum task
 success rate, and any named-check, p95 latency or mean-cost limits. Missing a
 required measurement fails that target. The objective is `quality`, `latency`,
 or `cost`; cost selection requires an observed cost estimate.
+Replies containing provider errors and streams with explicit failure events
+remain failed evidence, even when they also announce completion.
 
 Requests run sequentially over one reusable HTTP client: at most eight selected
 models, 32 cases, three repeats, and 128 planned requests. Each output is bounded

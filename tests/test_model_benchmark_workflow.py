@@ -72,6 +72,18 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
             self.assertEqual((metrics["attempts"], metrics["completed"], metrics["passed"],
                               metrics["task_success_rate"]), (2, 2, 1, 0.5))
 
+    def test_a_completed_reply_with_a_provider_error_cannot_meet_a_quality_target(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7", response_fields={"error": {"code": "provider_failure"}}) as (endpoint, _):
+            with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
+                report = self.run_benchmark("local-code", suite=suite)
+        model = report["models"][0]
+        self.assertEqual((model["metrics"]["completed"], model["metrics"]["passed"],
+                          model["workloads"][0]["target_met"], model["observations"][0]["error"]),
+                         (0, 0, False, "incomplete_response"))
+
     def test_saved_scorecard_can_be_reviewed_offline_without_retaining_task_text(self):
         with workflow.provider("7") as (endpoint, _):
             with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
@@ -170,6 +182,22 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         for observation in report["models"][0]["observations"]:
             self.assertLessEqual(observation["first_byte_ms"], observation["ttft_ms"])
             self.assertLessEqual(observation["ttft_ms"], observation["latency_ms"])
+
+    def test_stream_failure_after_a_completed_event_cannot_qualify_the_model(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["cases"][0]["request"]["stream"] = True
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7", event_stream=True, text_deltas=("7",),
+                               trailing_events=({"type": "response.failed"},)) as (endpoint, _):
+            value = self.fixture.admission_configuration(endpoint, endpoint)
+            value["model_routes"]["local-code"]["capabilities"].append("streaming")
+            with self.fixture.connected_client(value):
+                report = self.run_benchmark("local-code", suite=suite)
+        model = report["models"][0]
+        self.assertEqual((model["metrics"]["completed"], model["metrics"]["passed"],
+                          model["workloads"][0]["target_met"], model["observations"][0]["error"]),
+                         (0, 0, False, "benchmark_stream_invalid"))
 
     def test_repeats_do_not_inflate_held_out_coverage_or_hide_unmet_workload_targets(self):
         suite = self.suite()

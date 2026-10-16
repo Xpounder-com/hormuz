@@ -76,7 +76,7 @@ finally:
 
 
 @contextmanager
-def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None, text_deltas=()):
+def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None, text_deltas=(), trailing_events=()):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -110,7 +110,7 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                 tool = {"type": "function_call", "call_id": "fixture-call", "name": "fixture_tool", "arguments": "{}"}
                 events = [{"type": "response.output_item.done", "item": tool},
                           *({"type": "response.output_text.delta", "delta": delta} for delta in text_deltas),
-                          {"type": "response.completed", "response": result}]
+                          {"type": "response.completed", "response": result}, *trailing_events]
                 data = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
             if backpressure_first and len(received) == 1:
                 data = b"data: " + b" " * (16 * 1024 * 1024) + b"\n\n" + data
