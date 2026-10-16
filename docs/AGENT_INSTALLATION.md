@@ -5,46 +5,47 @@ commands. All packages expose the same [Hormuz skill](../skills/hormuz/SKILL.md)
 and [shared workflow](../skills/hormuz/references/workflow.md). They contain no
 MCP server, lifecycle hook, background installer or separate agent loop.
 
-## Preview this branch
+## Choose a source revision
 
-Until [PR #527](https://github.com/Xpounder-com/hormuz/pull/527) lands, choose one
-of these installs. They select the branch containing the manifests, rather than
-the default branch where this package is not yet available.
+The examples below select `main` explicitly. For a preview, replace `main`
+with a reviewed branch or tag in the same repository. Use a fresh profile
+when testing a preview so an active installation is preserved.
 
 Codex (CLI `plugin add` checked on 0.160.0):
 
 ```sh
-codex plugin marketplace add Xpounder-com/hormuz --ref mehrdad/router-scope-cleanup-20261014
+codex plugin marketplace add mehrdadxzaker/hormuz --ref main
 codex plugin add hormuz@hormuz
 ```
 
 Gemini CLI:
 
 ```sh
-gemini extensions install https://github.com/Xpounder-com/hormuz --ref mehrdad/router-scope-cleanup-20261014
+gemini extensions install https://github.com/mehrdadxzaker/hormuz --ref main
 ```
 
 GitHub Copilot CLI:
 
 ```sh
-copilot plugin marketplace add 'Xpounder-com/hormuz#mehrdad/router-scope-cleanup-20261014'
+copilot plugin marketplace add 'mehrdadxzaker/hormuz#main'
 copilot plugin install hormuz@hormuz
 ```
 
 Claude Code (or replace `claude plugin` with `/plugin` inside a session):
 
 ```sh
-claude plugin marketplace add 'Xpounder-com/hormuz#mehrdad/router-scope-cleanup-20261014'
+claude plugin marketplace add 'mehrdadxzaker/hormuz#main'
 claude plugin install hormuz@hormuz
 ```
 
 For Cursor, OpenCode or another agent supported by the open Agent Skills
-installer, clone the preview into a new directory, then install the skill from
-that local source. Choose an unused directory name if `hormuz-preview` exists:
+installer, clone the selected revision into a new directory, then install the
+skill from that local source. Choose an unused directory name if
+`hormuz-preview` exists:
 
 ```sh
-git clone --depth 1 --single-branch --branch mehrdad/router-scope-cleanup-20261014 \
-  https://github.com/Xpounder-com/hormuz.git hormuz-preview
+git clone --depth 1 --single-branch --branch main \
+  https://github.com/mehrdadxzaker/hormuz.git hormuz-preview
 npx skills add ./hormuz-preview --skill hormuz --agent cursor
 ```
 
@@ -102,7 +103,7 @@ before uninstalling. Keep newer user edits and report retained setting names.
 points Codex at the repository root. `.claude-plugin/` supplies Claude's manifest
 and the catalog also understood by Copilot CLI. `gemini-extension.json` makes
 the root installable by Gemini. All discover `skills/hormuz/`; no vendor copy
-of the workflow is maintained. Skill bundle version `0.1.0` is independent of
+of the workflow is maintained. Skill bundle version `0.2.1` is independent of
 the Python router's development version.
 
 Run `python tools/verify_router_scope.py` for offline identity, path, content
