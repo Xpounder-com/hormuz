@@ -513,6 +513,58 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             finally:
                 self.command("disconnect")
 
+    def test_mixed_coding_route_preserves_noncoding_profiles_and_checks_coding_continuations(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3"),
+                                "tool_capable_aliases": ["local-code"]}
+            value["model_routes"]["local-code"]["capabilities"].extend(["tools", "codex_http"])
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification["task_types"] = ["summarization", "code_change", "code_review"]
+            evidence = self.coding_evidence(value)
+            controls = {"store": False, "service_tier": "default", "tools": [
+                {"type": "function", "name": "fixture_tool", "parameters": {"type": "object"}}],
+                "input_instructions": [{"position": 0, "message": {"role": "developer", "content": "Pinned agent instructions."}}]}
+            evidence["plan"]["subject"]["request_profile_sha256"] = hashlib.sha256(json.dumps(
+                controls, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+            qualification["coding_evidence"] = evidence
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                state = self.client("router-state")["body"]["routes"][0]
+                self.assertEqual(state["coding_readiness"], "qualified")
+                self.assertEqual(set(state["automatic_task_types"]), {"summarization", "code_change"})
+                summary = self.client("missing-client-version", "instruction-drift")
+                self.assertEqual(summary["status"], 200, summary)
+                first = self.client("coding-tools", "bound-conversation")
+                self.assertEqual(first["status"], 200, first)
+                self.assertEqual(first["body"]["output"][0]["type"], "function_call")
+                second = self.client("tool-continuation", "coding-tools", "bound-conversation")
+                self.assertEqual(second["status"], 200, second)
+                self.assertEqual(second["headers"]["x-hormuz-routing-reason"], "session_affinity")
+                self.assertEqual(second["headers"]["x-hormuz-work-id"], first["headers"]["x-hormuz-work-id"])
+                coding = self.client("code-change", "coding-tools", "bound-conversation", "input-developer-pinned")
+                self.assertEqual(coding["status"], 200, coding)
+                for options in (("missing-client-version",), ("instruction-drift",)):
+                    with self.subTest(coding_drift=options):
+                        denied = self.client("tool-continuation", "coding-tools", "bound-conversation",
+                                             "input-developer-pinned", *options)
+                        self.assertEqual(denied["status"], 503, denied)
+                continued = self.client("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned")
+                self.assertEqual(continued["status"], 200, continued)
+                self.assertEqual(continued["headers"]["x-hormuz-routing-reason"], "session_affinity")
+                self.assertEqual(continued["headers"]["x-hormuz-work-id"], coding["headers"]["x-hormuz-work-id"])
+                self.assertEqual(self.client("code-review")["status"], 503)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"] * 5)
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+
     def test_unsuccessful_or_incomplete_coding_campaigns_never_admit_local_inference(self):
         with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
             value, port, engine = self.managed_configuration(cloud)

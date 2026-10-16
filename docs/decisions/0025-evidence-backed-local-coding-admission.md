@@ -5,6 +5,8 @@ native repairs. Require a pinned, predeclared campaign with actual edits,
 independent checks and normal completion before fresh automatic coding admission;
 keep health and shadow advice observational. Explicit declarations remain useful
 for noncoding work and experiments, but cannot silently become coding evidence.
+Coding receipts gate coding requests and their continuations; mixed routes keep
+their declared noncoding envelopes, including observed noncoding continuations.
 
 The first criteria cover bounded autonomous repairs, with development/held-out
 separation and no qualified code review. This deliberately trades local coverage

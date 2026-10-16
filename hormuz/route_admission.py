@@ -288,6 +288,8 @@ class RouteAdmission:
             required.add(capability)
         limit = 0 if endpoint == "/v1/messages/count_tokens" else value.get(output_field)
         hint = request_characteristics(value)["task_hint"]
+        handler._route_admission_coding_required = (hint == "code_change"
+            or continuation and getattr(handler, "_work_requires_coding_evidence", True))
         engine = PolicyEngine(self.config, handler.server.store,
             policy_runtime=handler.server.policy_engine.policy_runtime)
         candidates = {}
@@ -303,7 +305,8 @@ class RouteAdmission:
             automatic_tasks = qualification.automatic_task_types(self.coding[alias])
             if not automatic_tasks or not continuation and hint not in automatic_tasks:
                 continue
-            if "code_change" in automatic_tasks and not self._coding_request_matches(handler, alias, value, client):
+            if handler._route_admission_coding_required and (
+                    "code_change" not in automatic_tasks or not self._coding_request_matches(handler, alias, value, client)):
                 continue
             candidate = engine.evaluate(identity=identity, client=client, protocol=protocol,
                 requested_model=alias, requested_output_tokens=limit, snapshot=decision.snapshot)
@@ -361,8 +364,9 @@ class RouteAdmission:
         if destination.locality == "local":
             qualification = self.qualifications.get(decision.resolved_alias)
             if (not self._within_envelope(handler, decision.route, qualification, value, output_field)
-                    or "code_change" in qualification.automatic_task_types(self.coding[decision.resolved_alias])
-                    and not self._coding_request_matches(handler, decision.resolved_alias, value, client)
+                    or handler._route_admission_coding_required and (
+                        "code_change" not in qualification.automatic_task_types(self.coding[decision.resolved_alias])
+                        or not self._coding_request_matches(handler, decision.resolved_alias, value, client))
                     or not self._ready(decision.route)):
                 raise RouteAdmissionError("local_route_unavailable", 503)
         self.receipt(handler, decision.route)

@@ -314,6 +314,7 @@ def identify(handler, identity, request_value, *, client, protocol, account_usag
     handler._work_id = None
     handler._work_route = None
     handler._work_conversation = None
+    handler._work_requires_coding_evidence = True
     runtime = handler.server.work_runtime
     headers = handler.headers.get_all(WORK_HEADER, [])
     if len(headers) > 1 or headers and (not headers[0] or len(headers[0]) > 128):
@@ -363,6 +364,11 @@ def identify(handler, identity, request_value, *, client, protocol, account_usag
                 handler._work_conversation = threads[0]
     if work is not None:
         handler._work_id = work["work_id"]
+        # Only an observed noncoding context can exempt a continuation from
+        # coding checks. A declared coding job or unknown context stays gated.
+        handler._work_requires_coding_evidence = (work["task_type"] == "code_change"
+            or work["task_characteristics"].get("task_hint") not in {
+                "summarization", "translation", "structured_extraction"})
 
 
 def prepare(handler, identity, decision, request_value, *, client, protocol, output, output_field=None, account_usage):

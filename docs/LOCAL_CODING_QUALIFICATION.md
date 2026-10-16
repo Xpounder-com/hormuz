@@ -101,16 +101,19 @@ explicit policy-permitted cloud baseline in `auto`; a local baseline or
 `local_only` blocks with zero cloud requests. Shadow advice cannot add a
 candidate, qualify a model, relax privacy, or move a conversation.
 
-A passing coding record pins the instruction/tool profile for all automatic
-requests on that alias. Use a separate noncoding declaration for a different
-instruction/tool envelope. Standard-tier and `store:false` defaults are normalized
+A passing coding record pins the instruction/tool profile for `code_change`
+requests and their coding continuations. On the same route, declared noncoding
+tasks retain their existing bounded task/capability envelope without matching the
+coding receipt. Standard-tier and `store:false` defaults are normalized
 before hashing, consistently at selection and final dispatch. Any change to the
 managed inference flags invalidates `managed-llama.v1` evidence and requires a new
 runtime-profile identifier and campaign.
 
 Successful continuations retain the admitted model/destination generation and
-request envelope. They do not infer a new task from tool output. Changed or
-unqualified instruction/tool controls block rather than migrate. Existing
+the work's observed task context; they do not infer a new task from tool output.
+Only an observed noncoding context exempts a continuation from coding checks.
+Declared coding work and unknown contexts remain gated. Changed or unqualified
+coding instruction/tool controls block rather than migrate. Existing
 policy, credential, cancellation, helper and no-replay rules remain authoritative.
 
 The bundled Qwen3-4B experiment remains **unknown for automatic coding admission**.
