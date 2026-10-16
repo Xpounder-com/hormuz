@@ -81,6 +81,10 @@ no child processes, closes its connection on exit and is always reaped. On a
 deadline, cleanup allows 0.2 seconds after termination before killing the owned
 worker, then at most one second for reaping. No resolver thread survives a
 timeout. The server admits at most eight native requests/workers at once.
+The outbound slot is released before writing the response. Native responses
+close their client connection and use a separate three-second socket write
+timeout; a stalled reader cannot retain a slot or delay shutdown indefinitely.
+Partial writes close the connection without attempting another response.
 It reads at most 1 MiB plus an overflow byte and accepts at most
 256 unique nonempty model slugs. A strict JSON
 `models` array is required; malformed/duplicate records fail. Allowed model

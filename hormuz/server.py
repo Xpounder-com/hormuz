@@ -529,10 +529,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._attribution_result = None
         path = urlsplit(self.path).path
         if path == CATALOG_PATH:
+            self.close_connection = True
+            self.connection.settimeout(3)
             try:
                 handle_native_catalog(self)
             except _STORAGE_FAILURES as error:
                 self._send_storage_failure(None, error)
+            except OSError:
+                # A stalled/disconnected native reader cannot retain a request
+                # thread or trigger a second response after partial output.
+                pass
             return
         if path == "/v1/router/state":
             identity = self._authenticate()

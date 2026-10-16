@@ -37,6 +37,9 @@ DNS/trust stores and the coding-client executable.
   Close connections and pipes;
   no redirects, environment proxies, retries or alternate billing path. Return
   content-free errors; preserve native 401/403/429 status and safe Retry-After.
+- Release upstream capacity before downstream output. Bound native response
+  writes to three seconds and close the client connection, including when the
+  reader stalls. Do not attempt another response after partial output.
 - Native intent on generic endpoints or selecting a native profile for
   inference must fail before provider execution. Exclude native profiles from
   generic model discovery and API-key readiness counts. Catalog requests do

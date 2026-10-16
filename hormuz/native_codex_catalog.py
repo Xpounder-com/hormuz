@@ -91,31 +91,31 @@ def handle_native_catalog(handler):
         return
     try:
         response = fetch_native_catalog(authorization=authorization, account=account, query=urlencode(fields))
-        if response.status != 200:
-            status = response.status if response.status in {401, 403, 429} else HTTPStatus.BAD_GATEWAY
-            handler._send_contract_json(status, ERROR_SCHEMA_ID,
-                {"error": {"code": "gateway_upstream_error", "message": "Native catalog access is unavailable; no alternate billing path was selected."}},
-                extra_headers=_retry_after(response.retry_after) if status == 429 else None)
-            return
-        data = response.body
-        value = strict_json_loads(data.decode("utf-8"))
-        if (type(value) is not dict or type(value.get("models")) is not list
-                or len(value["models"]) > 256):
-            raise ValueError()
-        seen = set()
-        models = []
-        for model in value["models"]:
-            slug = model.get("slug") if type(model) is dict else None
-            if (type(slug) is not str or not 1 <= len(slug) <= 256
-                    or any(ord(char) <= 32 or ord(char) == 127 for char in slug) or slug in seen):
+        status = response.status if response.status in {200, 401, 403, 429} else HTTPStatus.BAD_GATEWAY
+        retry_headers = _retry_after(response.retry_after) if status == 429 else None
+        if status == 200:
+            value = strict_json_loads(response.body.decode("utf-8"))
+            if (type(value) is not dict or type(value.get("models")) is not list
+                    or len(value["models"]) > 256):
                 raise ValueError()
-            seen.add(slug)
-            if slug in allowed:
-                models.append(model)
-        handler._send_json(HTTPStatus.OK, {"models": models},
-                          contract_header_value=f"{NATIVE_CATALOG_SCHEMA_ID};v={NATIVE_CATALOG_SCHEMA_VERSION}")
+            seen = set()
+            models = []
+            for model in value["models"]:
+                slug = model.get("slug") if type(model) is dict else None
+                if (type(slug) is not str or not 1 <= len(slug) <= 256
+                        or any(ord(char) <= 32 or ord(char) == 127 for char in slug) or slug in seen):
+                    raise ValueError()
+                seen.add(slug)
+                if slug in allowed:
+                    models.append(model)
     except (OSError, http.client.HTTPException, ValueError, RecursionError):
-        handler._send_error("gateway_upstream_error", "Native catalog access is unavailable; no alternate billing path was selected.",
-                            HTTPStatus.BAD_GATEWAY)
+        status, retry_headers = HTTPStatus.BAD_GATEWAY, None
     finally:
         server.native_catalog_slots.release()
+    if status == 200:
+        handler._send_json(HTTPStatus.OK, {"models": models},
+                          contract_header_value=f"{NATIVE_CATALOG_SCHEMA_ID};v={NATIVE_CATALOG_SCHEMA_VERSION}")
+    else:
+        handler._send_contract_json(status, ERROR_SCHEMA_ID,
+            {"error": {"code": "gateway_upstream_error", "message": "Native catalog access is unavailable; no alternate billing path was selected."}},
+            extra_headers=retry_headers)
