@@ -13,11 +13,11 @@
       "onboardingSkill": "./skills/hormuz/SKILL.md",
       "interface": {
         "displayName": "Hormuz",
-        "shortDescription": "Manage your local model router",
+        "shortDescription": "Choose local models in your chat",
         "developerName": "Xpounder-com",
         "category": "Developer Tools",
         "defaultPrompt": [
-          "Use Hormuz to set up local-only routing for Codex."
+          "Use Hormuz in this chat. Let me choose the configured router or a qualified local model."
         ]
       }
     }

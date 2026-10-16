@@ -65,6 +65,36 @@ default model without breaking the owned provider's command-backed credential;
 that helper still requires the exact owned provider/auth table and generation.
 Provider edits block authentication. Disconnect preserves newer user edits.
 
+## Desktop model selection and provider binding
+
+Normal-app activation of the [app-server adapter experiment](CODEX_APP_BRIDGE.md)
+is disabled after a reported organization-policy startup failure. Use the
+[explicit Hormuz chat workflow](HORMUZ_CHAT.md), which leaves native startup,
+authentication and model selection intact. The following describes the stock
+app's provider-binding limits, not a verified combined desktop picker.
+
+The installed app engine binds one provider when a thread starts. Its
+`model/list` response carries model names and visibility, without a per-model
+provider; `turn/start` can change the model but has no provider override.
+Selecting Qwen in an existing OpenAI-backed thread therefore sends Qwen to the
+ChatGPT provider and returns `The 'Qwen3-4B-Q4_K_M' model is not supported when
+using Codex with a ChatGPT account.` The model label alone cannot select Hormuz.
+
+For local routing, require an active shared connection, reload the app's
+configuration and create a new chat using the connected provider. Keep existing
+ChatGPT chats on their original provider. The local catalog advertises Qwen as
+`visibility: list` at priority zero, and the native smoke test checks that it
+appears in `model/list` with `includeHidden: false`. That establishes normal
+catalog visibility, not its exact placement in the desktop menu.
+
+The observed desktop picker changes the model and effort, leaving the thread's
+provider unchanged. Mixing usable ChatGPT-plan models and Hormuz local models
+in one picker requires the app to retain a provider identity for each model and
+select that provider when starting a chat. A plugin or a catalog-only change
+cannot supply that missing app behavior. Report this UI requirement separately
+from backend routing. Adding OpenAI model names to a local-only catalog would
+not provide ChatGPT-plan inference and is outside this profile.
+
 ## Durable compatibility and migration
 
 Version-1 setup and managed profiles retain their original 64 KiB/512-token
@@ -107,6 +137,10 @@ a supplied script or an MCP probe, inspects public local work attempts, and
 cleans up its owned processes and settings. It grants only the exact requested
 read-only probe through Codex's normal approval mechanism. `--normal-mcp` uses
 the existing node_repl MCP; `--client-home` targets an explicitly selected home.
+Before inference it checks the effective default provider and the visible
+native model list. Thread creation inherits that provider without a
+`modelProvider` override, so a test-only provider selection cannot conceal a
+broken default connection.
 Wire capture is restricted to synthetic isolated homes. Use `--leave-connected`
 only for the requested persistent installation.
 `--capture-shapes` records only request structure and statuses; it can diagnose
@@ -115,6 +149,10 @@ normal-home failures without retaining request prompts or credentials.
 print command. `--discover-first` separates MCP discovery and invocation into
 two native turns. MCP acceptance checks the selected server and returned
 result, excluding arguments and the model's final claims.
+`--task calculation` exercises the reported unsupported-model failure with
+the exact `APP_LOCAL_OK: 7` answer, one successful provider attempt, reasoning
+and no tool execution. It uses the connected default provider and visible
+model list checks above.
 
 Native app-server evidence proves the bundled engine's transport and tool
 round trips. Visible app selection and interaction require separate evidence.

@@ -30,6 +30,7 @@ LOCAL_SETUP_SCHEMA_ID = "hormuz.local-setup"
 LOCAL_SETUP_PROFILE_SCHEMA_ID = "hormuz.local-setup-profile"
 
 CONNECTED_CLIENT_ERROR_ACTIONS = {
+    "connected_client_app_activation_disabled": "keep_native_app_and_use_isolated_test",
     "connected_client_version_unsupported": "use_pinned_client_or_disconnect",
     "connected_client_recovery_required": "disconnect_then_connect",
     "connected_client_setup_changed": "disconnect_then_connect",
@@ -203,6 +204,10 @@ PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restrict
                               *ROUTE_ADMISSION_ERROR_CODES, *CONNECTED_CLIENT_ERROR_ACTIONS})
 
 _CURRENT_SCHEMA_VERSIONS = {
+    "hormuz.chat-task": 1,
+    "hormuz.chat-models": 1,
+    "hormuz.chat-error": 1,
+    "hormuz.codex-app-bridge-install": 1,
     "hormuz.cloud-readiness": 1,
     LOCAL_SETUP_SCHEMA_ID: 1,
     LOCAL_SETUP_PROFILE_SCHEMA_ID: 2,

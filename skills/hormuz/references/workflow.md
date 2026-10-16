@@ -164,21 +164,14 @@ follow [override inspection](capabilities.md#diagnose-and-explain). See
 
 ### Codex app profile
 
-Use shared setup with the app's bundled executable and the version-2 app
-qualification. Its `codex_llama_v1` transport preserves plugins, MCP discovery,
-custom tools and reasoning. Launch the app normally, select the connected
-local model, and keep existing feature flags, effort, sandbox and approvals.
-The app may save a new default model; the owned provider's auth helper still
-works when that provider is selected for a thread. Inspect public work receipts
-for the actual destination and continuation outcome.
-
-The app profile permits explicit interactive model selection. It does not
-qualify automatic redirection of arbitrary cloud requests or model coding
-quality. Search tools execute in the client through its existing MCP tools;
-Hormuz keeps local-only model inference. Read
-[app compatibility](../../../docs/CODEX_APP_COMPATIBILITY.md) for exact bounds,
-verification and rollback. App-server verification and visible app verification
-are separate evidence; report which one completed.
+Use [the explicit chat workflow](../../../docs/HORMUZ_CHAT.md): one Hormuz
+entry, with a configured router or local model selected inside the chat.
+The native host keeps its model, account, plugins, tools and reasoning.
+Use a separate control home for Hormuz's router. Normal-app startup bridge
+activation is disabled after a reported organization-policy startup failure.
+A passing app-server test does not qualify app startup or the visible picker.
+See [the retired adapter experiment](../../../docs/CODEX_APP_BRIDGE.md) for
+recovery and isolated regression coverage.
 
 ### Legacy Codex 0.160.0 launch profile
 
@@ -212,6 +205,11 @@ privacy mode. Follow the CLI's recovery action; never delete its journal,
 retry an ambiguous model request or stop a process that Hormuz does not own.
 
 ## Disconnect and restore
+
+For the app-server adapter, `hormuz off` disables its launch overlay and
+disconnects the separate router owner while preserving normal ChatGPT settings.
+Use it before removing its CLI or plugin. The commands below manage a selected
+user-default connection directly.
 
 ```sh
 hormuz client disconnect codex --client-home /path/to/codex-home

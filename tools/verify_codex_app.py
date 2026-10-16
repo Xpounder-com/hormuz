@@ -42,7 +42,7 @@ def main():
     parser.add_argument('--discover-first', action='store_true', help='Discover the MCP tool in one turn, then invoke it in a second turn')
     parser.add_argument('--capture-wire', action='store_true', help='Private synthetic request capture; isolated homes only')
     parser.add_argument('--capture-shapes', action='store_true', help='Record only content-free request shapes and response statuses')
-    parser.add_argument('--task', choices=('script', 'mcp', 'both', 'approval'), default='both')
+    parser.add_argument('--task', choices=('script', 'mcp', 'both', 'approval', 'calculation'), default='both')
     args = parser.parse_args()
     if args.capture_wire and args.client_home:
         parser.error('Wire capture is limited to synthetic isolated homes')
@@ -80,7 +80,7 @@ def main():
         if result.returncode:
             raise RuntimeError(json.dumps(value))
         return value
-    proof = {'passed': False, 'scope': 'bundled app-server protocol; native desktop UI is separate', 'task': args.task,
+    proof = {'passed': False, 'scope': 'bundled app-server default-provider protocol; native desktop UI is separate', 'task': args.task,
              'client_home': str(home), 'normal_client_home': bool(args.client_home),
              'codex_executable': str(args.codex), 'codex_sha256': hashlib.sha256(args.codex.read_bytes()).hexdigest(),
              'evidence_directory': str(root), 'model_downloads': 0, 'feature_disable_overrides': []}
@@ -219,10 +219,20 @@ def main():
                                                                           'capabilities': {'experimentalApi': True}}})
             proof['initialize'] = result(1, 15)
             send({'method': 'initialized', 'params': {}})
+            send({'id': 6, 'method': 'config/read', 'params': {'cwd': str(project), 'includeLayers': False}})
+            effective = result(6, 15)['config']
+            proof['default_provider'] = effective.get('model_provider')
+            assert proof['default_provider'] == settings['model_provider'], 'Normal app configuration selects another provider'
+            send({'id': 7, 'method': 'model/list', 'params': {'includeHidden': False, 'cursor': None, 'limit': 100}})
+            models = result(7, 15)['data']
+            proof['visible_models'] = [{key: model.get(key) for key in ('model', 'displayName', 'hidden')} for model in models]
+            assert any(model['model'] == settings['model'] and not model['hidden'] for model in models), \
+                'The connected local model is absent from the normal model list'
             send({'id': 2, 'method': 'thread/start', 'params': {'model': settings['model'],
-                  'modelProvider': settings['model_provider'], 'cwd': str(project), 'ephemeral': True, 'sandbox': 'read-only'}})
+                  'cwd': str(project), 'ephemeral': True, 'sandbox': 'read-only'}})
             thread = result(2, 45)
             proof['thread_configuration'] = {key: thread.get(key) for key in ('model', 'modelProvider', 'reasoningEffort')}
+            assert thread.get('modelProvider') == settings['model_provider'], 'The native thread did not inherit the local provider'
             target = 'node_repl js' if args.normal_mcp else 'routing_fixture probe'
             instruction = ('Use tool_search to find ' + target + '. Then use the discovered js tool to run '
                            'console.log("MCP_ROUTING_OK"). ' if args.normal_mcp else
@@ -243,6 +253,8 @@ def main():
                     '{"cmd":"printf APPROVAL_ROUTING_OK", "sandbox_permissions":"require_escalated", '
                     '"justification":"Verify the existing automatic approval reviewer with one read-only print command."}. '
                     'Keep the existing approval settings. Report the actual command result. Reason briefly.')
+            elif args.task == 'calculation':
+                prompt = 'Calculate 2+5 and reply APP_LOCAL_OK: 7. Use no tools.'
             discovery_prompt = ('Discover the MCP tools for ' + target + ' using tool_search with limit 1. '
                                 'Report the discovered function names. This turn only discovers tools; invoke no other tools.')
             send({'id': 3, 'method': 'turn/start', 'params': {'threadId': thread['thread']['id'],
@@ -311,6 +323,10 @@ def main():
             if args.task == 'approval':
                 assert any(item.get('exitCode') == 0 and 'APPROVAL_ROUTING_OK' in item.get('aggregatedOutput', '')
                            for item in commands), 'The native automatic approval round trip did not complete'
+            if args.task == 'calculation':
+                assert any(item['type'] == 'agentMessage' and item.get('text', '').strip() == 'APP_LOCAL_OK: 7'
+                           for item in completed_items), 'The native calculation did not return the expected answer'
+                assert not commands and not mcp_calls, 'The calculation unexpectedly executed tools'
             assert proof['reasoning_notifications'] > 0 or proof['reasoning_items'] > 0, 'No actual model reasoning was observed'
         finally:
             stderr.close()
@@ -318,9 +334,12 @@ def main():
         proof['work_state'] = state
         attempts = [attempt for work in state['works'] for attempt in work['attempts'] if attempt['request_id'] not in prior_attempts]
         proof['probe_attempts'] = attempts
-        assert (2 if args.task in {'script', 'approval'} else 3) <= len(attempts) <= 8 and all(attempt['state'] == 'succeeded' for attempt in attempts), \
+        minimum_attempts = 1 if args.task == 'calculation' else 2 if args.task in {'script', 'approval'} else 3
+        maximum_attempts = 1 if args.task == 'calculation' else 8
+        assert minimum_attempts <= len(attempts) <= maximum_attempts and all(attempt['state'] == 'succeeded' for attempt in attempts), \
             'Provider attempts did not settle successfully: ' + str([attempt['state'] for attempt in attempts])
-        assert any(attempt['reason'] == 'session_affinity' for attempt in attempts)
+        if args.task != 'calculation':
+            assert any(attempt['reason'] == 'session_affinity' for attempt in attempts)
         assert all(state['totals'][key] == before_state['totals'][key] for key in ('unknown_attempts', 'retry_attempts', 'failover_attempts'))
         proof['passed'] = True
     except Exception as error:
