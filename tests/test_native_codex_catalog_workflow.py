@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import selectors
 import socket
 import ssl
 import subprocess
@@ -538,11 +539,11 @@ class NativeCodexCatalogWorkflowTests(unittest.TestCase):
                     self.assertEqual(len(native_requests), 1)
                 self.assertEqual((local_requests, cloud_requests), ([], []))
 
-    def test_native_catalog_closes_a_stalled_downstream_client_within_a_bounded_write(self):
+    def test_native_catalog_does_not_let_a_stalled_reader_delay_graceful_shutdown(self):
         client = r'''
-import json, os, socket, sys, time, tomllib
+import json, os, select, socket, sys, tomllib
 from urllib.parse import urlsplit
-config = tomllib.loads(sys.stdin.read())
+config = tomllib.loads(json.loads(sys.stdin.readline()))
 provider = config["model_providers"][config["model_provider"]]
 origin = urlsplit(provider["base_url"])
 with socket.create_connection((origin.hostname, origin.port), timeout=5) as wire:
@@ -558,20 +559,10 @@ with socket.create_connection((origin.hostname, origin.port), timeout=5) as wire
         headers += chunk
         if len(headers) > 8192: raise ValueError("fixture header limit")
     status = int(headers.split(b" ", 2)[1])
-    time.sleep(3.6)
-    wire.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2 * 1024 * 1024)
-    deadline, received, closed = time.monotonic() + 2, 0, False
-    while received <= 8 * 1024 * 1024:
-        remaining = deadline - time.monotonic()
-        if remaining <= 0: break
-        wire.settimeout(remaining)
-        try: chunk = wire.recv(65536)
-        except (TimeoutError, socket.timeout): break
-        if not chunk:
-            closed = True
-            break
-        received += len(chunk)
-print(json.dumps({"status": status, "closed": closed}))
+    print(json.dumps({"status": status}), flush=True)
+    # Remain connected without reading until the parent finishes shutting down.
+    # This safety deadline also makes a missing server write timeout finite.
+    select.select([sys.stdin], [], [], 8)
 '''
         # Under the upstream 1 MiB bound, but JSON escaping makes the downstream
         # body exceed typical Linux send buffers as well as the smaller macOS one.
@@ -579,23 +570,43 @@ print(json.dumps({"status": status, "closed": closed}))
                            ensure_ascii=False).encode("utf-8")
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
-            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
-                configuration = subprocess.run([sys.executable, "-m", "hormuz", "--config",
-                    str(self.fixture.root / "gateway.json"), "client", "config", "codex"],
-                    capture_output=True, text=True, timeout=10)
-                self.assertEqual(configuration.returncode, 0, configuration.stderr)
-                with native_backend(large) as native_requests:
-                    result = subprocess.run([sys.executable, "-c", client], input=configuration.stdout,
+            process = None
+            try:
+                with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                    configuration = subprocess.run([sys.executable, "-m", "hormuz", "--config",
+                        str(self.fixture.root / "gateway.json"), "client", "config", "codex"],
                         capture_output=True, text=True, timeout=10)
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(json.loads(result.stdout), {"status": 200, "closed": True})
-                    self.assertEqual(len(native_requests), 1)
-                with native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
-                    recovered = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
-                        headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
-                                 "X-Gateway-Key": "fixture-coding-client-credential"})
-                    self.assertEqual(recovered["status"], 200, recovered)
-                    self.assertEqual((len(native_requests), local_requests, cloud_requests), (1, [], []))
+                    self.assertEqual(configuration.returncode, 0, configuration.stderr)
+                    with native_backend(large) as native_requests:
+                        process = subprocess.Popen([sys.executable, "-c", client], stdin=subprocess.PIPE,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                        process.stdin.write(json.dumps(configuration.stdout) + "\n")
+                        process.stdin.flush()
+                        with selectors.DefaultSelector() as ready:
+                            ready.register(process.stdout, selectors.EVENT_READ)
+                            self.assertTrue(ready.select(timeout=5), "stalled client did not receive headers")
+                        self.assertEqual(json.loads(process.stdout.readline()), {"status": 200})
+                        self.assertEqual(len(native_requests), 1)
+                    with native_backend({"models": [{"slug": "fixture-cloud-model"}]}) as native_requests:
+                        recovered = submit(method="GET", path="/backend-api/codex/models", absolute_path=True,
+                            headers={"Authorization": "Bearer NATIVE_CHATGPT_SENTINEL",
+                                     "X-Gateway-Key": "fixture-coding-client-credential"})
+                        self.assertEqual(recovered["status"], 200, recovered)
+                        self.assertEqual((len(native_requests), local_requests, cloud_requests), (1, [], []))
+                    self.assertIsNone(process.poll(), "stalled client ended before gateway shutdown")
+                    shutdown_started = time.monotonic()
+                # The public disconnect fixture joins all non-daemon request
+                # threads. Check that lifetime directly: draining buffered TCP
+                # data before FIN has a platform-dependent duration on Linux.
+                self.assertLess(time.monotonic() - shutdown_started, 4)
+                self.assertIsNone(process.poll(), "gateway waited for the stalled client to finish")
+            finally:
+                if process is not None:
+                    try:
+                        process.communicate("\n", timeout=3)
+                    except (BrokenPipeError, subprocess.TimeoutExpired):
+                        process.kill()
+                        process.communicate(timeout=3)
 
 
 if __name__ == "__main__":
