@@ -29,6 +29,9 @@ cannot inherit coding evidence. Other client origins require separate wire
 qualification. The router bearer authenticates access; the header remains a
 caller assertion. This catches ordinary client upgrade drift, not a token
 holder forging a version or cryptographic attestation of an executable.
+Evidence must name an explicitly supported client wire version. Changing the
+adapter's default does not invalidate an unchanged older version that remains
+supported; each version still needs its own matching receipt and request header.
 
 The minimum battery is four development cases (at least one per family) and
 12 distinct held-out cases (at least three per family): arithmetic/boundaries,
@@ -80,6 +83,10 @@ Malformed readiness or task-list types raise `ContractValidationError`, like
 other invalid summary fields.
 Storage faults return unavailable diagnostic results without stopping the owned
 router or engine; restoring storage permits the same generation to recover.
+Routing control replies use a finite limit derived from the existing 1 MiB
+configuration bound, including JSON escaping and per-route summary overhead,
+so supported long aliases remain observable through CLI/plugin status. Other
+control replies retain their smaller bound.
 Nonfinite numeric input, including exponent overflow, returns `invalid_json`
 before admission or provider traffic.
 
@@ -139,8 +146,9 @@ statistical task success remain separate release qualification decisions.
 Local route declarations may embed `coding_evidence`. Version-1 declarations
 without it remain readable and explicitly unqualified for coding. Setup profile
 version 2 adds nullable `coding_evidence`, shared by CLI and plugin; version 1
-remains readable with unknown coding readiness. Existing generated configurations
-are never silently rewritten. Disconnect, inspect any intent mismatch, and use a
+remains readable with unknown coding readiness. The default profile selection
+is unchanged; select version 2 explicitly to install reviewed outcomes. Existing
+generated configurations are never silently rewritten. Disconnect, inspect any intent mismatch, and use a
 new configuration path or explicitly migrate the reviewed configuration.
 
 Router status version 1 and setup profile version 1 fixtures remain valid for

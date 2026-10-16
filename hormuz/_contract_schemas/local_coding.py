@@ -103,5 +103,5 @@ def validate_evidence(value):
         if type(outcome["termination"]) is not str or outcome["termination"] not in {"completed", "timeout", "canceled", "unknown"}:
             raise ContractValidationError("invalid coding completion")
         elapsed = outcome["elapsed_ms"]
-        if elapsed is not None and (type(elapsed) not in (int, float) or not math.isfinite(elapsed) or not 0 <= elapsed <= 86_400_000):
+        if elapsed is not None and (type(elapsed) not in (int, float) or not 0 <= elapsed <= 86_400_000 or not math.isfinite(elapsed)):
             raise ContractValidationError("invalid coding elapsed time")

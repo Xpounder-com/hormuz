@@ -76,6 +76,8 @@ def build_route_admission(raw, routes, upstreams):
         if evidence is not None:
             from .contracts import ContractValidationError, validate_contract
             try:
+                if type(evidence) is not dict:
+                    raise ValueError()
                 validate_contract(evidence)
                 if evidence["schema_id"] != "hormuz.local-coding-evidence":
                     raise ValueError()

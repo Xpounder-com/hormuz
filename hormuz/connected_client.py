@@ -365,14 +365,20 @@ def _setting(text, key, value):
 
 
 def _control(record, command):
+    from ._config_input import MAX_CONFIGURATION_BYTES
+
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.settimeout(1)
     try:
         connection.connect(record["control"])
         connection.sendall(json.dumps({"generation": record["generation"], "command": command}).encode() + b"\n")
+        # Routing metadata is derived from the bounded configuration. Reserve
+        # room for JSON escaping and per-route summaries; ordinary control
+        # replies retain their existing small bound.
+        limit = 8 * MAX_CONFIGURATION_BYTES if command == "routing" else 32768
         with connection.makefile("rb") as stream:
-            data = stream.readline(32769)
-        if len(data) > 32768:
+            data = stream.readline(limit + 1)
+        if len(data) > limit:
             raise ValueError()
         value = json.loads(data)
         if not isinstance(value, dict) or value.get("generation") != record["generation"]:

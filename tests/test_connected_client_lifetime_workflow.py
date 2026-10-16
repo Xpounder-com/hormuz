@@ -351,6 +351,39 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 self.command("disconnect")
             self.assertTrue((engine / "stopped").is_file())
 
+    def test_current_client_coding_evidence_pins_version_and_rejects_unknown_campaigns(self):
+        from hormuz.client_versions import SUPPORTED_CODEX_VERSION
+
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification["task_types"] = ["code_change"]
+            version_file = self.root / "client-version.txt"
+            version_file.write_text(SUPPORTED_CODEX_VERSION)
+            for version, expected in ((SUPPORTED_CODEX_VERSION, "qualified"), ("0.999.0", "subject_mismatch")):
+                with self.subTest(campaign_version=version):
+                    evidence = self.coding_evidence(value)
+                    evidence["plan"]["subject"]["client_version"] = version
+                    evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                        separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+                    qualification["coding_evidence"] = evidence
+                    self.path.write_text(json.dumps(value))
+                    try:
+                        self.command("connect")
+                        route = self.client("router-state")["body"]["routes"][0]
+                        self.assertEqual(route["coding_readiness"], expected)
+                        self.assertEqual(self.client("code-change")["status"], 200 if expected == "qualified" else 503)
+                        if expected == "qualified":
+                            version_file.write_text("0.999.0")
+                            self.assertEqual(self.client("code-change")["status"], 503)
+                            version_file.write_text(SUPPORTED_CODEX_VERSION)
+                        self.assertEqual(requests, [])
+                    finally:
+                        self.command("disconnect")
+            self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"])
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+
     def test_coding_requests_reject_nonfinite_controls_without_losing_the_connection_owner(self):
         with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
             value, _, engine = self.managed_configuration(cloud)
@@ -580,6 +613,85 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                     self.assertFalse((engine / "inference-count").exists())
                     self.assertEqual((self.home / "config.toml").read_bytes(), settings)
             self.assertEqual(requests, [])
+
+    def test_direct_configuration_rejects_non_object_coding_evidence_without_effects(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            settings = (self.home / "config.toml").read_bytes()
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            for evidence in ([], "PRIVATE_EVIDENCE_SENTINEL", 1, False):
+                with self.subTest(evidence=evidence):
+                    qualification["coding_evidence"] = evidence
+                    self.path.write_text(json.dumps(value))
+                    failed = self.command("connect", "--dry-run", check=False)
+                    self.assertEqual(failed.returncode, 2, failed.stderr)
+                    validate_contract(json.loads(failed.stderr))
+                    self.assertEqual(json.loads(failed.stderr)["error"]["code"],
+                                     "connected_client_setup_unavailable")
+                    self.assertNotIn("PRIVATE_EVIDENCE_SENTINEL", failed.stderr)
+                    self.assertNotIn("Traceback", failed.stderr)
+                    self.assertEqual((self.home / "config.toml").read_bytes(), settings)
+                    self.assertFalse((engine / "inference-count").exists())
+            self.assertEqual(requests, [])
+
+    def test_extreme_elapsed_integers_reject_config_and_profile_without_effects(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)
+            profile_path = Path(options[1])
+            original = json.loads(profile_path.read_text())
+            settings = (self.home / "config.toml").read_bytes()
+            for elapsed in (10**400, -(10**400)):
+                for operation in ("connect", "setup"):
+                    with self.subTest(elapsed=elapsed, operation=operation):
+                        evidence = self.coding_evidence(value)
+                        evidence["outcomes"][0]["elapsed_ms"] = elapsed
+                        if operation == "connect":
+                            value["route_admission"]["local_routes"]["local-code"]["coding_evidence"] = evidence
+                            self.path.write_text(json.dumps(value))
+                            failed = self.command("connect", "--dry-run", check=False)
+                            expected = "connected_client_setup_unavailable"
+                        else:
+                            self.path.unlink(missing_ok=True)
+                            profile_path.write_text(json.dumps({**original, "schema_version": 2,
+                                                                "coding_evidence": evidence}))
+                            failed = self.command("setup", *options, "--dry-run", check=False)
+                            expected = "connected_client_router_configuration_unsupported"
+                            self.assertFalse(self.path.exists())
+                        self.assertEqual(failed.returncode, 2, failed.stderr)
+                        validate_contract(json.loads(failed.stderr))
+                        self.assertEqual(json.loads(failed.stderr)["error"]["code"], expected)
+                        self.assertNotIn("Traceback", failed.stderr)
+                        self.assertEqual((self.home / "config.toml").read_bytes(), settings)
+                        self.assertFalse((engine / "inference-count").exists())
+            self.assertEqual(requests, [])
+
+    def test_routing_status_preserves_supported_large_route_metadata(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            route = value["model_routes"]["local-code"]
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            for index in range(7):
+                alias = f"extra-{index}-" + "x" * 5000
+                value["model_routes"][alias] = dict(route)
+                value["route_admission"]["local_routes"][alias] = dict(qualification)
+                value["policies"]["organization"]["allowed_models"].append(alias)
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                public = self.client("router-state")["body"]
+                validate_contract(public)
+                self.assertEqual(len(public["routes"]), 8)
+                self.assertGreater(len(json.dumps(public).encode()), 32768)
+                routing = json.loads(self.command("status", "--routing").stdout)
+                self.assertEqual(routing, public)
+                self.assertEqual(self.client()["status"], 200)
+                self.assertFalse((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
 
     def test_shared_setup_preserves_reviewed_coding_evidence_without_manual_configuration(self):
         with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):

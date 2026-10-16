@@ -21,7 +21,7 @@ from .managed_llama import ManagedLlamaError, ManagedLlamaProfile
 from .local_credentials import LocalCredentialError, read_local_credential
 
 
-DEFAULT_PROFILE = "local-setup-codex-0147-llama-b11617-qwen3-4b-v2.json"
+DEFAULT_PROFILE = "local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json"
 
 
 def _profile(path):
