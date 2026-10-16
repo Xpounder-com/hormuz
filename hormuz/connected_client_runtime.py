@@ -13,7 +13,7 @@ import subprocess
 
 from .connected_client import _read, _parse_record, _lock_descriptor
 from .config import GatewayConfig
-from .server import GatewayServer
+from .server import GatewayServer, _STORAGE_FAILURES
 from .managed_llama import OwnedLlama
 
 
@@ -138,7 +138,7 @@ def main(record_path, generation):
                     client.sendall(json.dumps({"generation": record["generation"],
                         "router": "stopping" if stopping.is_set() else "ready" if server.readiness_reason() is None
                         and (engine is None or engine.ready()) else "unavailable"}).encode() + b"\n")
-                except (OSError, ValueError):
+                except (*_STORAGE_FAILURES, OSError, ValueError):
                     continue
     finally:
         if engine is not None:

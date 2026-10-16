@@ -99,6 +99,9 @@ def _validate_route_admission(value: Mapping[str, Any]) -> None:
                     raise ContractValidationError("invalid local coding evidence")
             if (route["coding_readiness"] == "unknown") != (evidence is None):
                 raise ContractValidationError("invalid local coding evidence readiness")
+            if route["coding_readiness"] == "qualified" and (evidence["planned"] < 16
+                    or not evidence["passed"] == evidence["evaluated"] == evidence["planned"]):
+                raise ContractValidationError("invalid qualified coding outcomes")
             automatic = _value_string_list(route, "automatic_task_types")
             if any(kind not in route["task_types"] or kind == "code_review" or kind == "code_change" and route["coding_readiness"] != "qualified" for kind in automatic):
                 raise ContractValidationError("invalid automatic task types")

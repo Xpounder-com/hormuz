@@ -17,6 +17,7 @@ class CodingQualification:
     evaluated: int = 0
     passed: int = 0
     request_profile_sha256: str | None = None
+    client_version: str | None = None
 
     def describe(self):
         if self.evidence_id is None:
@@ -86,4 +87,4 @@ def assess_coding_evidence(serialized, config, route, qualification):
     readiness = ("subject_mismatch" if not matched else "failed" if failed else
                  "qualified" if covered and passed == len(plan["cases"]) else "incomplete")
     return CodingQualification(readiness, evidence["evidence_id"], evidence["plan_sha256"], canonical_digest(evidence),
-                               len(plan["cases"]), len(outcomes), passed, subject["request_profile_sha256"])
+                               len(plan["cases"]), len(outcomes), passed, subject["request_profile_sha256"], subject["client_version"])

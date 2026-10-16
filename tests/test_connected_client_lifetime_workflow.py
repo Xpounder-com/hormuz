@@ -92,7 +92,19 @@ try:
                "input": "Fix the arithmetic function in this Python code." if "code-change" in sys.argv else
                         "Review this code diff." if "code-review" in sys.argv else
                         "Consider this fixture." if "unknown-task" in sys.argv else "Summarize this fixture."}
-    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + credential}
+    version_file = pathlib.Path(__file__).with_name("client-version.txt")
+    version = version_file.read_text().strip() if version_file.exists() else "0.147.0"
+    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + credential,
+               "User-Agent": f"codex_exec/{version} (Mac OS 26.2.0; arm64) unknown (codex_exec; {version})"}
+    if "missing-client-version" in sys.argv:
+        headers.pop("User-Agent")
+    if "client-agent" in sys.argv:
+        headers["User-Agent"] = sys.argv[sys.argv.index("client-agent") + 1]
+    if "duplicate-client-version" in sys.argv:
+        class DuplicateAgent(dict):
+            def items(self):
+                return [*super().items(), ("User-Agent", self["User-Agent"])]
+        headers = DuplicateAgent(headers)
     if "local-only" in sys.argv:
         headers["X-Hormuz-Routing-Mode"] = "local_only"
     if "coding-tools" in sys.argv:
@@ -114,8 +126,11 @@ try:
             if items and items[0].get("role") == role:
                 items = items[1:]
             request["input"] = [{"role":role,"content":"Different unqualified agent instructions."}, *items]
+    body = json.dumps(request)
+    if "numeric-control" in sys.argv:
+        body = body[:-1] + ',"temperature":' + sys.argv[sys.argv.index("numeric-control") + 1] + '}'
     connection.request("GET" if control else "POST", origin.path.rstrip("/") + ("/router/state" if "router-state" in sys.argv else "/work/state" if control else "/responses"),
-                       None if control else json.dumps(request), headers)
+                       None if control else body, headers)
     response = connection.getresponse()
     view.update(status=response.status, body=json.loads(response.read()),
                 headers={k.lower():v for k,v in response.getheaders()})
@@ -296,7 +311,96 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertEqual(self.client("inspect")["model"], "original-model")
             self.assertTrue((engine / "stopped").is_file())
 
-    def test_qualified_coding_conversation_preserves_affinity_and_blocks_instruction_drift(self):
+    def test_coding_readiness_rejects_impossible_qualified_outcome_counts(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification.update(task_types=["code_change"], coding_evidence=self.coding_evidence(value))
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                self.assertEqual(self.client("code-change")["status"], 200)
+                state = self.client("router-state")["body"]
+                validate_contract(state)
+                for planned, evaluated, passed in ((1, 0, 0), (15, 15, 15), (16, 0, 0), (16, 16, 15)):
+                    with self.subTest(planned=planned, evaluated=evaluated, passed=passed):
+                        invalid = json.loads(json.dumps(state))
+                        invalid["routes"][0]["coding_evidence"].update(
+                            planned=planned, evaluated=evaluated, passed=passed)
+                        with self.assertRaises(ContractValidationError):
+                            validate_contract(invalid)
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+
+    def test_coding_requests_reject_nonfinite_controls_without_losing_the_connection_owner(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            value["model_routes"]["local-code"]["capabilities"].append("codex_http")
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification.update(task_types=["code_change"], coding_evidence=self.coding_evidence(value))
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                for number in ("NaN", "Infinity", "-Infinity", "1e999", "-1e999"):
+                    for options in ((), ("bound-conversation",)):
+                        with self.subTest(number=number, bound=bool(options)):
+                            result = self.client("code-change", "numeric-control", number, *options)
+                            self.assertEqual((result["status"], result["body"]["error"]["code"]),
+                                             (400, "invalid_json"))
+                self.assertFalse((engine / "inference-count").exists())
+                self.assertEqual(self.client("code-change")["status"], 200)
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+
+    def test_routing_diagnostics_survive_storage_failure_and_recover_the_owned_engine(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            database = Path(value["database"])
+            backup = self.root / "saved-usage.sqlite3"
+
+            @contextmanager
+            def unavailable_storage():
+                database.rename(backup)
+                database.mkdir()
+                try:
+                    yield
+                finally:
+                    database.rmdir()
+                    backup.rename(database)
+
+            try:
+                connected = json.loads(self.command("connect").stdout)
+                self.assertEqual(self.client()["status"], 200)
+                with unavailable_storage():
+                    failed = self.command("status", "--routing", check=False)
+                    self.assertEqual(failed.returncode, 2)
+                    self.assertEqual(json.loads(failed.stderr)["error"]["code"], "connected_client_router_unavailable")
+                recovered = json.loads(self.command("status", "--routing").stdout)
+                self.assertEqual(recovered["mode"], "local_only")
+                self.assertFalse((engine / "stopped").exists())
+                with unavailable_storage():
+                    state = self.client("router-state")
+                    self.assertEqual((state["status"], state["body"]["error"]["code"]),
+                                     (503, "hormuz_storage_unavailable"))
+                recovered = json.loads(self.command("status", "--routing").stdout)
+                self.assertEqual(recovered["mode"], "local_only")
+                status = json.loads(self.command("status").stdout)
+                self.assertEqual((status["generation"], status["router"]), (connected["generation"], "ready"))
+                self.assertEqual(self.client()["status"], 200)
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+
+    def test_qualified_coding_conversation_preserves_affinity_and_blocks_unqualified_request_drift(self):
         with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
             value, port, engine = self.managed_configuration(cloud)
             value["upstream_timeout_seconds"] = 6
@@ -325,6 +429,22 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                 self.assertEqual(second["headers"]["x-hormuz-routing-reason"], "session_affinity")
                 for header in ("x-hormuz-work-id", "x-hormuz-destination-generation"):
                     self.assertEqual(second["headers"][header], first["headers"][header])
+                request_options = (("code-change", "coding-tools", "input-developer-pinned"),
+                                   ("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned"))
+                version_file = self.root / "client-version.txt"
+                version_file.write_text("0.148.0")
+                try:
+                    for options in request_options:
+                        self.assertEqual(self.client(*options)["status"], 503)
+                finally:
+                    version_file.unlink()
+                for client_options in (("missing-client-version",), ("duplicate-client-version",),
+                                       ("client-agent", "other/0.147.0"),
+                                       ("client-agent", "codex_exec/0.147.0unexpected"),
+                                       ("client-agent", "codex_exec/0.147.0 " + "x" * 512)):
+                    for options in request_options:
+                        with self.subTest(client=client_options, request=options):
+                            self.assertEqual(self.client(*options, *client_options)["status"], 503)
                 drift = self.client("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned", "instruction-drift")
                 self.assertEqual(drift["status"], 503, drift)
                 for role in ("system", "developer"):

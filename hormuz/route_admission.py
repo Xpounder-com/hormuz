@@ -243,8 +243,12 @@ class RouteAdmission:
 
     def _coding_request_matches(self, handler, alias, value, client):
         coding = self.coding[alias]
+        agents = handler.headers.get_all("User-Agent", [])
+        agent = agents[0] if len(agents) == 1 else ""
         return (coding.readiness == "qualified" and client == "codex"
                 and handler.path == "/v1/responses"
+                and 0 < len(agent) <= 512 and all(32 <= ord(character) < 127 for character in agent)
+                and agent.partition(" ")[0] == f"codex_exec/{coding.client_version}"
                 and request_profile_digest(value) == coding.request_profile_sha256)
 
     def select(self, handler, identity, decision, value, *, client, protocol, output_field):

@@ -529,7 +529,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/router/state":
             identity = self._authenticate()
             if identity is not None:
-                self._send_contract_json(HTTPStatus.OK, "hormuz.route-admission", self.server.route_admission.status(identity, self.server.policy_engine))
+                try:
+                    self._send_contract_json(HTTPStatus.OK, "hormuz.route-admission", self.server.route_admission.status(identity, self.server.policy_engine))
+                except _STORAGE_FAILURES as error:
+                    self._send_storage_failure(None, error)
             return
         if handle_work_request(self):
             return
@@ -1806,13 +1809,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_error("request_too_large", "Request body exceeds the configured limit", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
             return None
         data = self.rfile.read(content_length)
+        from .compaction_formats import finite_json_float, strict_json_loads
         try:
             if (self.path == "/v1/responses" and self.server.work_runtime is not None
                     and (self.headers.get_all("thread-id", []) or self.headers.get_all("session-id", []))):
-                from .compaction_formats import strict_json_loads
                 value = strict_json_loads(data.decode("utf-8"))
             else:
-                value = json.loads(data)
+                value = json.loads(data, parse_float=finite_json_float, parse_constant=finite_json_float)
         except (ValueError, UnicodeDecodeError, RecursionError):
             self._send_error("invalid_json", "Request body must be valid JSON", HTTPStatus.BAD_REQUEST)
             return None

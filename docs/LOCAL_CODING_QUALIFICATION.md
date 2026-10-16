@@ -20,6 +20,16 @@ and output bounds, timeout and the instruction/tool/generation-control profile.
 Changing any of these requires new evidence. User text, conversation IDs and
 provider-owned continuation state are not part of the instruction profile hash.
 
+Coding admission and final dispatch also require one printable `User-Agent`
+header, at most 512 characters, whose first product is
+`codex_exec/<evidence client_version>`. This is the product/version observed in
+the pinned native Codex 0.147.0 coding experiment; its platform suffix may vary.
+Missing, duplicate, malformed, unrecognized or changed version declarations
+cannot inherit coding evidence. Other client origins require separate wire
+qualification. The router bearer authenticates access; the header remains a
+caller assertion. This catches ordinary client upgrade drift, not a token
+holder forging a version or cryptographic attestation of an executable.
+
 The minimum battery is four development cases (at least one per family) and
 12 distinct held-out cases (at least three per family): arithmetic/boundaries,
 text normalization, collection behavior, and validation/state. These are a
@@ -63,6 +73,12 @@ No receipt means `unknown`; insufficient or missing evidence is `incomplete`;
 observed unsuccessful episodes are `failed`; a different execution subject is
 `subject_mismatch`. Only a complete passing campaign is `qualified` for
 `code_change`. Review remains unsupported. A healthy engine can remain unqualified.
+Qualified public summaries require at least 16 planned cases and identical
+planned, evaluated and passed counts. Contradictory summaries fail validation.
+Storage faults return unavailable diagnostic results without stopping the owned
+router or engine; restoring storage permits the same generation to recover.
+Nonfinite numeric input, including exponent overflow, returns `invalid_json`
+before admission or provider traffic.
 
 Old operator declarations retain their noncoding task envelopes. Naming
 `code_change` or `code_review` alone no longer permits fresh automatic coding
