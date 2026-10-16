@@ -41,6 +41,7 @@ def inspect_request(
     redactor: SecretRedactor,
     mode: str,
     declared_version: str | None,
+    inspection_max_bytes: int | None = None,
 ) -> CompactionInspection:
     if declared_version not in {None, CONTEXT_FORMAT_VERSION}:
         raise CompactionEnforcementError("unsupported_compaction_version")
@@ -65,7 +66,9 @@ def inspect_request(
     if expanded_bytes > MAX_REQUEST_BYTES:
         raise CompactionEnforcementError("expanded_request_too_large")
 
-    expanded_result = redactor.inspect(reconstructed, mode=mode)
+    # Inspection plaintext may be larger than the compact representation that
+    # is ultimately forwarded. Its allocation has a separate bounded budget.
+    expanded_result = redactor.inspect(reconstructed, mode=mode, max_output_bytes=inspection_max_bytes)
     if expanded_result.count:
         # In redact mode this is the exact reconstructed, redacted payload.  In
         # deny mode the caller blocks egress and the value is never forwarded.

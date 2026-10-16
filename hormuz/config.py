@@ -502,6 +502,7 @@ class GatewayConfig:
     managed_llama: "ManagedLlamaProfile | None" = None
     shadow_router: "ShadowRouterConfig | None" = None
     native_codex_catalog: bool = False
+    native_codex_responses: bool = False
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":

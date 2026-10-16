@@ -3,9 +3,9 @@
 The router has an opt-in discovery endpoint for the documented native Codex
 gateway path. It consumes a separate Hormuz gateway credential and forwards
 the coding client's native ChatGPT credential only to the fixed ChatGPT
-backend. This is a transport/authentication foundation: native inference,
-workspace-managed client setup, supported host/build qualification, consent
-and actual account eligibility remain incomplete. A catalog response grants
+backend. [Native Responses](NATIVE_CODEX_RESPONSES.md) adds separately enabled
+HTTP/SSE inference. Workspace-managed client setup, supported host/build
+qualification, consent and actual account eligibility remain incomplete. A catalog response grants
 none of those capabilities. [Cloud readiness](CLOUD_READINESS.md) continues
 to report `native_codex_gateway: not_implemented`.
 
@@ -42,7 +42,8 @@ fixed HTTPS backend, `openai` protocol and `cloud` locality. It rejects API-key
 environment/envelope fields and storage/background opt-ins. An API-key route
 is unnecessary. Generic `/v1/models` discovery omits native profiles; preflight
 counts only API-key routes for the API authorization path. Native profiles
-cannot execute inference, even when selected by route admission or a fallback.
+cannot execute through generic API/local endpoints or automatic/fallback
+selection. Native HTTP/SSE inference requires its separate Responses flag.
 Existing CLI/plugin connect remains the existing API/local adapter; this slice
 does not generate native host configuration or change `requires_openai_auth`.
 Both generated configuration and persistent connection defaults skip native
@@ -91,7 +92,7 @@ It reads at most 1 MiB plus an overflow byte and accepts at most
 objects retain provider-owned metadata; root extras and unconfigured models
 are discarded. No model-usage request is recorded for discovery.
 
-Missing or ambiguous auth returns 401; denied policy/native inference returns
+Missing or ambiguous auth returns 401; denied policy/generic inference returns
 403; unsupported queries return 400; disabled discovery returns 404. Native
 401, 403 and 429 retain their status with a fixed, content-free gateway error;
 a valid bounded Retry-After is retained on 429. Other native statuses, TLS,
@@ -127,6 +128,5 @@ entitlement, native inference, OS/client support or release readiness.
 
 The [official gateway guide](https://learn.chatgpt.com/docs/enterprise/sign-in-with-chatgpt-through-a-gateway),
 checked October 15, 2026, documents separate gateway/native credentials,
-workspace-managed provider requirements and this backend. The full path must
-also support `/responses`; this implementation deliberately provides only
-`/models`. See [ADR 0027](decisions/0027-native-codex-catalog.md).
+workspace-managed provider requirements and this backend. The catalog contract covers `/models`; the separate
+[Responses contract](NATIVE_CODEX_RESPONSES.md) covers opt-in inference. See [ADR 0027](decisions/0027-native-codex-catalog.md).

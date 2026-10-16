@@ -62,6 +62,7 @@ from ._contract_schemas.connected_client import (
 )
 from ._contract_schemas.local_coding import EVIDENCE_FIELDS, validate_evidence as _validate_coding_evidence
 from ._contract_schemas.cloud_readiness import FIELDS as CLOUD_READINESS_FIELDS, validate_readiness as _validate_cloud_readiness
+from ._contract_schemas.native_codex import FIELDS as NATIVE_STATUS_FIELDS, validate_status as _validate_native_status
 from ._contract_schemas.local_setup import (validate_profile as _validate_local_setup_profile,
     validate_setup as _validate_local_setup, validate_setup_v2 as _validate_local_setup_v2,
     validate_setup_v3 as _validate_local_setup_v3)
@@ -506,6 +507,11 @@ def contract_manifest() -> dict[str, object]:
             _manifest_schema("hormuz.cloud-readiness", 1, "cli-output", "hormuz", sorted(CLOUD_READINESS_FIELDS)),
             _manifest_schema(NATIVE_CATALOG_SCHEMA_ID, NATIVE_CATALOG_SCHEMA_VERSION, "http-headers", "hormuz",
                 ["X-Hormuz-Contract"]),
+            _manifest_schema(NATIVE_RESPONSES_SCHEMA_ID, 1, "http-headers", "hormuz",
+                ["X-Hormuz-Contract", "X-Hormuz-Billing", "X-Hormuz-Cost-Status", "X-Hormuz-Redactions",
+                 "X-Hormuz-Destination", "X-Hormuz-Destination-Locality", "X-Hormuz-Destination-Generation",
+                 "X-Hormuz-Policy-Decision", "X-Hormuz-Requested-Model", "X-Hormuz-Routed-Model"]),
+            _manifest_schema(NATIVE_STATUS_SCHEMA_ID, 1, "response", "hormuz", sorted(NATIVE_STATUS_FIELDS)),
             _manifest_schema(CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_STATUS_SCHEMA_VERSION,
                 "cli-output", "hormuz", ["schema_id", "schema_version", "phase", "router", "scope",
                 "configuration", "retained_settings", "generation", "client_version", "owned_settings"]),
@@ -579,6 +585,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         ("hormuz.local-acquisition", 1): _validate_acquisition_receipt,
         ("hormuz.local-acquisition-error", 1): _validate_acquisition_error,
         ("hormuz.cloud-readiness", 1): _validate_cloud_readiness,
+        (NATIVE_STATUS_SCHEMA_ID, 1): _validate_native_status,
         (LOCAL_SETUP_SCHEMA_ID, 1): _validate_local_setup,
         (LOCAL_SETUP_SCHEMA_ID, 2): _validate_local_setup_v2,
         (LOCAL_SETUP_SCHEMA_ID, 3): _validate_local_setup_v3,

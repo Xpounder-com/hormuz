@@ -34,3 +34,7 @@
   ChatGPT backend; its validity and permitted account scope belong to that backend.
 - **Native catalog:** Account-scoped model metadata available through the native
   Codex path; discovery is separate from permission to execute model requests.
+- **Native response:** Model execution authorized by the coding client's native
+  account grant.
+- **Continuation affinity:** The association between provider state, tool results
+  and the identity, account and execution destination that produced them.
