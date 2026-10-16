@@ -309,6 +309,12 @@ class CodingProbeWorkflowTests(unittest.TestCase):
                                      "qualification-probe", armed["probe_id"])
                 self.assertEqual(second["status"], 200, second)
                 self.assertEqual(second["headers"]["x-hormuz-work-id"], result["headers"]["x-hormuz-work-id"])
+                malformed = json.loads(json.dumps(request))
+                malformed["input"] += [{"type": "message", "role": [], "content": "Malformed continuation"}]
+                request_file.write_text(json.dumps(malformed))
+                denied = self.client("request-file", str(request_file), "bound-conversation",
+                                     "qualification-probe", armed["probe_id"])
+                self.assertEqual(denied["status"], 403, denied)
                 request["input"][first_call_index]["call_id"] = "changed-provider-call"
                 request["input"] += second["body"]["output"]
                 request_file.write_text(json.dumps(request))

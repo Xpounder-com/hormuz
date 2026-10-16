@@ -25,6 +25,7 @@ def coding_input(value, *, schema_version=1):
     result = []
     for item in value:
         if (type(item) is dict and item.get("type") == "message"
+                and type(item.get("role")) is str
                 and item.get("role") in {"system", "developer", "user"}
                 and type(item.get("id")) is str
                 and re.fullmatch(r"msg_[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", item["id"])):
