@@ -40,6 +40,10 @@ typed `input_text`, plus assistant `output_text`/`refusal` replay with validated
 passive citations. Active file/image/media inputs and nested provider reference
 parts remain unsupported until separately qualified. Literal text mentioning
 file IDs is still text; passive citation metadata does not fetch a file.
+Tool declarations accept host-owned `function`/`custom` tools, optionally grouped
+in one namespace. Tool selectors accept those same kinds, their allowlists, or
+`auto`/`none`/`required`. Provider-hosted file search, containers, MCP and other
+unqualified tools are rejected before egress, including nested declarations.
 
 A configured alias takes precedence over native catalog slugs; aliases owned by
 other destinations are blocked. Without an exact alias, an unambiguous native

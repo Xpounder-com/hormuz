@@ -17,6 +17,7 @@ from .compaction_formats import MAX_REQUEST_BYTES as MAX_COMPACT_INSPECTION_BYTE
 from .redaction import RedactionLimitError, SecretRedactor
 from .native_codex_stream import NativeCodexStream
 from .native_codex_state import NativeConversationBusy
+from .native_codex_tools import validate_native_tools
 
 
 REQUEST_FIELDS = {"model", "input", "instructions", "stream", "store", "background", "max_output_tokens",
@@ -66,6 +67,7 @@ def _native_request(handler):
         for key in ("tools", "include"):
             if key in value and (type(value[key]) is not list or len(value[key]) > 256):
                 raise ValueError()
+        validate_native_tools(value)
         return {**value, "store": False}
     except ValueError:
         handler._send_error("invalid_request", "Native HTTP Responses requires an unambiguous bounded streaming request without storage, background or server-side conversation state.", 400)

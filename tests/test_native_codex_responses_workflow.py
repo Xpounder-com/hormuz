@@ -925,6 +925,43 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                     self.assertEqual(result["status"], 200, result)
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 3))
 
+    def test_native_tool_declarations_and_selectors_cannot_enable_unqualified_hosted_state(self):
+        function = {"type": "function", "name": "fixture_function", "parameters": {"type": "object"},
+                    "strict": False, "async": True, "allowed_callers": ["direct", "programmatic"]}
+        custom = {"type": "custom", "name": "fixture_custom", "format": {"type": "text"}}
+        namespace = {"type": "namespace", "name": "fixture_namespace", "description": "Host tools",
+                     "tools": [function, custom]}
+        hosted = [{"type": "file_search", "vector_store_ids": ["foreign-store"]},
+                  {"type": "code_interpreter", "container": "foreign-container"},
+                  {"type": "mcp", "server_url": "https://unqualified.example.invalid", "require_approval": "never"}]
+        invalid = [{"tools": [tool]} for tool in hosted]
+        invalid += [{"tools": [{**namespace, "tools": [hosted[0]]}]},
+                    {"tools": [{"type": {}, "name": "disguised"}]},
+                    {"tool_choice": {"type": "file_search"}},
+                    {"tool_choice": {"type": "mcp", "server_label": "unqualified"}},
+                    {"tool_choice": {"type": "allowed_tools", "mode": "auto", "tools": [hosted[1]]}}]
+        choices = ["auto", {"type": "function", "name": "fixture_function"},
+                   {"type": "custom", "name": "fixture_custom", "namespace": "fixture_namespace"},
+                   {"type": "allowed_tools", "mode": "required", "tools": [{"type": "function", "name": "fixture_function"}]}]
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                for request in invalid:
+                    with self.subTest(request=request):
+                        before = len(native_requests)
+                        denied = self.native(submit, request=request)
+                        self.assertEqual(denied["status"], 400, denied)
+                        self.assertEqual(len(native_requests), before)
+                before = len(native_requests)
+                for choice in choices:
+                    accepted = self.native(submit, request={"tools": [function, custom, namespace], "tool_choice": choice})
+                    self.assertEqual(accepted["status"], 200, accepted)
+                    self.assertEqual(native_requests[-1]["body"]["tools"], [function, custom, namespace])
+                    self.assertEqual(native_requests[-1]["body"]["tool_choice"], choice)
+                self.assertEqual(len(native_requests), before + len(choices))
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_unsupported_or_ambiguous_native_request_envelopes_never_reach_a_provider(self):
         cases = [
             {"request": {"stream": False}}, {"request": {"store": True}}, {"request": {"background": True}},

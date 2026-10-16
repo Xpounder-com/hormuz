@@ -12,7 +12,9 @@
     "message_text_parts": ["input_text", "output_text", "refusal"],
     "assistant_only_message_parts": ["output_text", "refusal"],
     "tool_result_text_parts": ["input_text"],
-    "active_media_or_provider_reference_parts": false
+    "active_media_or_provider_reference_parts": false,
+    "tool_declaration_kinds": ["function", "custom", "namespace"],
+    "provider_hosted_tools": false
   },
   "status_fields": [
     "schema_id", "schema_version", "scope", "generation", "enabled", "billing", "cost_status", "cost_usd",
