@@ -299,6 +299,23 @@ class LocalAcquisitionWorkflowTests(unittest.TestCase):
             self.assertFalse(self.directory.exists())
             self.assertEqual(self.client.client("inspect")["model"], "original-model")
 
+    def test_catalog_user_expansion_failure_returns_a_fixed_error_without_effects(self):
+        value, payloads = self.prepare()
+        with artifacts(payloads) as (origin, observed, _):
+            self.catalog(value, origin)
+            catalog = "~hormuz_nonexistent_review_user_548/catalog.json"
+            failed = self.acquire("--download", "--catalog", catalog, check=False)
+            self.assertEqual(failed.returncode, 2, failed.stderr)
+            error = json.loads(failed.stderr)
+            validate_contract(error)
+            self.assertEqual(error["error"], {
+                "code": "catalog_invalid", "action": "select_reviewed_catalog"})
+            self.assertNotIn(catalog, failed.stderr)
+            self.assertEqual(observed, [])
+            self.assertFalse(self.directory.exists())
+            self.assertFalse(self.client.path.exists())
+            self.assertEqual(self.client.client("inspect")["model"], "original-model")
+
     def test_absolute_download_deadline_closes_a_source_that_keeps_headers_incomplete(self):
         value, payloads = self.prepare()
         with artifacts(payloads) as (origin, observed, controls):

@@ -93,7 +93,7 @@ def _catalog(path):
         if value["schema_id"] != "hormuz.local-acquisition-catalog":
             raise ValueError()
         return value
-    except (OSError, ValueError, TypeError, KeyError, RecursionError, ContractValidationError, LocalAcquisitionError):
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, ContractValidationError, LocalAcquisitionError):
         raise LocalAcquisitionError("catalog_invalid") from None
 
 
