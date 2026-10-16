@@ -6,6 +6,26 @@ from .finance_attempts import NativeUsageAccumulator
 
 
 MAX_EVENT_BYTES = 1024 * 1024
+ANNOTATION_FIELDS = {
+    "url_citation": (("url", "title"), ("start_index", "end_index")),
+    "file_citation": (("file_id", "filename"), ("index",)),
+    "container_file_citation": (("container_id", "file_id", "filename"), ("start_index", "end_index")),
+    "file_path": (("file_id",), ("index",)),
+}
+
+
+def _validate_annotations(annotations):
+    if type(annotations) is not list:
+        raise ValueError("native_annotation_invalid")
+    for annotation in annotations:
+        if (type(annotation) is not dict or type(annotation.get("type")) is not str
+                or annotation["type"] not in ANNOTATION_FIELDS):
+            raise ValueError("native_annotation_invalid")
+        strings, indices = ANNOTATION_FIELDS[annotation["type"]]
+        if (any(type(annotation.get(field)) is not str for field in strings)
+                or any(type(annotation.get(field)) is not int or annotation[field] < 0 for field in indices)
+                or "end_index" in indices and annotation["end_index"] < annotation["start_index"]):
+            raise ValueError("native_annotation_invalid")
 
 
 class NativeCodexStream:
@@ -117,9 +137,8 @@ class NativeCodexStream:
                     field = "text" if part["type"] == "output_text" else "refusal"
                     if type(part.get(field)) is not str:
                         raise ValueError("native_output_invalid")
-                    if field == "text" and (type(part.get("annotations")) is not list
-                            or any(type(annotation) is not dict for annotation in part["annotations"])):
-                        raise ValueError("native_output_invalid")
+                    if field == "text":
+                        _validate_annotations(part.get("annotations"))
             elif kind == "reasoning":
                 for field, part_type in (("summary", "summary_text"), ("content", "reasoning_text")):
                     parts = item.get(field)

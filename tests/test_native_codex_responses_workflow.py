@@ -426,6 +426,82 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                         self.assertEqual(len(native_requests), 2 if valid else 1)
             self.assertEqual((local_requests, cloud_requests), ([], []))
 
+    def test_native_annotations_require_known_variants_and_fields_before_affinity(self):
+        call = {"type": "function_call", "call_id": "annotation-call", "name": "fixture_tool", "arguments": "{}"}
+        url = {"type": "url_citation", "url": "https://fixture.invalid/source", "title": "fixture", "start_index": 0, "end_index": 5}
+        file = {"type": "file_citation", "file_id": "fixture-file", "filename": "fixture.txt", "index": 0}
+        container = {"type": "container_file_citation", "container_id": "fixture-container",
+                     "file_id": "fixture-file", "filename": "fixture.txt", "start_index": 0, "end_index": 5}
+        cases = [(annotation, False) for annotation in ({}, {"type": "url_citation"},
+            {**url, "start_index": True}, {**url, "end_index": -1}, {**url, "start_index": 6},
+            {**file, "index": "0"}, {k: v for k, v in file.items() if k != "filename"},
+            {k: v for k, v in container.items() if k != "container_id"}, {"type": "unknown_annotation"})]
+        cases += [(annotation, True) for annotation in (url, file, container,
+                  {"type": "file_path", "file_id": "fixture-file", "index": 0})]
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for annotation, valid in cases:
+                with self.subTest(annotation=annotation):
+                    message = completed()["response"]["output"][0]
+                    message["content"][0]["annotations"] = [annotation]
+                    data = ("data: " + json.dumps(completed(output=[call, message])) + "\n\n").encode()
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                            result = self.native(submit)
+                            status = submit(method="GET", path="/v1/router/native-codex", absolute_path=True,
+                                headers={"X-Gateway-Key": NATIVE_HEADERS["X-Gateway-Key"]})["body"]
+                            self.assertEqual((status["succeeded"], status["outcome_unknown"]),
+                                             (1, 0) if valid else (0, 1), status)
+                            if valid:
+                                self.assertEqual(result["body"], data.decode())
+                            replay = self.native(submit, request={"input": [call,
+                                {"type": "function_call_output", "call_id": "annotation-call", "output": "result"}]})
+                            self.assertEqual(replay["status"], 200 if valid else 403, replay)
+                        self.assertEqual(len(native_requests), 2 if valid else 1)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_nullable_native_tool_ids_preserve_call_binding_and_continuation(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for kind in ("function_call", "custom_tool_call"):
+                with self.subTest(kind=kind):
+                    field = "arguments" if kind == "function_call" else "input"
+                    original = '{"value":"original"}' if kind == "function_call" else "original"
+                    changed = '{"value":"changed"}' if kind == "function_call" else "changed"
+                    call = {"id": None, "type": kind, "call_id": "nullable-call", "name": "fixture_tool", field: original}
+                    data = ("data: " + json.dumps(completed(output=[call])) + "\n\n").encode()
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                            first = self.native(submit)
+                            self.assertEqual(first["body"], data.decode())
+                            status = submit(method="GET", path="/v1/router/native-codex", absolute_path=True,
+                                headers={"X-Gateway-Key": NATIVE_HEADERS["X-Gateway-Key"]})["body"]
+                            self.assertEqual((status["succeeded"], status["outcome_unknown"]), (1, 0), status)
+                            result = {"type": kind + "_output", "call_id": "nullable-call", "output": "result"}
+                            denied = self.native(submit, request={"input": [{**call, field: changed}, result]})
+                            self.assertEqual(denied["status"], 403, denied)
+                            self.assertEqual(len(native_requests), 1)
+                            replay = self.native(submit, request={"input": [call, result]})
+                            self.assertEqual(replay["status"], 200, replay)
+                        self.assertEqual(len(native_requests), 2)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_unsupported_or_ambiguous_native_request_envelopes_never_reach_a_provider(self):
         cases = [
             {"request": {"stream": False}}, {"request": {"store": True}}, {"request": {"background": True}},

@@ -55,7 +55,10 @@ items are messages, reasoning, function/custom calls and compaction. Messages
 require provider IDs, status and text/refusal content; text includes annotations.
 Reasoning requires an ID and typed summary, with optional typed reasoning text
 and nullable encrypted content. Compaction requires an ID and encrypted content.
-Function/custom calls retain their required call/name/argument or input fields.
+Function/custom calls retain their required call/name/argument or input fields;
+their optional item IDs may be omitted or null without weakening call binding.
+Text annotations accept the documented URL/file/container-file citation and
+file-path shapes, including their required fields and nonnegative ordered indices.
 These follow the [official output message](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_output_message.py)
 and [reasoning item](https://github.com/openai/openai-python/blob/main/src/openai/types/responses/response_reasoning_item.py)
 schemas checked October 16, 2026. Unsupported variants remain unknown until qualified.

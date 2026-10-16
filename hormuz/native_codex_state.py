@@ -43,6 +43,7 @@ def continuation_tags(items):
             opaque.encode("utf-8")
             tags.append(("opaque", opaque))
         if ("id" in item and kind not in {"function_call_output", "custom_tool_call_output"}
+                and not (kind in {"function_call", "custom_tool_call"} and item["id"] is None)
                 and not (message and item.get("role") in {"user", "developer", "system"})):
             if (type(item["id"]) is not str or not 1 <= len(item["id"]) <= 256
                     or any(not 33 <= ord(c) <= 126 for c in item["id"])):
