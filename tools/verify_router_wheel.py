@@ -38,7 +38,7 @@ def main():
                         'assert Path(hormuz.__file__).resolve().is_relative_to(Path("installed").resolve())'],
                        cwd=temporary, env=environment, check=True, timeout=10)
         subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
-                        '-p', 'test_*workflow.py', '-f', '-q'],
+                        '-p', 'test_*workflow.py', '-f', '-v'],
                        # The 250-test installed suite exceeded 540 seconds on
                        # two CI runners. Keep a finite eleven-minute allowance
                        # and one minute for build/artifacts in the package job.
