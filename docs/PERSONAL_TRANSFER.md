@@ -53,6 +53,13 @@ removes the repository redirect. The canonical Pages repository and its
 `usehormuz.github.io` domain stay where they are. This patch does not change
 Pages ownership, DNS, Search Console verification, or the source snapshot.
 
+The audit also found a legacy repository Pages site under Xpounder. GitHub
+does not redirect transferred Pages sites. Inventory links to
+`https://xpounder-com.github.io/hormuz/` and plan their redirect or retirement
+separately; the canonical `usehormuz.github.io` publication does not prove those
+legacy URLs will survive. Do not recreate the transferred repository slug to
+host a redirect, because that would remove Git repository redirects.
+
 ## Later cutover
 
 These are manual instructions for the separately approved maintenance window:
@@ -78,6 +85,8 @@ These are manual instructions for the separately approved maintenance window:
    external integrations that bind an owner name. Recheck token grants and
    installation access; retained secrets and webhooks do not prove that their
    external permissions still work. Requalify paused automation before resuming.
+   Review the retained `V1_RELEASE_ADMIN_TOKEN` grant specifically against the
+   destination owner, without printing or changing its value during preparation.
 
 GitHub Free supports rulesets for this **public** repository. The plan decision
 for any private controller belongs to that repository's cutover review; no
