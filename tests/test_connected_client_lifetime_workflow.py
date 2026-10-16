@@ -311,7 +311,7 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             self.assertEqual(self.client("inspect")["model"], "original-model")
             self.assertTrue((engine / "stopped").is_file())
 
-    def test_coding_readiness_rejects_impossible_qualified_outcome_counts(self):
+    def test_coding_readiness_rejects_corrupt_public_evidence_summaries(self):
         with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
             value, _, engine = self.managed_configuration(cloud)
             value["upstream_timeout_seconds"] = 6
@@ -328,6 +328,22 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                         invalid = json.loads(json.dumps(state))
                         invalid["routes"][0]["coding_evidence"].update(
                             planned=planned, evaluated=evaluated, passed=passed)
+                        with self.assertRaises(ContractValidationError):
+                            validate_contract(invalid)
+                for field in ("plan_sha256", "receipt_sha256"):
+                    for digest in ("x", "g" * 64, "A" * 64, "a" * 63, "a" * 65, "", None, [], {}):
+                        with self.subTest(field=field, digest=digest):
+                            invalid = json.loads(json.dumps(state))
+                            invalid["routes"][0]["coding_evidence"][field] = digest
+                            with self.assertRaises(ContractValidationError):
+                                validate_contract(invalid)
+                for field, corrupt in (("coding_readiness", []), ("coding_readiness", {}),
+                                       ("coding_readiness", None), ("coding_readiness", True),
+                                       ("coding_readiness", 1), ("coding_readiness", "unsupported"),
+                                       ("task_types", None), ("task_types", 1), ("task_types", {})):
+                    with self.subTest(field=field, corrupt=corrupt):
+                        invalid = json.loads(json.dumps(state))
+                        invalid["routes"][0][field] = corrupt
                         with self.assertRaises(ContractValidationError):
                             validate_contract(invalid)
                 self.assertEqual(requests, [])

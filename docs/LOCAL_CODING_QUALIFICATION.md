@@ -75,6 +75,9 @@ observed unsuccessful episodes are `failed`; a different execution subject is
 `code_change`. Review remains unsupported. A healthy engine can remain unqualified.
 Qualified public summaries require at least 16 planned cases and identical
 planned, evaluated and passed counts. Contradictory summaries fail validation.
+Summary plan/receipt digests require 64 lowercase hexadecimal characters.
+Malformed readiness or task-list types raise `ContractValidationError`, like
+other invalid summary fields.
 Storage faults return unavailable diagnostic results without stopping the owned
 router or engine; restoring storage permits the same generation to recover.
 Nonfinite numeric input, including exponent overflow, returns `invalid_json`
