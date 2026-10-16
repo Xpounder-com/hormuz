@@ -104,7 +104,8 @@ After installation, ask: **“Use Hormuz to set up local-only routing for Codex.
 The skill checks the installed router, client version and route qualification
 before using shared setup. Plugin installation installs instructions; the
 router runtime and a qualified local model are separate prerequisites. The
-implemented persistent connection targets Codex CLI 0.147.0. Other agents can
+implemented persistent connection supports Codex CLI 0.147.0 and the
+[0.160.0 single-agent HTTP profile](docs/CODEX_0160.md). Other agents can
 use the skill to manage that connection; their own inference-routing adapters
 are not implemented. See [installation, updates, removal and compatibility](docs/AGENT_INSTALLATION.md).
 

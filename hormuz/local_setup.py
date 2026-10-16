@@ -8,25 +8,30 @@ from pathlib import Path
 import platform
 import re
 import secrets
+import shutil
 import socket
 import stat
 import tempfile
 import time
 
-from .client_versions import SUPPORTED_CODEX_VERSION
+from .client_versions import SUPPORTED_CODEX_VERSIONS
 from .compaction_formats import strict_json_loads
-from .connected_client import ConnectedClientError, _directory, _lock_descriptor, _read
+from .connected_client import ConnectedClientError, _directory, _lock_descriptor, _read, _qualify_client
 from .contracts import ContractValidationError, LOCAL_SETUP_SCHEMA_ID, contract_envelope, validate_contract
 from .managed_llama import ManagedLlamaError, ManagedLlamaProfile
 from .local_credentials import LocalCredentialError, read_local_credential
 
 
-DEFAULT_PROFILE = "local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json"
+DEFAULT_PROFILES = {
+    "0.147.0": "local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json",
+    "0.160.0": "local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json",
+}
 
 
-def _profile(path):
+def _profile(path, client_version):
     try:
-        value = strict_json_loads(_read(Path(path).expanduser() if path else Path(__file__).with_name(DEFAULT_PROFILE)))
+        value = strict_json_loads(_read(Path(path).expanduser() if path else
+                                       Path(__file__).with_name(DEFAULT_PROFILES[client_version])))
         if type(value) is not dict:
             raise ValueError()
         validate_contract(value)
@@ -34,7 +39,7 @@ def _profile(path):
             raise ValueError()
     except (ContractValidationError, ValueError, TypeError, KeyError, RecursionError):
         raise ConnectedClientError("router_configuration_unsupported") from None
-    if value["client_version"] != SUPPORTED_CODEX_VERSION:
+    if value["client_version"] not in SUPPORTED_CODEX_VERSIONS:
         raise ConnectedClientError("version_unsupported")
     if (value["system"], value["machine"]) != (platform.system(), platform.machine()):
         raise ConnectedClientError("platform_unsupported")
@@ -203,7 +208,13 @@ def _credential_candidate(state, *, configuration_exists):
 
 
 def setup_local(lifetime, args):
-    profile = _profile(args.qualification)
+    program = shutil.which(args.executable)
+    if program is None:
+        raise ConnectedClientError("client_unavailable")
+    client_version = _qualify_client(program)
+    profile = _profile(args.qualification, client_version)
+    if client_version != profile["client_version"]:
+        raise ConnectedClientError("version_unsupported")
     if args.credential_env is not None and (re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", args.credential_env) is None
             or not os.environ.get(args.credential_env)):
         raise ConnectedClientError("authentication_unsupported")
@@ -248,7 +259,8 @@ def setup_local(lifetime, args):
             if existing is not None:
                 if not args.dry_run:
                     _directory(state)
-                connection = lifetime.connect(path, executable=args.executable, actor_id=args.actor, preview=args.dry_run)
+                connection = lifetime.connect(path, executable=args.executable, actor_id=args.actor, preview=args.dry_run,
+                                              expected_client_version=profile["client_version"])
             else:
                 descriptor, temporary = tempfile.mkstemp(prefix=_stage_prefix(path), dir=path.parent)
                 try:
@@ -259,7 +271,8 @@ def setup_local(lifetime, args):
                         stream.write(preview_text)
                         stream.flush()
                         os.fsync(stream.fileno())
-                    connection = lifetime.connect(Path(temporary), executable=args.executable, actor_id=args.actor, preview=True)
+                    connection = lifetime.connect(Path(temporary), executable=args.executable, actor_id=args.actor, preview=True,
+                                                  expected_client_version=profile["client_version"])
                     if not args.dry_run:
                         if publish_credential is not None:
                             publish_credential()
@@ -279,7 +292,8 @@ def setup_local(lifetime, args):
                         finally:
                             os.close(parent)
                         _directory(state)
-                        connection = lifetime.connect(path, executable=args.executable, actor_id=args.actor)
+                        connection = lifetime.connect(path, executable=args.executable, actor_id=args.actor,
+                                                      expected_client_version=profile["client_version"])
                 finally:
                     if os.path.exists(temporary):
                         os.unlink(temporary)

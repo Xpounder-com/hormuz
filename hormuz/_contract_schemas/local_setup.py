@@ -30,7 +30,7 @@ def validate_profile(value):
         if type(value[key]) is not int or not 1 <= value[key] <= maximum:
             raise ContractValidationError("invalid local setup limit")
     choices = {
-        "capabilities": {"responses", "text", "streaming", "tools", "codex_http", "structured_output"},
+        "capabilities": {"responses", "text", "streaming", "tools", "codex_http", "codex_http_0160", "structured_output"},
         "task_types": {"summarization", "translation", "structured_extraction", "code_change", "code_review"},
     }
     for key, allowed in choices.items():

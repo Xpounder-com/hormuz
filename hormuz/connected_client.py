@@ -25,7 +25,7 @@ import time
 import tomllib
 from urllib.parse import urlsplit
 
-from .client_versions import SUPPORTED_CODEX_VERSION
+from .client_versions import SUPPORTED_CODEX_VERSIONS
 from .config import GatewayConfig
 from .compaction_formats import strict_json_loads
 from .contracts import (
@@ -66,10 +66,13 @@ def _control_directory():
     return Path("/tmp").resolve() / ("hormuz-connected-" + str(os.getuid()))
 
 
-def _provider_block(provider, origin, credential_env=None, *, helper=None, generation=None):
+def _provider_block(provider, origin, credential_env=None, *, helper=None, generation=None, client_version="0.147.0"):
     block = ('\n[model_providers.' + provider + ']\nname = "Hormuz"\n'
             + 'base_url = ' + json.dumps(origin + '/v1') + '\n'
             + 'wire_api = "responses"\n')
+    if client_version == "0.160.0":
+        block += ('supports_websockets = false\nrequest_max_retries = 0\nstream_max_retries = 0\n'
+                  + 'model_catalog_url = ' + json.dumps(origin + '/v1/models') + '\n')
     if helper is None:
         return block + 'requires_openai_auth = false\n' + 'env_key = ' + json.dumps(credential_env) + '\n'
     return (block + '\n[model_providers.' + provider + '.auth]\n'
@@ -128,7 +131,7 @@ def _parse_record(text):
                 or (helper is None and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table["env_key"]))
                 or record["provider_block"] != _provider_block(record["installed"]["model_provider"],
                     f"http://127.0.0.1:{endpoint.port}", table.get("env_key"), helper=helper,
-                    generation=record["generation"])):
+                    generation=record["generation"], client_version=record["client_version"])):
             raise ValueError()
         retained = record.get("retained_settings", [])
         if (not isinstance(retained, list) or len(retained) > 4 or len(set(retained)) != len(retained)
@@ -171,9 +174,11 @@ def _qualify_client(program):
                 output.extend(data)
                 if len(output) > 4096:
                     raise ConnectedClientError("version_unsupported")
-        if (process.wait(timeout=max(0.01, deadline - time.monotonic()))
-                or bytes(output).strip() != ("codex-cli " + SUPPORTED_CODEX_VERSION).encode("ascii")):
+        versions = {("codex-cli " + version).encode("ascii"): version for version in SUPPORTED_CODEX_VERSIONS}
+        version = versions.get(bytes(output).strip())
+        if process.wait(timeout=max(0.01, deadline - time.monotonic())) or version is None:
             raise ConnectedClientError("version_unsupported")
+        return version
     finally:
         process.stdout.close()
         # The direct executable can exit while a descendant keeps stdout open.
@@ -537,7 +542,7 @@ class ConnectedClientLifetime:
                 raise ConnectedClientError("authentication_unsupported")
             return identity.token
 
-    def connect(self, config_path: Path, *, executable: str, actor_id=None, preview=False):
+    def connect(self, config_path: Path, *, executable: str, actor_id=None, preview=False, expected_client_version=None):
         with self._transaction():
             _require_unmanaged(self.home)
             config_path = config_path.expanduser().absolute().resolve()
@@ -560,8 +565,12 @@ class ConnectedClientLifetime:
             program = shutil.which(executable)
             if program is None:
                 raise ConnectedClientError("client_unavailable")
-            _qualify_client(program)
+            client_version = _qualify_client(program)
+            if expected_client_version is not None and client_version != expected_client_version:
+                raise ConnectedClientError("version_unsupported")
             if _read(config_path) != gateway_text:
+                raise ConnectedClientError("setup_changed")
+            if existing and existing["phase"] != "disconnected" and existing["client_version"] != client_version:
                 raise ConnectedClientError("setup_changed")
             if existing and existing["phase"] != "disconnected" and any(existing[key] != value for key, value in intent.items()):
                 raise ConnectedClientError("setup_changed")
@@ -586,7 +595,7 @@ class ConnectedClientLifetime:
                 if preview:
                     return _lifetime_envelope(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
                            {"phase": "preview", "scope": "codex_user_defaults",
-                            "client_version": SUPPORTED_CODEX_VERSION, "settings": existing["installed"],
+                            "client_version": client_version, "settings": existing["installed"],
                             "changes": {}, "router": "ready",
                             **({"local_runtime": {"ownership": "owned", "state": "ready"}}
                                if existing.get("managed_llama") else {})}, existing.get("managed_llama", False))
@@ -632,14 +641,14 @@ class ConnectedClientLifetime:
                       "entrypoint": str(Path(__file__).with_name("_local_auth_helper.py").resolve()),
                       "credential_sha256": hashlib.sha256(identity.token.encode()).hexdigest()} if identity.token_file is not None else None
             block = _provider_block(provider, f"http://127.0.0.1:{config.listen.port}", identity.token_env,
-                                    helper=helper, generation=generation)
+                                    helper=helper, generation=generation, client_version=client_version)
             text += block
             _document(text)
             control_directory = _control_directory()
             _directory(control_directory)
             record = {"schema_id": JOURNAL_SCHEMA_ID, "schema_version": JOURNAL_SCHEMA_VERSION,
                       "generation": generation, "phase": "prepared",
-                      "client_version": SUPPORTED_CODEX_VERSION, "installed": installed, "original": original,
+                      "client_version": client_version, "installed": installed, "original": original,
                       "provider_block": block, **intent,
                       "control": str(control_directory / (generation + ".sock"))}
             if managed is not None:
@@ -649,7 +658,7 @@ class ConnectedClientLifetime:
             if preview:
                 return _lifetime_envelope(CONNECTED_CLIENT_PREVIEW_SCHEMA_ID,
                        {"phase": "preview", "scope": "codex_user_defaults",
-                        "client_version": SUPPORTED_CODEX_VERSION, "settings": installed,
+                        "client_version": client_version, "settings": installed,
                         "changes": {**{key: "replace" if key in document else "add" for key in installed},
                                     "provider_table": "add"}, "router": "not_started",
                         **({"local_runtime": {"ownership": "planned", "state": "not_started"}}

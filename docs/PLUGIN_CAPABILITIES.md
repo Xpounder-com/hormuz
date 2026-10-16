@@ -1,9 +1,10 @@
 # Plugin capability contract, version 1
 
-The 0.2.0 skills-only plugin adds focused diagnosis, explanation, qualification,
+The 0.2.1 skills-only plugin adds focused diagnosis, explanation, qualification,
 recommendation, privacy/budget, insights and maintenance workflows. All hosts
-call the same CLI; the persistent routing adapter remains pinned Codex CLI
-0.147.0. Installing the plugin does not connect a client or install assets.
+call the same CLI; the persistent routing adapter supports exact Codex CLI
+0.147.0 and [the 0.160.0 single-agent HTTP profile](CODEX_0160.md). Installing
+the plugin does not connect a client or install assets.
 
 The [capability workflow](../skills/hormuz/references/capabilities.md) documents
 commands, bounds, activation, output privacy and unsupported scope.
@@ -86,7 +87,7 @@ Verification uses the agreed public CLI/connection seam and synthetic client and
 provider boundaries. Live macOS/model quality is not established by synthetic
 workflow tests. A separately scoped smoke test is required for a live claim.
 
-Override inspection follows the supported Codex 0.147.0 configuration loader:
+Override inspection follows the selected supported Codex configuration loader:
 user defaults, selected profile file, trusted project layers, generic `-c`
 overrides, then dedicated launch flags. Project provider/profile settings are
 ignored by that client. Selected files are bounded and checked for safe local
@@ -94,3 +95,6 @@ ownership; missing profiles, malformed files and unsupported supplied flags
 remain explicit inspection failures. See the pinned
 [loader](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/config/src/loader/mod.rs)
 and [CLI precedence](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/tui/src/lib.rs).
+The 0.160.0 version is selected from the observed executable or owned journal;
+its `--ignore-user-config` bypass is attributed to launch settings. Supplied
+unsupported versions retain the connection receipt with unobserved routing.

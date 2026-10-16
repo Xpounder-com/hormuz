@@ -1,0 +1,14 @@
+{
+  "model": "local-code",
+  "stream": true,
+  "store": false,
+  "input": [{"type": "message", "id": "msg_synthetic", "role": "user", "content": [{"type": "input_text", "text": "Review this Python function: def add(a, b): return a + b"}]}],
+  "instructions": "Review the supplied synthetic Python function.",
+  "reasoning": {},
+  "include": ["reasoning.encrypted_content"],
+  "parallel_tool_calls": false,
+  "tool_choice": "auto",
+  "tools": [{"type": "function", "name": "exec_command", "description": "Run a command in the isolated synthetic project.", "strict": false, "parameters": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"], "additionalProperties": false}}],
+  "prompt_cache_key": "synthetic-codex-0160-session",
+  "client_metadata": {"thread_id": "synthetic-codex-0160-thread", "session_id": "synthetic-codex-0160-session", "turn_id": "synthetic-codex-0160-turn", "root_turn_id": "synthetic-codex-0160-turn", "x-codex-turn-metadata": "{\"request_kind\":\"turn\",\"thread_source\":\"user\"}"}
+}

@@ -15,6 +15,7 @@ import subprocess
 import time
 from urllib.request import Request
 
+from . import __version__
 from .local_transport import open_local_upstream
 
 from .config import GatewayConfig
@@ -292,7 +293,7 @@ def qualify(args):
                           data=json.dumps({'model': args.model, 'stream': False, 'store': False,
                                            'max_output_tokens': 128, **payload}).encode(),
                           headers={'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
-                                   'User-Agent': 'codex_cli_rs/0.147.0', 'X-Hormuz-Routing-Mode': 'local_only',
+                                   'User-Agent': f'Hormuz/{__version__} codex-model-probe', 'X-Hormuz-Routing-Mode': 'local_only',
                                    **({'X-Hormuz-Work-Id': work_id} if work_id else {})})
         with open_local_upstream(request, timeout=min(3, remaining), absolute_timeout=remaining) as response:
             data = _read_probe(response, deadline)

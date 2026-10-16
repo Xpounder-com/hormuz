@@ -202,7 +202,7 @@ class CloudReadinessWorkflowTests(unittest.TestCase):
 
     def test_unsupported_cli_and_managed_settings_do_not_activate_or_read_authorization(self):
         self.write_configuration(self.configuration("http://127.0.0.1:1", "https://cloud.example.invalid/v1"))
-        (self.root / "client-version.txt").write_text("0.160.0")
+        (self.root / "client-version.txt").write_text("0.160.1")
         managed = self.home / "requirements.toml"
         os.mkfifo(managed, mode=0o600)
         before = self.settings.read_bytes(), set(self.home.iterdir())
@@ -211,6 +211,17 @@ class CloudReadinessWorkflowTests(unittest.TestCase):
         codes = {blocker["code"] for blocker in receipt["paths"][0]["blockers"]}
         self.assertTrue({"client_version_unsupported", "managed_configuration"} <= codes)
         self.assertEqual(before, (self.settings.read_bytes(), set(self.home.iterdir())))
+
+    def test_each_supported_cli_reports_its_observed_version_without_changing_settings(self):
+        self.write_configuration(self.configuration("http://127.0.0.1:1", "https://cloud.example.invalid/v1"))
+        before = self.settings.read_bytes(), set(self.home.iterdir())
+        for version in ("0.147.0", "0.160.0"):
+            with self.subTest(version=version):
+                (self.root / "client-version.txt").write_text(version)
+                receipt = self.inspect()
+                self.assertEqual(receipt["client"]["version_check"], "pinned")
+                self.assertEqual(receipt["client"]["pinned_cli_version"], version)
+                self.assertEqual(before, (self.settings.read_bytes(), set(self.home.iterdir())))
 
     def test_api_preflight_does_not_require_secret_environment_or_create_client_home(self):
         self.write_configuration(self.configuration("http://127.0.0.1:1", "https://cloud.example.invalid/v1"))
