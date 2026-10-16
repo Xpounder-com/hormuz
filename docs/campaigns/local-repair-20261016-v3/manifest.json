@@ -1,0 +1,197 @@
+{
+  "document_version": 3,
+  "campaign_id": "local-repair-20261016-v3",
+  "qualification_issue": 537,
+  "status": "prepared_not_executed",
+  "criteria_version": "local-repair.v1",
+  "candidate": {
+    "path": "docs/campaigns/local-repair-20261016-v3/candidate.json",
+    "sha256": "8306ca8b812becee13870651e05928b095882ef763751508420c1ff1d191bca2"
+  },
+  "setup_profile": {
+    "path": "docs/campaigns/local-repair-20261016-v3/setup-profile.json",
+    "sha256": "1a5acc819d01200cabc7dd6633e2a116cf2585c0fcb8963f765787595e94f0c6"
+  },
+  "corpus": {
+    "path": "tests/fixtures/local-coding-campaign-v3.json",
+    "sha256": "fe4660d4840dfcb256157caf79ac7be1d4a022c433dfccdbf911b186d8ffe2b3"
+  },
+  "inventory": [
+    {
+      "case_id": "dev-clamp",
+      "partition": "development",
+      "family": "arithmetic",
+      "task_sha256": "2a29ac2b8bfd827edfcaa7feaa82aaea0422b2577a6ddfb23210f8e70a0ca3ee",
+      "checks_sha256": "da25b64603054b72230db061e79855ed9d3f32b6f31076fa5755ac4eec12b942"
+    },
+    {
+      "case_id": "dev-strip-prefix",
+      "partition": "development",
+      "family": "text",
+      "task_sha256": "575409b0ad0a326760619fb36449d555d4afee75a7478510e1f069d59b2bfd10",
+      "checks_sha256": "fcc045ad3370cc3e2e8306bb1f1ec3105eda3b1566d72877c25269822dd8ff8d"
+    },
+    {
+      "case_id": "dev-rotate-left",
+      "partition": "development",
+      "family": "collections",
+      "task_sha256": "d787acdf265ff59d2bde3a5dec28aaa5e17a6938f8052b0bcc2054f5031460f0",
+      "checks_sha256": "3f83dd8fc94581f1d72a6952b1e0f0c4988e90c0ec9001383c325de44954d3b1"
+    },
+    {
+      "case_id": "dev-positive-counter",
+      "partition": "development",
+      "family": "validation_state",
+      "task_sha256": "e0c6d4f753a9879f5ee0d5bf13ee5b54e1c5378dfcae62bdf05c6e2515d23c6b",
+      "checks_sha256": "65e4123e7ba3a0b5e8f953213a1078d170b9fe997e27372efe413719edabb6d3"
+    },
+    {
+      "case_id": "held-multiple-ceiling",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "task_sha256": "5cb65d4c9fa492f1b687b8a4c8163c4bb2c021b07a31bc27f69e770d7efa59d4",
+      "checks_sha256": "a3643dd9fc2eca367ae579b85284903e62707d69a264690543cde9e5155c8760"
+    },
+    {
+      "case_id": "held-interval-overlap",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "task_sha256": "b348567f2bd0e83d942aa32cdde9c279fb50ff8afc3ba2291b4cc91d703b40fa",
+      "checks_sha256": "8a9545aca63711b6fc2b70fa3979cafd93cb2fa55ae4544435686c17dda13e4c"
+    },
+    {
+      "case_id": "held-weighted-total",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "task_sha256": "6b6bedfb0da7ea4ffeb5ab267daa77d53101ce01939ad0667a0467a019a2fe64",
+      "checks_sha256": "5f54061d8494623cfdea1d3808b51f5eb691cc92288537036b6299c10c662c2a"
+    },
+    {
+      "case_id": "held-collapse-spaces",
+      "partition": "held_out",
+      "family": "text",
+      "task_sha256": "ae3b1cf69b3b36a48df9b3d502adff5467b7fd6ccb830d637dbfd4daf615a80c",
+      "checks_sha256": "a70703d17b39e15636f9797bbdeb043b4947e68f9b8be0b5f6c1d39ce8f16e9b"
+    },
+    {
+      "case_id": "held-ensure-suffix",
+      "partition": "held_out",
+      "family": "text",
+      "task_sha256": "0154ce846faf2ce0b1b1b101449b1f5e6423233cc8c49b286a0ab11fc89ecb32",
+      "checks_sha256": "39d32b39a756a75fad20278fa0c62bc7096afc10be505b6f4dc6c6d022159f54"
+    },
+    {
+      "case_id": "held-split-once",
+      "partition": "held_out",
+      "family": "text",
+      "task_sha256": "028a9843406c62485967ef8801e385cc8662c361a9124a03fd43fc20f9cdd264",
+      "checks_sha256": "447c6f805fb5ed9f894344f05087b86f7e7f3889d5b7369eb61c881f7911ca77"
+    },
+    {
+      "case_id": "held-adjacent-pairs",
+      "partition": "held_out",
+      "family": "collections",
+      "task_sha256": "d76bf678ca1a324a7e16f0be226c7829553fc9a321e9a930b1ec9198480c6a8f",
+      "checks_sha256": "769a007fb3db526e91d59b8e6fa02c3f9bc204cb1640216ebf187867720a529a"
+    },
+    {
+      "case_id": "held-merge-counts",
+      "partition": "held_out",
+      "family": "collections",
+      "task_sha256": "2fe1c7c1449229995d1dced026c81334537b57a56339a86703dd7a0932ea5c42",
+      "checks_sha256": "57f63fd96c98400f91f1371214cd2fdc3fe89df147518b39e714b703e4eea1f4"
+    },
+    {
+      "case_id": "held-last-index",
+      "partition": "held_out",
+      "family": "collections",
+      "task_sha256": "99967d2b4bfd9f049d1b7a3507eaf349fd045675e690f49c1af026b793a99c51",
+      "checks_sha256": "c7330bbe9e5f68022d98878e8ca92a23b70755f9d8f6693ac5bbaf264f4e117e"
+    },
+    {
+      "case_id": "held-strict-percentage",
+      "partition": "held_out",
+      "family": "validation_state",
+      "task_sha256": "1d7caf4402329c43a763daa2e2ee887a9f3f7e41f2ed04c86e19c9f0172c3ba3",
+      "checks_sha256": "b9310a3cfdb5a2d071f4605848e8334a554f3a4431ec3c675047bf1b1923e8b6"
+    },
+    {
+      "case_id": "held-stack-lifo",
+      "partition": "held_out",
+      "family": "validation_state",
+      "task_sha256": "f258b1ffdc7f1534f3a5e01321c729734f769eeeed646decac16d5ac9cc2b25a",
+      "checks_sha256": "51cd2d37e07a53bbfc566dce551f5c823643a87dce5f43f6303ac7a62177a3b8"
+    },
+    {
+      "case_id": "held-wallet-withdraw",
+      "partition": "held_out",
+      "family": "validation_state",
+      "task_sha256": "beeb26d8b83b18751713abbe4601d412acd9e7e7848d51b79bc13b10d6706d00",
+      "checks_sha256": "785d1c2926c5783de0bf678b0a8635e73562736a89543a6f99ffd2287b47d1cb"
+    }
+  ],
+  "budget": {
+    "planned_cases": 16,
+    "development_cases": 4,
+    "held_out_cases": 12,
+    "episodes_per_case": 1,
+    "concurrent_episodes": 1,
+    "quality_retries": 0,
+    "transport_retries": 0,
+    "client_deadline_seconds": 90,
+    "checker_deadline_seconds": 2,
+    "startup_deadline_seconds": 60,
+    "disconnect_deadline_seconds": 20,
+    "campaign_deadline_seconds": 3600
+  },
+  "freeze_rules": {
+    "all_cases_must_pass": true,
+    "drop_or_replace_after_inference": false,
+    "tune_on_held_out_results": false,
+    "actual_edit_required": true,
+    "independent_unchanged_checks_required": true,
+    "baseline_exit_code": 1,
+    "client_exit_code": 0,
+    "normal_completion_required": true,
+    "missing_timeout_canceled_or_unknown": "does not pass",
+    "subject_or_controls_change": "new version and new held-out cases before inference"
+  },
+  "native_start_conditions": [
+    "capture and review exact native request profile without model inference",
+    "freeze complete subject and plan_sha256 before first model call",
+    "review a bounded outcome-collection path that preserves local-only and affinity",
+    "retain default unqualified-coding denial; never fabricate a receipt or use configured mode to bypass it"
+  ],
+  "receipt": {
+    "emitted": false,
+    "reason": "preparation has no native outcomes or observed native request-profile binding",
+    "installable_coding_evidence": null,
+    "automatic_admission_effect": "none"
+  },
+  "retained_evidence": [
+    {
+      "path": "docs/native-coding-diagnosis-20261015-v2.md",
+      "sha256": "d5d34b45566a8faa71827eb40d7e290dcd49e747b6473b2c3ed4c5cdf159d052"
+    },
+    {
+      "path": "docs/native-coding-evaluation-20261015-v2.json",
+      "sha256": "9a584af9fb539459a239881cf6e5d4a75bf195d9d8caf7efa4f8fb9292dedc47"
+    },
+    {
+      "path": "docs/native-repair-observation-20261015-v2.json",
+      "sha256": "769d0f01569791e45af8d3e79cf9b99ef31363105f2e44e230b5a1a84d5062ef"
+    },
+    {
+      "path": "docs/shadow-routing-evaluation-20261015.json",
+      "sha256": "01c18b40c25b170a0cf4f14c5dcd67eed03aca3be1300e2b93347aded697e0a2"
+    },
+    {
+      "path": "tests/fixtures/shadow-coding-cases-v1.json",
+      "sha256": "80e714e7094ccc2969041ce8a2ae9935aa664698dd2d39a38bf94a8300391bc9"
+    },
+    {
+      "path": "tests/fixtures/shadow-coding-cases-v2.json",
+      "sha256": "26dbfe67992cb9c110681199f0ead4c54d1f5f4c45f0f55b60eea2b8505700d5"
+    }
+  ]
+}
