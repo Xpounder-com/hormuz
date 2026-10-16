@@ -45,6 +45,11 @@ Hormuz also treats every configured employee identity token and every available 
 
 For redacted requests, Hormuz returns `X-Hormuz-Redactions` and appends `+redacted` to `X-Hormuz-Policy-Decision`. A separate security event stores the action, detection count, and rule identifiers for every inspected endpoint, including token-count calls that are excluded from inference usage. Accounted generation events also carry the redaction count for usage reporting. Neither ledger stores the matched value, prompt, transformed prompt, or response.
 
+The opt-in [native Codex Responses](NATIVE_CODEX_RESPONSES.md) route uses the same
+redaction header and content-free security totals. Native protected-member
+denials record one observed guard detection when inspection stops. These security
+events do not add native requests, tokens or plan charges to priced API usage.
+
 ## OpenAI provider storage policy
 
 Hormuz also enforces provider-side storage policy for `POST /v1/responses`:
