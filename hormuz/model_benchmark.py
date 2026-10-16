@@ -21,8 +21,9 @@ import threading
 import time
 
 from .compaction_formats import strict_json_loads
-from .config import GatewayConfig
+from .config import ConfigError, GatewayConfig
 from ._config_identity import resolve_static_identity_tokens
+from ._config_ingress import _is_loopback_listener
 from ._config_input import load_configuration_input
 from .execution_destination import route_fingerprint
 from .coding_qualification import request_profile_digest
@@ -67,11 +68,12 @@ def digest(value):
 
 
 def benchmark_route_fingerprint(config, route):
-    fingerprint = route_fingerprint(route, upstreams=config.upstreams)
-    if config.managed_llama is None:
-        return fingerprint
+    subject = {"route": route_fingerprint(route, upstreams=config.upstreams),
+               "upstream_timeout_seconds": config.upstream_timeout_seconds}
     # Pin the local managed-runtime setup, including aliases sharing its engine.
-    return "destination-v1:" + digest({"route": fingerprint, "managed_runtime": asdict(config.managed_llama)})
+    if config.managed_llama is not None:
+        subject["managed_runtime"] = asdict(config.managed_llama)
+    return "destination-v1:" + digest(subject)
 
 
 def benchmark_profile_digest(value):
@@ -418,16 +420,24 @@ class RouterClient:
     """One reusable loopback connection, finite reads, an absolute request deadline."""
     def __init__(self, config, actor=None):
         self.config = config
-        identities = [identity for identity in config.identities_by_actor.values()
+        identities = [identity for identity in config.identities_by_token.values()
                       if actor is None or identity.actor_id == actor]
-        if len(identities) != 1:
+        if len({identity.actor_id for identity in identities}) != 1:
             raise BenchmarkError("benchmark_actor_required")
-        selected = resolve_static_identity_tokens((identities[0],), os.environ)
-        self.token, self.identity = next(iter(selected.items()))
-        if config.listen.host not in {"127.0.0.1", "::1", "localhost"}:
+        for identity in identities:
+            try:
+                selected = resolve_static_identity_tokens((identity,), os.environ)
+            except ConfigError:
+                continue
+            self.token, self.identity = next(iter(selected.items()))
+            break
+        else:
+            raise BenchmarkError("benchmark_credential_unavailable")
+        if not _is_loopback_listener(config.listen.host):
             raise BenchmarkError("benchmark_loopback_router_required")
+        host = config.listen.host.lower().rstrip(".")
         self.connection = http.client.HTTPConnection(
-            "127.0.0.1" if config.listen.host == "localhost" else config.listen.host,
+            "127.0.0.1" if host == "localhost" else host,
             config.listen.port, timeout=3)
 
     def close(self):

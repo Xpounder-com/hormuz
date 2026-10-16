@@ -387,6 +387,24 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                                   delivered["body"]["max_output_tokens"]),
                                  (200, expected_model, expected_status, 4))
 
+    def test_a_changed_upstream_deadline_cannot_inherit_old_scores(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("0") as (first, _), workflow.provider("7") as (second, _):
+            value = self.two_local_configuration(first, second)
+            value["route_admission"]["scorecard"] = str(self.report_path)
+            with self.fixture.connected_client(value) as submit:
+                self.run_benchmark("local-code", "local-better", suite=suite)
+                before = submit(request={"input": "Summarize seven boxes as a digit."})
+                self.assertEqual(before["headers"].get("x-hormuz-scorecard-status"), "selected")
+            value["upstream_timeout_seconds"] = 1
+            with self.fixture.connected_client(value) as submit:
+                after = submit(request={"input": "Summarize seven boxes as a digit."})
+        self.assertEqual((after["status"], after["headers"].get("x-hormuz-routed-model"),
+                          after["headers"].get("x-hormuz-scorecard-status")),
+                         (200, "fixture-local-model", "no_target_match"))
+
     def test_larger_prepared_requests_do_not_inherit_a_smaller_workloads_score(self):
         suite = self.suite()
         suite["cases"] = suite["cases"][:1]
@@ -681,6 +699,38 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                                   report["models"][0]["workloads"][0]["target_met"], len(received)),
                                  ("developer", 1, True, 1))
                 self.assertNotIn(secret, self.report_path.read_text())
+
+    def test_actor_rotation_can_use_an_available_later_credential_source(self):
+        self.fixture.environment["BENCHMARK_OLD_TOKEN"] = "fixture-old-actor-credential"
+        self.environment.pop("BENCHMARK_OLD_TOKEN", None)
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        with workflow.provider("7") as (endpoint, received):
+            value = self.fixture.admission_configuration(endpoint, endpoint)
+            value["identities"].insert(0, {**value["identities"][0], "token_env": "BENCHMARK_OLD_TOKEN"})
+            with self.fixture.connected_client(value):
+                report = self.run_benchmark("local-code", suite=suite, arguments=("--actor", "developer"))
+        self.assertEqual((report["actor_id"], report["models"][0]["metrics"]["completed"],
+                          report["models"][0]["workloads"][0]["target_met"], len(received)),
+                         ("developer", 1, True, 1))
+
+    def test_runner_accepts_loopback_spellings_allowed_by_ingress(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        hosts = ["LOCALHOST"] + (["127.0.0.2"] if sys.platform == "linux" else [])
+        for host in hosts:
+            with self.subTest(host=host):
+                self.report_path = self.root / f"loopback-{host}.json"
+                with workflow.provider("7") as (endpoint, received):
+                    value = self.fixture.admission_configuration(endpoint, endpoint)
+                    value["listen"]["host"] = host
+                    with self.fixture.connected_client(value):
+                        report = self.run_benchmark("local-code", suite=suite)
+                self.assertEqual((report["models"][0]["metrics"]["completed"],
+                                  report["models"][0]["workloads"][0]["target_met"], len(received)),
+                                 (1, True, 1))
 
     def test_a_changed_endpoint_cannot_receive_an_older_endpoints_benchmark_evidence(self):
         suite = self.suite()

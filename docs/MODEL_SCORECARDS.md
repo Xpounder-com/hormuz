@@ -93,11 +93,13 @@ hormuz benchmark show --scorecard "$PWD/scorecard.json" --format markdown
 Omit `--format markdown` for JSON. `show` works without the configuration,
 credentials or a live router. If the configuration has several actors, select
 one explicitly with `run --actor ACTOR_ID`.
-A runner resolves only that actor's static authentication credential. Custom
+A runner selects a locally available static authentication credential for that
+actor, skipping unavailable earlier sources during token rotation. Custom
 redaction secrets and other actors' credentials can remain in the running
 service environment; metadata validation and the live policy digest still apply.
 A run uses a loopback listener, `ingress.mode: local`, and the configured static
-gateway identity. OIDC-only
+gateway identity. Listener addresses use the same loopback rules as ingress
+validation. OIDC-only
 configurations are outside the current local-router configuration contract.
 
 | Recorded metric | Interpretation |
@@ -149,7 +151,8 @@ are recorded as unstarted. Error bodies are closed without parsing.
 Before model work, one authenticated `/v1/router/benchmark-state` snapshot checks
 the actor, local policy digest, full route fingerprint and explicit-price fields
 against the running router. The fingerprint includes the endpoint, revision,
-capabilities and the configured managed-runtime identity. Changing a managed
+capabilities, upstream timeout and the configured managed-runtime identity.
+Changing `upstream_timeout_seconds` requires new measurements. Changing a managed
 runtime archive, checksum or launch definition requires new measurements for
 that local setup. Every
 model response must match that live destination generation and requested model;
