@@ -62,6 +62,8 @@ class ScorecardRouting:
             if self.config.ai_work.enabled:
                 from .work_gateway import _prepare_pricing
                 _prepare_pricing(candidate.route.protocol, prepared)
+            if not self.config.upstreams[candidate.route.destination_id].allow_response_storage:
+                prepared["store"] = False
             request_bytes = len(provider_body(prepared, candidate.route))
             for workload in model["workloads"]:
                 if (not workload["target_met"] or workload["task_type"] != characteristics["task_hint"]

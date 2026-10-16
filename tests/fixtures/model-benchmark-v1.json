@@ -1,5 +1,5 @@
 {
-  "schema_id": "hormuz.model-scorecard",
+  "schema_id": "hormuz.personal-model-scorecard",
   "schema_version": 1,
   "scorecard_required_fields": ["schema_id", "schema_version", "suite", "actor_id", "organization_id", "machine", "resources", "recorded_at", "expires_at", "targets", "models"],
   "model_required_fields": ["model_alias", "subject", "route_fingerprint", "observations", "metrics", "workloads"],

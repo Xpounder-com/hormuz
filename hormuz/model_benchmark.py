@@ -22,6 +22,7 @@ import time
 
 from .compaction_formats import strict_json_loads
 from .config import GatewayConfig
+from ._config_identity import resolve_static_identity_tokens
 from ._config_input import load_configuration_input
 from .execution_destination import route_fingerprint
 from .coding_qualification import request_profile_digest
@@ -233,7 +234,7 @@ def read_scorecard(path):
     if raw is None:
         raise BenchmarkError("benchmark_scorecard_unavailable")
     report = strict_json_loads(raw.decode())
-    if (type(report) is not dict or report.get("schema_id") != "hormuz.model-scorecard"
+    if (type(report) is not dict or report.get("schema_id") != "hormuz.personal-model-scorecard"
             or type(report.get("schema_version")) is not int or report["schema_version"] != 1
             or type(report.get("models")) is not list or not 1 <= len(report["models"]) <= 8):
         raise BenchmarkError("benchmark_scorecard_invalid")
@@ -246,7 +247,7 @@ def validate_scorecard(report):
     try:
         if (type(report) is not dict or set(report) != {"schema_id", "schema_version", "suite", "actor_id", "organization_id", "machine",
                             "resources", "recorded_at", "expires_at", "targets", "models"}
-                or report["schema_id"] != "hormuz.model-scorecard"
+                or report["schema_id"] != "hormuz.personal-model-scorecard"
                 or type(report["schema_version"]) is not int or report["schema_version"] != 1
                 or type(report["models"]) is not list or not 1 <= len(report["models"]) <= 8
                 or not valid_targets(report["targets"])
@@ -421,9 +422,8 @@ class RouterClient:
                       if actor is None or identity.actor_id == actor]
         if len(identities) != 1:
             raise BenchmarkError("benchmark_actor_required")
-        self.identity = identities[0]
-        self.token = next(token for token, owner in config.identities_by_token.items()
-                          if owner.actor_id == self.identity.actor_id)
+        selected = resolve_static_identity_tokens((identities[0],), os.environ)
+        self.token, self.identity = next(iter(selected.items()))
         if config.listen.host not in {"127.0.0.1", "::1", "localhost"}:
             raise BenchmarkError("benchmark_loopback_router_required")
         self.connection = http.client.HTTPConnection(
@@ -669,7 +669,9 @@ def workload_scores(observations, targets):
 def run_benchmark(args):
     cpu_started = time.process_time()
     suite = read_suite(args.suite)
-    config = GatewayConfig.load(args.config)
+    source_path = local_path(Path(args.config)).resolve()
+    source = load_configuration_input(source_path)
+    config = GatewayConfig.parse_preflight(source_path, json.dumps(source, ensure_ascii=False, allow_nan=False, separators=(",", ":")))
     if config.shadow_router is not None:
         raise BenchmarkError("benchmark_shadow_router_unsupported")
     output = local_path(Path(args.output))
@@ -767,7 +769,7 @@ def run_benchmark(args):
     finally:
         client.close()
     recorded = int(time.time())
-    report = {"schema_id": "hormuz.model-scorecard", "schema_version": 1,
+    report = {"schema_id": "hormuz.personal-model-scorecard", "schema_version": 1,
               "suite": {"name": suite["name"], "sha256": digest(suite)}, "actor_id": client.identity.actor_id,
               "organization_id": client.identity.organization_id,
               "machine": machine_facts(),

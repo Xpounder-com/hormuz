@@ -93,6 +93,9 @@ hormuz benchmark show --scorecard "$PWD/scorecard.json" --format markdown
 Omit `--format markdown` for JSON. `show` works without the configuration,
 credentials or a live router. If the configuration has several actors, select
 one explicitly with `run --actor ACTOR_ID`.
+A runner resolves only that actor's static authentication credential. Custom
+redaction secrets and other actors' credentials can remain in the running
+service environment; metadata validation and the live policy digest still apply.
 A run uses a loopback listener, `ingress.mode: local`, and the configured static
 gateway identity. OIDC-only
 configurations are outside the current local-router configuration contract.
@@ -153,6 +156,8 @@ model response must match that live destination generation and requested model;
 the provider-reported model must also match before scores or prices are certified.
 Benchmark receipts report the forwarded request's byte count and output budget
 after router preparation; recorded byte bounds use these observed values.
+Candidate selection measures the prepared body with that destination's storage
+controls applied, so an omitted `store` field cannot understate its wire size.
 An unexpected live policy cap invalidates the measurement for the requested
 generation budget. The running router also rejects benchmark probes while its
 shadow helpers are enabled, even if the configuration file has since changed.
@@ -244,6 +249,8 @@ performance on the declared cases, not universal model quality.
 
 The suite, scorecard, runtime-snapshot, routing-configuration and error receipts start at schema
 version 1 and appear in `hormuz contract manifest`. The
+personal report uses `hormuz.personal-model-scorecard`, distinct from the older
+portfolio `hormuz.model-scorecard` contract. The
 [compatibility fixture](../tests/fixtures/model-benchmark-v1.json) freezes the
 initial shape. Scorecard-enabled and benchmark-probe relay metadata uses version
 4, including observed `X-Hormuz-Benchmark-Request-Bytes` and
@@ -252,8 +259,9 @@ scorecard routing retain existing versions. Reconnect after upgrading the router
 before running probes; an older running process cannot provide the version-1
 runtime snapshot. Existing SQLite and AI Work storage need
 no migration. Re-run into a new report path to retain earlier comparisons.
-Reports from earlier development builds that lack required cache-write or
-runtime-policy facts cannot guide routing; rebenchmark with the current binary.
+Reports from earlier development builds using the old scorecard ID or lacking
+required cache-write or runtime-policy facts cannot guide routing; rebenchmark
+with the current binary.
 
 For rollback, disconnect with the current binary, remove `route_admission.scorecard`
 or select the earlier configuration, and reconnect. Retain or delete the local

@@ -2,7 +2,7 @@
 from .common import ContractValidationError
 
 FIELDS = {
-    "hormuz.model-scorecard": ["schema_id", "schema_version", "suite", "actor_id", "organization_id", "machine",
+    "hormuz.personal-model-scorecard": ["schema_id", "schema_version", "suite", "actor_id", "organization_id", "machine",
                               "resources", "recorded_at", "expires_at", "targets", "models"],
     "hormuz.benchmark-suite": ["schema_id", "schema_version", "name", "targets", "cases"],
     "hormuz.benchmark-routing-configuration": ["schema_id", "schema_version", "scorecard_sha256", "output",
@@ -18,7 +18,7 @@ def validate_benchmark(value):
         schema = value["schema_id"]
         if set(value) != set(FIELDS[schema]) or type(value["schema_version"]) is not int or value["schema_version"] != 1:
             raise ValueError()
-        if schema == "hormuz.model-scorecard":
+        if schema == "hormuz.personal-model-scorecard":
             validate_scorecard(value)
         elif schema == "hormuz.benchmark-suite":
             validate_suite(value)

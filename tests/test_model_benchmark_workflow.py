@@ -402,6 +402,28 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                           result["headers"].get("x-hormuz-scorecard-status")),
                          (200, "fixture-local-model", "no_target_match"))
 
+    def test_candidate_storage_normalization_preserves_the_measured_wire_bound(self):
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        measured_input = suite["cases"][0]["request"]["input"]
+        with workflow.provider("0") as (first, first_requests), workflow.provider("7") as (second, second_requests):
+            value = self.two_local_configuration(first, second)
+            value["upstreams"]["local-llama"]["allow_response_storage"] = True
+            value["upstreams"]["openai"]["allow_response_storage"] = True
+            value["route_admission"]["scorecard"] = str(self.report_path)
+            with self.fixture.connected_client(value) as submit:
+                report = self.run_benchmark("local-code", "local-better", suite=suite)
+                matching = submit(request={"input": measured_input, "stream": False})
+                larger = submit(request={"input": measured_input + "!", "stream": False})
+        self.assertEqual((matching["status"], matching["headers"].get("x-hormuz-scorecard-status"),
+                          larger["status"], larger["headers"].get("x-hormuz-routed-model"),
+                          larger["headers"].get("x-hormuz-scorecard-status")),
+                         (200, "selected", 200, "fixture-local-model", "no_target_match"))
+        measured_bound = report["models"][1]["workloads"][0]["request_bytes_max"]
+        self.assertEqual((len(first_requests), len(second_requests), second_requests[-1]["wire_bytes"]),
+                         (2, 2, measured_bound))
+
     def test_compaction_requests_cannot_inherit_response_generation_scores(self):
         suite = self.suite()
         suite["cases"] = suite["cases"][:1]
@@ -500,9 +522,12 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
             with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)) as submit:
                 report = self.run_benchmark("local-code")
                 runtime = submit(method="GET", path="/router/benchmark-state")["body"]
+        self.assertEqual(report["schema_id"], "hormuz.personal-model-scorecard")
         validate_contract(report)
         validate_contract(runtime)
         frozen = json.loads((Path(__file__).parent / "fixtures/model-benchmark-v1.json").read_text())
+        self.assertEqual((report["schema_id"], report["schema_version"]),
+                         (frozen["schema_id"], frozen["schema_version"]))
         self.assertEqual(sorted(report), sorted(frozen["scorecard_required_fields"]))
         self.assertEqual(sorted(report["machine"]), sorted(frozen["machine_required_fields"]))
         self.assertEqual(sorted(report["models"][0]), sorted(frozen["model_required_fields"]))
@@ -516,7 +541,7 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         relay = {row["schema_version"]: set(row["fields"]) for row in json.loads(manifest.stdout)["schemas"]
                  if row["schema_id"] == "hormuz.relay-metadata"}
         self.assertTrue(relay[3] <= relay[4])
-        self.assertTrue({("hormuz.model-scorecard", 1), ("hormuz.benchmark-suite", 1),
+        self.assertTrue({("hormuz.personal-model-scorecard", 1), ("hormuz.benchmark-suite", 1),
                          ("hormuz.benchmark-routing-configuration", 1), ("hormuz.benchmark-error", 1),
                          ("hormuz.relay-metadata", 4), ("hormuz.benchmark-runtime", 1)} <= schemas)
 
@@ -631,6 +656,31 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 result = self.run_benchmark("local-code", suite=suite, expected=2)
         self.assertEqual((result["error"]["code"], received, self.report_path.exists()),
                          ("benchmark_execution_mismatch", [], False))
+
+    def test_runner_needs_only_the_selected_actor_credential_and_no_service_secrets(self):
+        secret = "fixture-service-only-redaction-secret"
+        self.fixture.environment["BENCHMARK_SERVICE_SECRET"] = secret
+        self.fixture.environment["BENCHMARK_OTHER_ACTOR_TOKEN"] = "fixture-other-actor-credential"
+        self.environment.pop("BENCHMARK_SERVICE_SECRET", None)
+        self.environment.pop("BENCHMARK_OTHER_ACTOR_TOKEN", None)
+        suite = self.suite()
+        suite["cases"] = suite["cases"][:1]
+        suite["targets"]["min_cases"] = 1
+        for multiple_actors in (False, True):
+            with self.subTest(multiple_actors=multiple_actors):
+                self.report_path = self.root / f"service-only-{multiple_actors}.json"
+                with workflow.provider("7") as (endpoint, received):
+                    value = self.fixture.admission_configuration(endpoint, endpoint)
+                    value["egress_controls"] = {"secrets": {"mode": "redact", "custom_secret_envs": ["BENCHMARK_SERVICE_SECRET"]}}
+                    if multiple_actors:
+                        value["identities"].append({**value["identities"][0], "actor_id": "other",
+                            "actor_name": "Other", "token_env": "BENCHMARK_OTHER_ACTOR_TOKEN"})
+                    with self.fixture.connected_client(value):
+                        report = self.run_benchmark("local-code", suite=suite, arguments=("--actor", "developer"))
+                self.assertEqual((report["actor_id"], report["models"][0]["metrics"]["completed"],
+                                  report["models"][0]["workloads"][0]["target_met"], len(received)),
+                                 ("developer", 1, True, 1))
+                self.assertNotIn(secret, self.report_path.read_text())
 
     def test_a_changed_endpoint_cannot_receive_an_older_endpoints_benchmark_evidence(self):
         suite = self.suite()
