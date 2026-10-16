@@ -40,3 +40,40 @@ revokes permission, disconnects and verifies restoration/closed listeners.
 Its failure finalizer preserves missing, invalid and timeout outcomes.
 It emits no coding receipt and never changes ordinary automatic admission.
 Results will be added as separate files without rewriting this manifest.
+
+## Retained development outcome
+
+The [observation](observation.json), [full public result](development-result.json)
+and [native events](development-native.jsonl) record one completed local model
+episode in 25,626 ms. Codex exited zero with one completed turn. Six inference
+submissions used one work; public totals report no retry, failover, unknown or
+failed transport attempts. The retained five most recent attempt summaries
+show the same model/generation and conversation affinity; the state endpoint's
+per-work default page is five, while its total includes all six requests.
+
+**The repair failed.** The model read only the function declaration using
+`cat solution.py | rg 'def clamp'`, proposed a plausible implementation in text,
+then twice ran `apply_patch` without a patch. Both commands exited 2 with usage
+output. It never edited [solution.py](implementation-after.py). The unchanged
+independent oracle still returned assertion exit 1; the empty
+[patch](implementation.patch) is retained. A normal turn and successful model
+transport do not satisfy the coding criteria.
+
+This is zero passing episodes out of the one observed development case, with
+fifteen planned cases missing. No held-out case ran and no quality retry occurred.
+This does not establish general model incompetence or a statistically estimated
+failure rate. It demonstrates the observed tool-use failure in this exact
+512-token/request native profile. Do not change the prompt/model or run another
+episode under this frozen version.
+
+Probe permission was revoked; disconnect restored settings and closed both owned
+listeners. Public coding readiness stayed `unknown`, with no automatic coding
+tasks and no passing receipt. The normal evidence gate remains authoritative.
+The candidate remains experimental and unqualified.
+
+The independent failure check is the frozen corpus's `dev-clamp` checker against
+[the unchanged implementation](implementation-after.py), using the runner's
+`independent_check` procedure under a two-second no-network/no-write sandbox.
+The consumed marker deliberately prevents another native run. A future changed
+model/instruction/tool treatment requires a new campaign and fresh held-out
+inventory before inference, while retaining this failure.

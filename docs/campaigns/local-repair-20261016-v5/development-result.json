@@ -1,0 +1,828 @@
+{
+  "stage": "native-development-repair",
+  "campaign_id": "local-repair-20261016-v5",
+  "case_id": "dev-clamp",
+  "baseline_exit_code": 1,
+  "native_episodes": 1,
+  "quality_retries": 0,
+  "automatic_admission_effect": "none",
+  "setup": {
+    "configuration": {
+      "authentication": "managed_local",
+      "listen_port": 56998,
+      "mode": "local_only",
+      "model": "Qwen3-4B-Q4_K_M",
+      "operation": "reuse",
+      "qualification_id": "codex0160-m5-32g-local-repair-v5-probe",
+      "runtime_port": 56999
+    },
+    "connection": {
+      "client_version": "0.160.0",
+      "configuration": "installed",
+      "generation": "e3af5d8abdf35e91567cdb12702ba67b",
+      "local_runtime": {
+        "ownership": "owned",
+        "state": "ready"
+      },
+      "owned_settings": [
+        "model",
+        "model_provider",
+        "web_search"
+      ],
+      "phase": "connected",
+      "retained_settings": [],
+      "router": "ready",
+      "schema_id": "hormuz.connected-client-status",
+      "schema_version": 2,
+      "scope": "codex_user_defaults"
+    },
+    "schema_id": "hormuz.local-setup",
+    "schema_version": 2
+  },
+  "readiness_before": {
+    "local_capacity": {
+      "active": 0,
+      "limit": 1
+    },
+    "mode": "local_only",
+    "routes": [
+      {
+        "automatic_task_types": [],
+        "capabilities": [
+          "responses",
+          "text",
+          "streaming",
+          "tools",
+          "codex_http",
+          "codex_http_0160"
+        ],
+        "coding_evidence": null,
+        "coding_readiness": "unknown",
+        "destination": "local-llama",
+        "evidence_basis": "operator_declared",
+        "generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+        "max_output_tokens": 512,
+        "max_request_bytes": 65536,
+        "model": "Qwen3-4B-Q4_K_M",
+        "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+        "qualification_id": "codex0160-m5-32g-local-repair-v5-probe",
+        "readiness": "unchecked",
+        "task_types": [
+          "code_change"
+        ]
+      }
+    ],
+    "schema_id": "hormuz.route-admission",
+    "schema_version": 2,
+    "task_classifier": "bounded_local_heuristic"
+  },
+  "native": {
+    "exit_code": 0,
+    "termination": "completed",
+    "elapsed_ms": 25626,
+    "cleanup_error": null
+  },
+  "probe_after": {
+    "automatic_admission_effect": "none",
+    "case_id": "dev-clamp",
+    "destination_generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+    "max_requests": 8,
+    "model": "Qwen3-4B-Q4_K_M",
+    "plan_sha256": "0a5b4f763b88e3380b0d29431d7ef8641e18ceb00e52f0923f48528b4fc2541d",
+    "probe_id": "1be3d88273e2d13b08c70743a87d0e0a",
+    "remaining_ms": 64252,
+    "schema_id": "hormuz.coding-probe-status",
+    "schema_version": 1,
+    "state": "running",
+    "submitted_requests": 6
+  },
+  "readiness_after": {
+    "local_capacity": {
+      "active": 0,
+      "limit": 1
+    },
+    "mode": "local_only",
+    "routes": [
+      {
+        "automatic_task_types": [],
+        "capabilities": [
+          "responses",
+          "text",
+          "streaming",
+          "tools",
+          "codex_http",
+          "codex_http_0160"
+        ],
+        "coding_evidence": null,
+        "coding_readiness": "unknown",
+        "destination": "local-llama",
+        "evidence_basis": "operator_declared",
+        "generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+        "max_output_tokens": 512,
+        "max_request_bytes": 65536,
+        "model": "Qwen3-4B-Q4_K_M",
+        "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+        "qualification_id": "codex0160-m5-32g-local-repair-v5-probe",
+        "readiness": "stale",
+        "task_types": [
+          "code_change"
+        ]
+      }
+    ],
+    "schema_id": "hormuz.route-admission",
+    "schema_version": 2,
+    "task_classifier": "bounded_local_heuristic"
+  },
+  "work_state": {
+    "schema_id": "hormuz.ai-work-state",
+    "schema_version": 3,
+    "organization_id": "organization",
+    "actor_id": "local-user",
+    "as_of": "2026-10-16T15:37:15.302130+00:00",
+    "works": [
+      {
+        "work_id": "work-d59866fc18b646cdae48f4b944288ac1",
+        "organization_id": "organization",
+        "actor_id": "local-user",
+        "repository": "unattributed",
+        "title": null,
+        "task_type": "code_change",
+        "context_revision": null,
+        "state": "active",
+        "pause_reason": null,
+        "created_at": "2026-10-16T15:36:49.688513+00:00",
+        "updated_at": "2026-10-16T15:37:12.678132+00:00",
+        "completed_at": null,
+        "version": 1,
+        "pinned_model": "Qwen3-4B-Q4_K_M",
+        "task_origin": "inferred_characteristics",
+        "task_characteristics": {
+          "version": "characteristics.v1",
+          "task_hint": "code_change",
+          "confidence": "heuristic",
+          "input_size": "small",
+          "tools": true,
+          "structured_output": false,
+          "history": false
+        },
+        "context_signature": "3eeb3b6466e7388ffada5634e5214d8baa017bf777b35bc31948ac101726ef68",
+        "completion_condition": "workflow.completed.v1",
+        "costs": {
+          "attempts": 6,
+          "committed_microusd": 0,
+          "estimated_cost_microusd": 0,
+          "provider_confirmed_cost_microusd": 0,
+          "provider_confirmed_attempts": 0,
+          "unconfirmed_attempts": 6,
+          "pending_microusd": 0,
+          "uncertain_microusd": 0,
+          "cache_hits": 0,
+          "denied": 0,
+          "failed_attempts": 0,
+          "unknown_attempts": 0,
+          "retry_attempts": 0,
+          "failover_attempts": 0,
+          "reservation_exceeded": 0,
+          "repeated_requests": 0,
+          "provider_latency_ms": 24677.201134,
+          "timed_attempts": 6,
+          "gateway_wall_ms": 24901.317374000002,
+          "gateway_overhead_ms": 224.11624000000143,
+          "timed_gateway_attempts": 6,
+          "consumed_microusd": 0,
+          "cost_basis": "gateway_reported_or_configured_estimate",
+          "invoice_finality": false,
+          "latency_basis": "sum_provider_transport_blocking_time",
+          "gateway_timing_basis": "entry_through_work_settlement_wall_time",
+          "summed_provider_ms": 24677.201134,
+          "timing_coverage": {
+            "observed": 6,
+            "attempts": 6,
+            "basis": "gateway_observed_wall_and_provider_intervals"
+          },
+          "gateway_overhead_cost_microusd": null,
+          "cost_coverage": "covered_provider_attempts_excludes_unallocated_platform_and_compute_charges"
+        },
+        "observations": [],
+        "attempts": [
+          {
+            "organization_id": "organization",
+            "actor_id": "local-user",
+            "request_id": "d2a5da3b-60d9-45dc-8f3b-06b3d5ba76b6",
+            "work_id": "work-d59866fc18b646cdae48f4b944288ac1",
+            "logical_request_id": "3255e8646a60448da44d61cd32b1a39a",
+            "retry_of": null,
+            "cache_source": null,
+            "model": "Qwen3-4B-Q4_K_M",
+            "protocol": "openai",
+            "route_fingerprint": "destination-v1:4f39e55864db7eb0a8e8197859d9d5215cbf65fe46c175255c1dd16aee91cd9a",
+            "request_shape": "shape-v1:27037ebfb2f87221e92d6adaf4e68a5951d567b508c9e7defecc1737c8d2cae3.3eeb3b6466e7388ffada5634e5214d8b",
+            "repeat_count": 0,
+            "pattern_excluded": 0,
+            "reason": "session_affinity",
+            "state": "succeeded",
+            "reserved_microusd": 0,
+            "cost_microusd": 0,
+            "latency_ms": 2369.7745030000005,
+            "created_at": "2026-10-16T15:37:12.678132+00:00",
+            "settled_at": "2026-10-16T15:37:15.059143+00:00",
+            "reservation_exceeded": false,
+            "context_signature": "3eeb3b6466e7388ffada5634e5214d8baa017bf777b35bc31948ac101726ef68",
+            "request_kind": "interactive",
+            "cache_bypass_reason": null,
+            "gateway_wall_ms": 2406.287958,
+            "gateway_overhead_ms": 36.51345499999934,
+            "timing_basis": "provider_transport_blocking_time",
+            "timing_stages": {
+              "redaction": 2.610791,
+              "routing": 7.531292
+            },
+            "confirmed_cost_microusd": null,
+            "cost_confirmation_source": null,
+            "cost_confirmation_reference": null,
+            "cost_confirmed_at": null,
+            "response_succeeded": true,
+            "cache_generation": 0,
+            "repeat_signal": "none"
+          },
+          {
+            "organization_id": "organization",
+            "actor_id": "local-user",
+            "request_id": "f38d438f-6679-45ba-b061-97b21835d6f0",
+            "work_id": "work-d59866fc18b646cdae48f4b944288ac1",
+            "logical_request_id": "3f5e879743eb4b4d919210ca9783b26e",
+            "retry_of": null,
+            "cache_source": null,
+            "model": "Qwen3-4B-Q4_K_M",
+            "protocol": "openai",
+            "route_fingerprint": "destination-v1:4f39e55864db7eb0a8e8197859d9d5215cbf65fe46c175255c1dd16aee91cd9a",
+            "request_shape": "shape-v1:27037ebfb2f87221e92d6adaf4e68a5951d567b508c9e7defecc1737c8d2cae3.3eeb3b6466e7388ffada5634e5214d8b",
+            "repeat_count": 0,
+            "pattern_excluded": 0,
+            "reason": "session_affinity",
+            "state": "succeeded",
+            "reserved_microusd": 0,
+            "cost_microusd": 0,
+            "latency_ms": 3540.011916,
+            "created_at": "2026-10-16T15:37:09.059614+00:00",
+            "settled_at": "2026-10-16T15:37:12.611508+00:00",
+            "reservation_exceeded": false,
+            "context_signature": "3eeb3b6466e7388ffada5634e5214d8baa017bf777b35bc31948ac101726ef68",
+            "request_kind": "interactive",
+            "cache_bypass_reason": null,
+            "gateway_wall_ms": 3575.569084,
+            "gateway_overhead_ms": 35.557168000000274,
+            "timing_basis": "provider_transport_blocking_time",
+            "timing_stages": {
+              "redaction": 2.299542,
+              "routing": 6.432958
+            },
+            "confirmed_cost_microusd": null,
+            "cost_confirmation_source": null,
+            "cost_confirmation_reference": null,
+            "cost_confirmed_at": null,
+            "response_succeeded": true,
+            "cache_generation": 0,
+            "repeat_signal": "none"
+          },
+          {
+            "organization_id": "organization",
+            "actor_id": "local-user",
+            "request_id": "4eddeabc-d5c0-4c74-a06b-24c7f82b593c",
+            "work_id": "work-d59866fc18b646cdae48f4b944288ac1",
+            "logical_request_id": "5e6640ee5ffe4025945e331e358cc931",
+            "retry_of": null,
+            "cache_source": null,
+            "model": "Qwen3-4B-Q4_K_M",
+            "protocol": "openai",
+            "route_fingerprint": "destination-v1:4f39e55864db7eb0a8e8197859d9d5215cbf65fe46c175255c1dd16aee91cd9a",
+            "request_shape": "shape-v1:27037ebfb2f87221e92d6adaf4e68a5951d567b508c9e7defecc1737c8d2cae3.3eeb3b6466e7388ffada5634e5214d8b",
+            "repeat_count": 0,
+            "pattern_excluded": 0,
+            "reason": "session_affinity",
+            "state": "succeeded",
+            "reserved_microusd": 0,
+            "cost_microusd": 0,
+            "latency_ms": 4832.5897559999985,
+            "created_at": "2026-10-16T15:37:04.144983+00:00",
+            "settled_at": "2026-10-16T15:37:08.994295+00:00",
+            "reservation_exceeded": false,
+            "context_signature": "3eeb3b6466e7388ffada5634e5214d8baa017bf777b35bc31948ac101726ef68",
+            "request_kind": "interactive",
+            "cache_bypass_reason": null,
+            "gateway_wall_ms": 4871.557875,
+            "gateway_overhead_ms": 38.968119000001934,
+            "timing_basis": "provider_transport_blocking_time",
+            "timing_stages": {
+              "redaction": 2.061125,
+              "routing": 6.273542
+            },
+            "confirmed_cost_microusd": null,
+            "cost_confirmation_source": null,
+            "cost_confirmation_reference": null,
+            "cost_confirmed_at": null,
+            "response_succeeded": true,
+            "cache_generation": 0,
+            "repeat_signal": "none"
+          },
+          {
+            "organization_id": "organization",
+            "actor_id": "local-user",
+            "request_id": "bd879e93-1231-479d-93f1-97ceafbfa0fd",
+            "work_id": "work-d59866fc18b646cdae48f4b944288ac1",
+            "logical_request_id": "36eacc6f745c4a15bc7a5c6f5b320d41",
+            "retry_of": null,
+            "cache_source": null,
+            "model": "Qwen3-4B-Q4_K_M",
+            "protocol": "openai",
+            "route_fingerprint": "destination-v1:4f39e55864db7eb0a8e8197859d9d5215cbf65fe46c175255c1dd16aee91cd9a",
+            "request_shape": "shape-v1:27037ebfb2f87221e92d6adaf4e68a5951d567b508c9e7defecc1737c8d2cae3.3eeb3b6466e7388ffada5634e5214d8b",
+            "repeat_count": 0,
+            "pattern_excluded": 0,
+            "reason": "session_affinity",
+            "state": "succeeded",
+            "reserved_microusd": 0,
+            "cost_microusd": 0,
+            "latency_ms": 2678.8512099999994,
+            "created_at": "2026-10-16T15:37:01.030435+00:00",
+            "settled_at": "2026-10-16T15:37:03.719649+00:00",
+            "reservation_exceeded": false,
+            "context_signature": "3eeb3b6466e7388ffada5634e5214d8baa017bf777b35bc31948ac101726ef68",
+            "request_kind": "interactive",
+            "cache_bypass_reason": null,
+            "gateway_wall_ms": 2713.923416,
+            "gateway_overhead_ms": 35.07220600000073,
+            "timing_basis": "provider_transport_blocking_time",
+            "timing_stages": {
+              "redaction": 1.958959,
+              "routing": 6.104875
+            },
+            "confirmed_cost_microusd": null,
+            "cost_confirmation_source": null,
+            "cost_confirmation_reference": null,
+            "cost_confirmed_at": null,
+            "response_succeeded": true,
+            "cache_generation": 0,
+            "repeat_signal": "none"
+          },
+          {
+            "organization_id": "organization",
+            "actor_id": "local-user",
+            "request_id": "a3173097-5edd-413f-b36a-98dcd2777b4d",
+            "work_id": "work-d59866fc18b646cdae48f4b944288ac1",
+            "logical_request_id": "0a683c493f5e4644a62d7d0cf1aa2261",
+            "retry_of": null,
+            "cache_source": null,
+            "model": "Qwen3-4B-Q4_K_M",
+            "protocol": "openai",
+            "route_fingerprint": "destination-v1:4f39e55864db7eb0a8e8197859d9d5215cbf65fe46c175255c1dd16aee91cd9a",
+            "request_shape": "shape-v1:27037ebfb2f87221e92d6adaf4e68a5951d567b508c9e7defecc1737c8d2cae3.3eeb3b6466e7388ffada5634e5214d8b",
+            "repeat_count": 0,
+            "pattern_excluded": 0,
+            "reason": "session_affinity",
+            "state": "succeeded",
+            "reserved_microusd": 0,
+            "cost_microusd": 0,
+            "latency_ms": 1436.9984580000005,
+            "created_at": "2026-10-16T15:36:59.563968+00:00",
+            "settled_at": "2026-10-16T15:37:01.008355+00:00",
+            "reservation_exceeded": false,
+            "context_signature": "3eeb3b6466e7388ffada5634e5214d8baa017bf777b35bc31948ac101726ef68",
+            "request_kind": "interactive",
+            "cache_bypass_reason": null,
+            "gateway_wall_ms": 1475.954791,
+            "gateway_overhead_ms": 38.956332999999404,
+            "timing_basis": "provider_transport_blocking_time",
+            "timing_stages": {
+              "redaction": 1.952917,
+              "routing": 6.764584
+            },
+            "confirmed_cost_microusd": null,
+            "cost_confirmation_source": null,
+            "cost_confirmation_reference": null,
+            "cost_confirmed_at": null,
+            "response_succeeded": true,
+            "cache_generation": 0,
+            "repeat_signal": "none"
+          }
+        ],
+        "attempts_truncated": true,
+        "attempts_limit": 5,
+        "observations_truncated": false,
+        "observations_limit": 5,
+        "plans": [],
+        "objective": "cost",
+        "budget_microusd": null,
+        "cost_microusd": 0,
+        "outcome_evidence": "unknown",
+        "completion_elapsed_ms": null,
+        "routing": {
+          "alias": "Qwen3-4B-Q4_K_M",
+          "reason": "session_affinity",
+          "sample_confidence": "not_applicable",
+          "sample_count": 0,
+          "objective": "cost",
+          "evidence_basis": "local_observational_work_episodes",
+          "context_signature": "3eeb3b6466e7388ffada5634e5214d8baa017bf777b35bc31948ac101726ef68",
+          "task_origin": "inferred_characteristics",
+          "task_type": "code_change",
+          "completion_condition": "workflow.completed.v1",
+          "candidates": [],
+          "evidence_scope": {
+            "repository": "unattributed",
+            "task_type": "code_change",
+            "context_signature": "3eeb3b6466e7388ffada5634e5214d8baa017bf777b35bc31948ac101726ef68",
+            "request_shape": "shape-v1:27037ebfb2f87221e92d6adaf4e68a5951d567b508c9e7defecc1737c8d2cae3.3eeb3b6466e7388ffada5634e5214d8b",
+            "request_kind": "interactive",
+            "window_days": 90
+          }
+        }
+      }
+    ],
+    "plans": [],
+    "totals": {
+      "attempts": 6,
+      "committed_microusd": 0,
+      "estimated_cost_microusd": 0,
+      "provider_confirmed_cost_microusd": 0,
+      "provider_confirmed_attempts": 0,
+      "unconfirmed_attempts": 6,
+      "pending_microusd": 0,
+      "uncertain_microusd": 0,
+      "cache_hits": 0,
+      "denied": 0,
+      "failed_attempts": 0,
+      "unknown_attempts": 0,
+      "retry_attempts": 0,
+      "failover_attempts": 0,
+      "reservation_exceeded": 0,
+      "repeated_requests": 0,
+      "provider_latency_ms": 24677.201134,
+      "timed_attempts": 6,
+      "gateway_wall_ms": 24901.317374000002,
+      "gateway_overhead_ms": 224.11624000000143,
+      "timed_gateway_attempts": 6,
+      "consumed_microusd": 0,
+      "cost_basis": "gateway_reported_or_configured_estimate",
+      "invoice_finality": false,
+      "latency_basis": "sum_provider_transport_blocking_time",
+      "gateway_timing_basis": "entry_through_work_settlement_wall_time",
+      "summed_provider_ms": 24677.201134,
+      "timing_coverage": {
+        "observed": 6,
+        "attempts": 6,
+        "basis": "gateway_observed_wall_and_provider_intervals"
+      },
+      "gateway_overhead_cost_microusd": null,
+      "cost_coverage": "covered_provider_attempts_excludes_unallocated_platform_and_compute_charges",
+      "works": 1,
+      "completed": 0
+    },
+    "scope": "actor",
+    "display": {
+      "job_limit": 100,
+      "shown_jobs": 1,
+      "total_jobs": 1,
+      "jobs_truncated": false,
+      "attempt_limit_per_job": 5,
+      "observation_limit_per_job": 5,
+      "plan_limit": 100,
+      "shown_plans": 0,
+      "total_plans": 0,
+      "plans_truncated": false
+    },
+    "coverage": "gateway_captured_work_requests_only",
+    "provider_account_costs": {
+      "status": "unavailable",
+      "reason": "external_account_collection_retired",
+      "accounts": []
+    },
+    "routing": {
+      "minimum_samples": 5,
+      "exploration_enabled": false,
+      "exploration_aliases": [],
+      "exploration_rate_percent": 5,
+      "exploration_max_cost_microusd": 0,
+      "evidence_basis": "local_observational_work_episodes",
+      "exploration_allocation_count": 0,
+      "exploration_reserved_microusd": 0,
+      "exploration_remaining_microusd": 0,
+      "exploration_allowance_basis": "monthly_quoted_reservations_including_unused_or_unknown_allocations"
+    },
+    "cache": {
+      "enabled": false,
+      "retention": "bounded_process_memory",
+      "exact_only": true
+    },
+    "connection": {
+      "endpoint": "http://127.0.0.1:56998",
+      "routes": [
+        {
+          "model": "Qwen3-4B-Q4_K_M",
+          "destination": "local-llama",
+          "protocol": "openai",
+          "locality": "local",
+          "authentication": "none",
+          "generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+          "upstream_model": "Qwen3-4B-Q4_K_M",
+          "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+          "capabilities": [
+            "responses",
+            "text",
+            "streaming",
+            "tools",
+            "codex_http",
+            "codex_http_0160"
+          ],
+          "credential_configured": false,
+          "eligible": true
+        }
+      ],
+      "shadow_router_enabled": false,
+      "credential_location": "router",
+      "coverage": "only_authenticated_intercepted_model_requests"
+    },
+    "onboarding": {
+      "choices": [
+        {
+          "model": "Qwen3-4B-Q4_K_M",
+          "destination": "local-llama",
+          "protocol": "openai",
+          "locality": "local",
+          "authentication": "none",
+          "generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+          "upstream_model": "Qwen3-4B-Q4_K_M",
+          "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+          "capabilities": [
+            "responses",
+            "text",
+            "streaming",
+            "tools",
+            "codex_http",
+            "codex_http_0160"
+          ],
+          "credential_configured": false,
+          "eligible": true,
+          "client": "codex"
+        }
+      ]
+    }
+  },
+  "revoked": {
+    "automatic_admission_effect": "none",
+    "case_id": "dev-clamp",
+    "destination_generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+    "max_requests": 8,
+    "model": "Qwen3-4B-Q4_K_M",
+    "plan_sha256": "0a5b4f763b88e3380b0d29431d7ef8641e18ceb00e52f0923f48528b4fc2541d",
+    "probe_id": "1be3d88273e2d13b08c70743a87d0e0a",
+    "remaining_ms": 0,
+    "schema_id": "hormuz.coding-probe-status",
+    "schema_version": 1,
+    "state": "revoked",
+    "submitted_requests": 6
+  },
+  "disconnect": {
+    "client_version": "0.160.0",
+    "configuration": "not_owned",
+    "generation": "e3af5d8abdf35e91567cdb12702ba67b",
+    "local_runtime": {
+      "ownership": "owned",
+      "state": "stopped"
+    },
+    "owned_settings": [
+      "model",
+      "model_provider",
+      "web_search"
+    ],
+    "phase": "disconnected",
+    "retained_settings": [],
+    "router": "stopped",
+    "schema_id": "hormuz.connected-client-status",
+    "schema_version": 2,
+    "scope": "codex_user_defaults"
+  },
+  "settings_restored": true,
+  "owned_listeners_closed": true,
+  "receipts": [
+    {
+      "operation": [
+        "client",
+        "setup"
+      ],
+      "receipt": {
+        "configuration": {
+          "authentication": "managed_local",
+          "listen_port": 56998,
+          "mode": "local_only",
+          "model": "Qwen3-4B-Q4_K_M",
+          "operation": "reuse",
+          "qualification_id": "codex0160-m5-32g-local-repair-v5-probe",
+          "runtime_port": 56999
+        },
+        "connection": {
+          "client_version": "0.160.0",
+          "configuration": "installed",
+          "generation": "e3af5d8abdf35e91567cdb12702ba67b",
+          "local_runtime": {
+            "ownership": "owned",
+            "state": "ready"
+          },
+          "owned_settings": [
+            "model",
+            "model_provider",
+            "web_search"
+          ],
+          "phase": "connected",
+          "retained_settings": [],
+          "router": "ready",
+          "schema_id": "hormuz.connected-client-status",
+          "schema_version": 2,
+          "scope": "codex_user_defaults"
+        },
+        "schema_id": "hormuz.local-setup",
+        "schema_version": 2
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "status"
+      ],
+      "receipt": {
+        "local_capacity": {
+          "active": 0,
+          "limit": 1
+        },
+        "mode": "local_only",
+        "routes": [
+          {
+            "automatic_task_types": [],
+            "capabilities": [
+              "responses",
+              "text",
+              "streaming",
+              "tools",
+              "codex_http",
+              "codex_http_0160"
+            ],
+            "coding_evidence": null,
+            "coding_readiness": "unknown",
+            "destination": "local-llama",
+            "evidence_basis": "operator_declared",
+            "generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+            "max_output_tokens": 512,
+            "max_request_bytes": 65536,
+            "model": "Qwen3-4B-Q4_K_M",
+            "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+            "qualification_id": "codex0160-m5-32g-local-repair-v5-probe",
+            "readiness": "unchecked",
+            "task_types": [
+              "code_change"
+            ]
+          }
+        ],
+        "schema_id": "hormuz.route-admission",
+        "schema_version": 2,
+        "task_classifier": "bounded_local_heuristic"
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "qualify"
+      ],
+      "receipt": {
+        "automatic_admission_effect": "none",
+        "case_id": "dev-clamp",
+        "destination_generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+        "max_requests": 8,
+        "model": "Qwen3-4B-Q4_K_M",
+        "plan_sha256": "0a5b4f763b88e3380b0d29431d7ef8641e18ceb00e52f0923f48528b4fc2541d",
+        "probe_id": "1be3d88273e2d13b08c70743a87d0e0a",
+        "remaining_ms": 89999,
+        "schema_id": "hormuz.coding-probe-status",
+        "schema_version": 1,
+        "state": "armed",
+        "submitted_requests": 0
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "qualify"
+      ],
+      "receipt": {
+        "automatic_admission_effect": "none",
+        "case_id": "dev-clamp",
+        "destination_generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+        "max_requests": 8,
+        "model": "Qwen3-4B-Q4_K_M",
+        "plan_sha256": "0a5b4f763b88e3380b0d29431d7ef8641e18ceb00e52f0923f48528b4fc2541d",
+        "probe_id": "1be3d88273e2d13b08c70743a87d0e0a",
+        "remaining_ms": 64252,
+        "schema_id": "hormuz.coding-probe-status",
+        "schema_version": 1,
+        "state": "running",
+        "submitted_requests": 6
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "status"
+      ],
+      "receipt": {
+        "local_capacity": {
+          "active": 0,
+          "limit": 1
+        },
+        "mode": "local_only",
+        "routes": [
+          {
+            "automatic_task_types": [],
+            "capabilities": [
+              "responses",
+              "text",
+              "streaming",
+              "tools",
+              "codex_http",
+              "codex_http_0160"
+            ],
+            "coding_evidence": null,
+            "coding_readiness": "unknown",
+            "destination": "local-llama",
+            "evidence_basis": "operator_declared",
+            "generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+            "max_output_tokens": 512,
+            "max_request_bytes": 65536,
+            "model": "Qwen3-4B-Q4_K_M",
+            "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+            "qualification_id": "codex0160-m5-32g-local-repair-v5-probe",
+            "readiness": "stale",
+            "task_types": [
+              "code_change"
+            ]
+          }
+        ],
+        "schema_id": "hormuz.route-admission",
+        "schema_version": 2,
+        "task_classifier": "bounded_local_heuristic"
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "qualify"
+      ],
+      "receipt": {
+        "automatic_admission_effect": "none",
+        "case_id": "dev-clamp",
+        "destination_generation": "e3050d09f0612c40347bf243b267c536e0dcc0eeafadfccc7773c6a78887495f",
+        "max_requests": 8,
+        "model": "Qwen3-4B-Q4_K_M",
+        "plan_sha256": "0a5b4f763b88e3380b0d29431d7ef8641e18ceb00e52f0923f48528b4fc2541d",
+        "probe_id": "1be3d88273e2d13b08c70743a87d0e0a",
+        "remaining_ms": 0,
+        "schema_id": "hormuz.coding-probe-status",
+        "schema_version": 1,
+        "state": "revoked",
+        "submitted_requests": 6
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "disconnect"
+      ],
+      "receipt": {
+        "client_version": "0.160.0",
+        "configuration": "not_owned",
+        "generation": "e3af5d8abdf35e91567cdb12702ba67b",
+        "local_runtime": {
+          "ownership": "owned",
+          "state": "stopped"
+        },
+        "owned_settings": [
+          "model",
+          "model_provider",
+          "web_search"
+        ],
+        "phase": "disconnected",
+        "retained_settings": [],
+        "router": "stopped",
+        "schema_id": "hormuz.connected-client-status",
+        "schema_version": 2,
+        "scope": "codex_user_defaults"
+      }
+    }
+  ],
+  "implementation_changed": false,
+  "patch_sha256": null,
+  "checks_sha256": "da25b64603054b72230db061e79855ed9d3f32b6f31076fa5755ac4eec12b942",
+  "checks_unchanged": true,
+  "check_exit_code": 1,
+  "completed_turns": 1,
+  "invalid_event_lines": 0,
+  "passed": false
+}

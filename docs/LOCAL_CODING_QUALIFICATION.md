@@ -153,6 +153,12 @@ collection path without changing ordinary coding admission. It binds one frozen
 case and native profile to a local conversation with finite request/time budgets.
 Probe permission is not an outcome or passing receipt.
 
+The [version-five development observation](campaigns/local-repair-20261016-v5/README.md)
+ran that path with frozen native pins/profile. One local episode completed, but
+made no edit and failed independent checks after malformed patch commands.
+The v4 denial before inference is retained separately. No held-out case ran,
+no passing receipt was installed, and this candidate remains unqualified.
+
 ## Contracts, migration and rollback
 
 The version-1 `hormuz.local-coding-evidence` receipt contains a frozen `plan`, its
