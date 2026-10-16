@@ -33,13 +33,13 @@ corpus and frozen records lie outside them. This is not a filesystem read
 isolation claim. Independent checks execute under a separate no-network,
 no-write macOS sandbox; the oracle hash must remain unchanged.
 
-At this commit the actual model outcome is pending. The one-shot runner checks
+At preregistration the actual model outcome was pending. The one-shot runner checks
 all frozen hashes before authorization, records a consumed marker, retains
 native events and implementation diff, evaluates unchanged independent checks,
 revokes permission, disconnects and verifies restoration/closed listeners.
 Its failure finalizer preserves missing, invalid and timeout outcomes.
 It emits no coding receipt and never changes ordinary automatic admission.
-Results will be added as separate files without rewriting this manifest.
+Results are retained as separate files without rewriting this manifest.
 
 ## Retained development outcome
 
