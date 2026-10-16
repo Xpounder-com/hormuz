@@ -92,7 +92,9 @@ configuration bound, including JSON escaping and per-route summary overhead,
 so supported long aliases remain observable through CLI/plugin status. Other
 control replies retain their smaller bound.
 Nonfinite numeric input, including exponent overflow, returns `invalid_json`
-before admission or provider traffic.
+before admission or provider traffic. Escaped lone Unicode surrogates in values
+or object keys return the same bounded error. Valid Unicode, including astral
+characters, retains its existing UTF-8 profile digest.
 
 Old operator declarations retain their noncoding task envelopes. Naming
 `code_change` or `code_review` alone no longer permits fresh automatic coding
@@ -119,6 +121,9 @@ An explicit task in a history-bearing request must still be permitted for the
 route; `code_review` stays unsupported. Moving a noncoding work to coding requires
 a self-contained matching request so its new context can be recorded before any
 coding continuation. Inherited provider state cannot establish that transition.
+For inferred work, a later admitted self-contained noncoding request replaces
+the observed context used by its continuations; the original inferred task label
+does not turn into declared coding intent.
 
 The bundled Qwen3-4B experiment remains **unknown for automatic coding admission**.
 Its recorded 0/3 original and 0/4 later repairs, including an unevaluable timeout,

@@ -1818,6 +1818,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 value = strict_json_loads(data.decode("utf-8"))
             else:
                 value = json.loads(data, parse_float=finite_json_float, parse_constant=finite_json_float)
+            # Escaped lone surrogates decode as strings but cannot be sent as
+            # UTF-8 or hashed in a qualified profile. Reject before admission.
+            pending = [value]
+            while pending:
+                item = pending.pop()
+                if isinstance(item, str):
+                    item.encode("utf-8")
+                elif isinstance(item, dict):
+                    pending.extend(item)
+                    pending.extend(item.values())
+                elif isinstance(item, list):
+                    pending.extend(item)
         except (ValueError, UnicodeDecodeError, RecursionError):
             self._send_error("invalid_json", "Request body must be valid JSON", HTTPStatus.BAD_REQUEST)
             return None

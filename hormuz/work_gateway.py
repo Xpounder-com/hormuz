@@ -368,7 +368,8 @@ def identify(handler, identity, request_value, *, client, protocol, account_usag
         handler._work_id = work["work_id"]
         # Continuations inherit observed context; declared coding intent may
         # tighten that context but cannot qualify an unsupported task.
-        handler._work_task_hint = (work["task_type"] if work["task_type"] in {"code_change", "code_review"}
+        handler._work_task_hint = (work["task_type"] if work["task_origin"] == "declared"
+            and work["task_type"] in {"code_change", "code_review"}
             else work["task_characteristics"].get("task_hint", "unknown"))
         handler._work_context_bound = work["context_signature"] != "legacy"
         handler._work_pinned_model = work["pinned_model"]

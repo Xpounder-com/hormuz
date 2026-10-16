@@ -395,9 +395,21 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             value, _, engine = self.managed_configuration(cloud)
             value["upstream_timeout_seconds"] = 6
             value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
-            value["model_routes"]["local-code"]["capabilities"].append("codex_http")
+            value["model_routes"]["local-code"]["capabilities"].extend(["tools", "codex_http"])
             qualification = value["route_admission"]["local_routes"]["local-code"]
-            qualification.update(task_types=["code_change"], coding_evidence=self.coding_evidence(value))
+            valid_request = {"model": "local-code", "max_output_tokens": 8,
+                "input": "Fix the arithmetic function in this Python code.",
+                "instructions": "Pinned agent instructions. \U0001f9ea",
+                "tools": [{"type": "function", "name": "fixture_tool", "parameters": {
+                    "type": "object", "properties": {"\U0001f9ea": {"type": "string", "description": "Pinned \U0001f9ea"}}}}]}
+            evidence = self.coding_evidence(value)
+            controls = {key: valid_request[key] for key in ("instructions", "tools")}
+            controls.update(store=False, service_tier="default")
+            evidence["plan"]["subject"]["request_profile_sha256"] = hashlib.sha256(json.dumps(
+                controls, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+            evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+            qualification.update(task_types=["code_change"], coding_evidence=evidence)
             self.path.write_text(json.dumps(value))
             try:
                 self.command("connect")
@@ -407,8 +419,35 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                             result = self.client("code-change", "numeric-control", number, *options)
                             self.assertEqual((result["status"], result["body"]["error"]["code"]),
                                              (400, "invalid_json"))
+                request_path = self.root / "unicode-request.json"
+                for surrogate in ("\ud800", "\udfff"):
+                    for field in ("instructions", "developer-input", "tool-description", "schema-key"):
+                        invalid = json.loads(json.dumps(valid_request))
+                        if field == "instructions":
+                            invalid["instructions"] = surrogate
+                        elif field == "developer-input":
+                            invalid["input"] = [{"role": "developer", "content": surrogate},
+                                                {"role": "user", "content": valid_request["input"]}]
+                        elif field == "tool-description":
+                            invalid["tools"][0]["description"] = surrogate
+                        else:
+                            invalid["tools"][0]["parameters"]["properties"] = {surrogate: {"type": "string"}}
+                        request_path.write_text(json.dumps(invalid))
+                        for options in ((), ("bound-conversation",)):
+                            with self.subTest(unicode_control=field, surrogate=ascii(surrogate), bound=bool(options)):
+                                result = self.client("request-file", str(request_path), *options)
+                                self.assertEqual((result["status"], result["body"]["error"]["code"]),
+                                                 (400, "invalid_json"))
                 self.assertFalse((engine / "inference-count").exists())
-                self.assertEqual(self.client("code-change")["status"], 200)
+                self.assertEqual(self.client("work-state")["body"]["works"], [])
+                # json.dumps emits the valid astral characters as surrogate
+                # pairs; decoding must preserve their reviewed UTF-8 digest.
+                request_path.write_text(json.dumps(valid_request))
+                for options in ((), ("bound-conversation",)):
+                    accepted = self.client("request-file", str(request_path), *options)
+                    self.assertEqual(accepted["status"], 200, accepted)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1", "1"])
+                self.assertEqual(self.client("router-state")["status"], 200)
                 self.assertEqual(requests, [])
             finally:
                 self.command("disconnect")
@@ -586,6 +625,32 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                         denied = self.client("tool-continuation", "coding-tools", "work-id", declared_id, *options)
                         self.assertEqual(denied["status"], 503, denied)
                 self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"] * 6)
+                for task_type, origin in (("unattributed", "inferred_characteristics"), ("code_change", "declared")):
+                    with self.subTest(coding_origin=origin):
+                        declared_path.write_text(json.dumps({"repository": "example/repository", "task_type": task_type}))
+                        created = self.client("create-work", "request-file", str(declared_path))
+                        self.assertEqual(created["status"], 201, created)
+                        work_id = created["body"]["work_id"]
+                        coding = self.client("code-change", "coding-tools", "work-id", work_id, "input-developer-pinned")
+                        self.assertEqual(coding["status"], 200, coding)
+                        summary = self.client("coding-tools", "work-id", work_id, "missing-client-version", "instruction-drift")
+                        self.assertEqual(summary["status"], 200, summary)
+                        continued = self.client("tool-continuation", "coding-tools", "work-id", work_id,
+                                                "missing-client-version", "instruction-drift")
+                        self.assertEqual(continued["status"], 200 if origin == "inferred_characteristics" else 503, continued)
+                        observed = next(work for work in self.client("work-state")["body"]["works"] if work["work_id"] == work_id)
+                        self.assertEqual((observed["task_type"], observed["task_origin"],
+                                          observed["task_characteristics"]["task_hint"]),
+                                         ("code_change", origin, "summarization"))
+                        for header in ("x-hormuz-work-id", "x-hormuz-destination-generation"):
+                            self.assertEqual(summary["headers"][header], coding["headers"][header])
+                            if origin == "inferred_characteristics":
+                                self.assertEqual(continued["headers"][header], coding["headers"][header])
+                        if origin == "declared":
+                            matching = self.client("tool-continuation", "coding-tools", "work-id", work_id,
+                                                   "input-developer-pinned")
+                            self.assertEqual(matching["status"], 200, matching)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"] * 12)
                 self.assertEqual(requests, [])
             finally:
                 self.command("disconnect")
@@ -670,7 +735,8 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             profile_path = Path(options[1])
             original = json.loads(profile_path.read_text())
             settings = (self.home / "config.toml").read_bytes()
-            for variant in ("changed-plan", "held-out-leak", "duplicate-outcome", "invalid-shape"):
+            for variant in ("changed-plan", "held-out-leak", "duplicate-outcome", "invalid-shape",
+                            "surrogate-identifier", "surrogate-subject"):
                 with self.subTest(variant=variant):
                     evidence = self.coding_evidence(value)
                     if variant == "changed-plan":
@@ -681,7 +747,11 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
                         evidence["outcomes"][-1]["case_id"] = evidence["outcomes"][0]["case_id"]
                     elif variant == "invalid-shape":
                         evidence["plan"]["cases"][0]["family"] = {"protected-marker": "must-not-appear"}
-                    if variant != "changed-plan":
+                    elif variant == "surrogate-identifier":
+                        evidence["evidence_id"] = "\ud800protected-marker"
+                    elif variant == "surrogate-subject":
+                        evidence["plan"]["subject"]["client_version"] = "\udfffprotected-marker"
+                    if variant not in {"changed-plan", "surrogate-subject"}:
                         evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
                             separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
                     profile_path.write_text(json.dumps({**original, "schema_version": 2, "coding_evidence": evidence}))
