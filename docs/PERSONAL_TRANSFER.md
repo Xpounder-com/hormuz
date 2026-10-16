@@ -85,8 +85,10 @@ These are manual instructions for the separately approved maintenance window:
    external integrations that bind an owner name. Recheck token grants and
    installation access; retained secrets and webhooks do not prove that their
    external permissions still work. Requalify paused automation before resuming.
-   Review the retained `V1_RELEASE_ADMIN_TOKEN` grant specifically against the
-   destination owner, without printing or changing its value during preparation.
+   The final October 16 metadata audit found only `DOCKERHUB_READ_TOKEN` and
+   `DOCKERHUB_USERNAME`, with no inherited organization secrets. Current main
+   contains only non-deployment CI; do not restore retired release credentials
+   or Azure automation as part of this transfer.
 
 GitHub Free supports rulesets for this **public** repository. The plan decision
 for any private controller belongs to that repository's cutover review; no
