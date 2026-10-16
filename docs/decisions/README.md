@@ -28,3 +28,8 @@ is superseded by ADR 0018; retaining a record does not reactivate its product or
 acceptance gates. Do not rewrite accepted rationale; supersede it with a new
 owner-approved decision. [Operational cleanup](../OPERATIONS_CLEANUP.md) remains
 separate from product development.
+
+The [first candidate selection](../CANDIDATE_SETUP.md) pins the experimental
+host/client/runtime/model for #541 and prepares the #537 campaign. It retains
+ADR 0025's coding gate and records remaining native/cloud/plugin release gates;
+candidate selection is not a coding qualification or epic scope reduction.
