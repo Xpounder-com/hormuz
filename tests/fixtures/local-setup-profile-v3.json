@@ -1,19 +1,18 @@
 {
   "schema_id": "hormuz.local-setup-profile",
-  "schema_version": 2,
-  "qualification_id": "codex-app0162-llamab11617-qwen3-4b-interactive-review-360s-v2",
+  "schema_version": 3,
+  "qualification_id": "synthetic-app-profile-v3",
   "client_version": "0.162.0-alpha.17.2",
   "system": "Darwin",
   "machine": "arm64",
-  "runtime_sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9",
-  "model_sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
-  "model": "Qwen3-4B-Q4_K_M",
+  "runtime_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "model_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "model": "local-code",
   "capabilities": [
     "responses",
     "text",
     "streaming",
     "tools",
-    "codex_http",
     "codex_http_0160",
     "codex_llama_v1",
     "structured_output"
@@ -24,5 +23,6 @@
     "interactive"
   ],
   "upstream_timeout_seconds": 360,
-  "startup_timeout_seconds": 60
+  "startup_timeout_seconds": 3,
+  "coding_evidence": null
 }

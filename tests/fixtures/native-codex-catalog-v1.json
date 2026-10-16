@@ -1,0 +1,16 @@
+{
+  "contract": "hormuz.native-codex-catalog;v=1",
+  "delivery": "http-headers",
+  "request": {
+    "method": "GET",
+    "path": "/backend-api/codex/models",
+    "gateway_credential_header": "X-Gateway-Key",
+    "native_credential_headers": ["Authorization", "ChatGPT-Account-ID"]
+  },
+  "response": {
+    "models": [
+      {"slug": "fixture-cloud-model", "display_name": "Fixture native model", "context_window": 32000}
+    ]
+  },
+  "inference_supported": false
+}

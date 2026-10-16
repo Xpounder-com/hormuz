@@ -21,6 +21,7 @@ import unittest
 from unittest.mock import patch
 
 from hormuz.config import GatewayConfig
+from hormuz.contracts import validate_contract
 from hormuz.server import GatewayServer, serve_in_thread
 
 
@@ -58,14 +59,23 @@ try:
         print(json.dumps({"status": "cancelled", "body": None, "headers": {}}))
         sys.exit(0)
     response = connection.getresponse()
+    if value.get("headers_signal"):
+        with open(value["headers_signal"], "w") as signal:
+            signal.write("client received headers")
     if value.get("stall_after_headers"):
-        time.sleep(1.8)
+        time.sleep(value.get("stall_seconds", 1.8))
         connection.close()
         print(json.dumps({"status": response.status,
                           "headers": dict((k.lower(), v) for k, v in response.getheaders()),
                           "body": None}))
         sys.exit(0)
-    data = response.readline() if value.get("cancel_after_event") else response.read()
+    if value.get("first_event_signal"):
+        data = response.readline()
+        with open(value["first_event_signal"], "w") as signal:
+            signal.write("client received first event")
+        data += response.read()
+    else:
+        data = response.readline() if value.get("cancel_after_event") else response.read()
     print(json.dumps({"status": response.status,
                       "headers": dict((k.lower(), v) for k, v in response.getheaders()),
                       "body": json.loads(data) if "application/json" in response.getheader("Content-Type", "") else data.decode()}))
@@ -75,7 +85,7 @@ finally:
 
 
 @contextmanager
-def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None, compact_json=False):
+def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None, text_deltas=(), trailing_events=(), response_body=None, compact_json=False):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -93,7 +103,7 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            received.append({"path": self.path, "body": body,
+            received.append({"path": self.path, "body": body, "wire_bytes": int(self.headers["Content-Length"]),
                              "headers": {k.lower(): v for k, v in self.headers.items()}})
             if hold_first and len(received) == 1:
                 hold_first[0].set()
@@ -110,8 +120,11 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                 tool = (response_fields['output'][0] if response_fields and response_fields.get('output') else
                         {"type": "function_call", "call_id": "fixture-call", "name": "fixture_tool", "arguments": "{}"})
                 events = [{"type": "response.output_item.done", "item": tool},
-                          {"type": "response.completed", "response": result}]
+                          *({"type": "response.output_text.delta", "delta": delta} for delta in text_deltas),
+                          {"type": "response.completed", "response": result}, *trailing_events]
                 data = b"".join(("data: " + json.dumps(event, separators=separators) + "\n\n").encode() for event in events)
+            if response_body is not None:
+                data = response_body
             if backpressure_first and len(received) == 1:
                 data = b"data: " + b" " * (16 * 1024 * 1024) + b"\n\n" + data
             self.send_response(status(body) if callable(status) else status)
@@ -344,6 +357,24 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
             "task_types": ["summarization"]}}}
         return value
 
+    def test_healthy_operator_declared_coding_route_is_not_automatically_qualified(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud)
+            value["route_admission"]["local_routes"]["local-code"]["task_types"] = ["code_change", "code_review", "summarization"]
+            with self.connected_client(value) as submit:
+                self.assertEqual(submit(request={"input": "Summarize this fixture."})["status"], 200)
+                result = submit(request={"input": "Fix the arithmetic function in this Python code."})
+                self.assertEqual((result["status"], result["body"].get("error", {}).get("code")),
+                                 (503, "hormuz_route_local_route_unavailable"))
+                state = submit(method="GET", path="/router/state")["body"]
+                self.assertEqual(state["schema_version"], 2)
+                route = state["routes"][0]
+                self.assertEqual((route["coding_readiness"], route["automatic_task_types"]),
+                                 ("unknown", ["summarization"]))
+                self.assertEqual((route["evidence_basis"], route["readiness"]), ("operator_declared", "ready"))
+            self.assertEqual((len(local_requests), cloud_requests), (1, []))
+
     def test_local_only_admits_local_execution_without_ai_work_accounting(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \
              provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
@@ -564,9 +595,11 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 before = submit(method="GET", path="/router/state")
                 self.assertEqual(before["status"], 200, before)
                 self.assertEqual((before["body"]["schema_id"], before["body"]["schema_version"], before["body"]["mode"]),
-                                 ("hormuz.route-admission", 1, "local_only"))
+                                 ("hormuz.route-admission", 2, "local_only"))
                 route = before["body"]["routes"][0]
-                frozen = json.loads((Path(__file__).parent / "fixtures/execution_destination/router-state-v1.json").read_text())
+                frozen = json.loads((Path(__file__).parent / "fixtures/execution_destination/router-state-v2.json").read_text())
+                validate_contract(json.loads((Path(__file__).parent / "fixtures/execution_destination/router-state-v1.json").read_text()))
+                validate_contract(before["body"])
                 normalized = json.loads(json.dumps(before["body"]))
                 self.assertRegex(normalized["routes"][0]["generation"], r"^[0-9a-f]{64}$")
                 normalized["routes"][0]["generation"] = "LIVE_DESTINATION_GENERATION"
@@ -1214,7 +1247,7 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 entries = json.loads(manifest.stdout)["schemas"]
                 versions = {entry["schema_version"] for entry in entries
                             if entry["schema_id"] == "hormuz.relay-metadata"}
-                self.assertEqual(versions, {1, 2, 3})
+                self.assertEqual(versions, {1, 2, 3, 4})
                 frozen = json.loads((Path(__file__).parent / "fixtures/execution_destination/relay-v3.json").read_text())
                 self.assertEqual(next(entry for entry in entries if entry["schema_id"] == "hormuz.relay-metadata" and entry["schema_version"] == 3), frozen)
                 self.assertIn("hormuz_route_local_route_unavailable", json.loads(manifest.stdout)["error_codes"])

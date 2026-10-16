@@ -21,7 +21,7 @@ not run a terminal binary or treat its version as desktop qualification.
 | Path | Current result | Remaining work |
 | --- | --- | --- |
 | `api_key` | `blocked` or `unverified`; `api_usage` billing | An explicit permitted cloud route, valid credentials and separate provider/client qualification |
-| `native_codex_gateway` | `not_implemented`; `chatgpt_plan` billing | Native gateway adapter, a supported build, workspace-managed setup, actual consent and eligibility |
+| `native_codex_gateway` | `not_implemented`; `chatgpt_plan` billing | Qualified native host adapter, supported build, workspace-managed setup, actual consent and eligibility |
 | `chatgpt_app` | `not_implemented`; `chatgpt_plan` billing | App-specific authorization, registration, stable host ID, plan request profile, actual consent and eligibility |
 
 The API result describes declarations only. `unverified` means the CLI version
@@ -32,6 +32,12 @@ Credentials, provider health, actual request eligibility, budgets, host
 overrides and subscription allowance remain unverified. It is never an
 authorization grant. A stored API key is not ChatGPT plan authorization; the
 subscription paths never prescribe adding an API key or a paid API route.
+
+The opt-in [native Codex catalog](NATIVE_CODEX_CATALOG.md) implements discovery;
+separately enabled [native Responses](NATIVE_CODEX_RESPONSES.md) implements bounded
+HTTP/SSE transport. Native profiles remain excluded from API route counts. These
+transport checkpoints do not qualify a native host/account or install managed
+settings, so the complete native path remains `not_implemented` here.
 
 Hard local-only mode appears as a blocker on all paths, including when the
 selected actor is unknown. Missing or invalid configuration, denied client or

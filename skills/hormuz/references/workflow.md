@@ -120,6 +120,15 @@ credentials, actual request eligibility and provider qualification need a
 separately authorized flow. Both ChatGPT plan paths remain `not_implemented`
 and require their own adapter, native consent and account eligibility.
 
+An administrator-selected [native catalog configuration](../../../docs/NATIVE_CODEX_CATALOG.md)
+provides discovery only. Keep that distinction in diagnosis: a catalog response
+does not enable inference by itself. The separately enabled
+[native Responses transport](../../../docs/NATIVE_CODEX_RESPONSES.md) has its own
+policy, continuation and unknown-cost observation boundary; actual account
+eligibility and a supported host remain unqualified.
+Do not read native login caches, generate native provider settings or reuse a
+gateway/API credential as native auth to clear the remaining blockers.
+
 Keep hard local-only policy and existing settings intact. Finish the preflight
 by reporting unresolved blockers and the next action; preflight does not
 authorize connection or billable fallback. For project/profile/launch conflicts,
@@ -199,6 +208,11 @@ for native evidence, model-catalog compatibility and rollback.
 
 Run the status command for the same client home. Report `phase`, `router`,
 `configuration`, `retained_settings` names and content-free error/action codes.
+For coding readiness, check `client status --help` for `--routing`, then run
+`hormuz client status codex --client-home /path/to/codex-home --routing`.
+Report its `coding_readiness` and `automatic_task_types` separately from engine
+health. The bundled experiment has unknown coding readiness and blocks automatic
+coding. For reviewed outcome receipts, read [coding qualification](../../../docs/LOCAL_CODING_QUALIFICATION.md).
 Keep router readiness separate from model readiness and task completion. A
 local-only admission rejection is a blocked request, not permission to change
 privacy mode. Follow the CLI's recovery action; never delete its journal,

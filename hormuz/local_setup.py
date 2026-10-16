@@ -25,7 +25,7 @@ from .local_credentials import LocalCredentialError, read_local_credential
 DEFAULT_PROFILES = {
     "0.147.0": "local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json",
     "0.160.0": "local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json",
-    "0.162.0-alpha.17.2": "local-setup-codex-app-0162-llama-b11617-qwen3-4b-v2.json",
+    "0.162.0-alpha.17.2": "local-setup-codex-app-0162-llama-b11617-qwen3-4b-v3.json",
 }
 
 
@@ -162,6 +162,8 @@ def _configuration(path, profile, managed, credential_env, listen_port, *, crede
         "ai_work": {"enabled": True, "database": str(state / "work.sqlite3"),
                     "tool_capable_aliases": [profile["model"]] if "tools" in profile["capabilities"] else []},
     }
+    if profile["schema_version"] >= 2:
+        value["route_admission"]["local_routes"][profile["model"]]["coding_evidence"] = profile["coding_evidence"]
     if shadow_router:
         value["shadow_router"] = {"schema_version": 1, "mode": "shadow", "model": profile["model"],
                                   "local_model": profile["model"]}
@@ -230,7 +232,7 @@ def setup_local(lifetime, args):
         model_file=_absolute(args.model_file), model_sha256=profile["model_sha256"],
         startup_timeout_seconds=profile["startup_timeout_seconds"], port=1,
         alias=profile["model"], output_tokens=profile["max_output_tokens"],
-        schema_version=profile["schema_version"],
+        schema_version=2 if profile["schema_version"] >= 3 else 1,
     )
     try:
         managed.verify()

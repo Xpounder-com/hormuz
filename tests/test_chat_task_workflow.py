@@ -118,6 +118,21 @@ class ChatTaskWorkflowTests(unittest.TestCase):
                 self.assertEqual([len(failed), len(local), len(cloud)], [1, 0, 0])
                 self.assert_normal_unchanged()
 
+    def test_explicit_interactive_choice_does_not_bypass_coding_qualification(self):
+        with self.fixture.configured() as (local, cloud):
+            self.qualify_configuration()
+            config = json.loads(self.fixture.path.read_text())
+            config['route_admission']['local_routes']['local-code']['task_types'] = ['interactive', 'code_change']
+            self.fixture.path.write_text(json.dumps(config))
+            self.prompt.write_text('Fix the arithmetic function in this Python code.')
+            self.fixture.command('connect')
+            result = self.command('ask', '--model', 'local-code', '--prompt-file', str(self.prompt),
+                                  '--max-output-tokens', '8')
+            self.assertEqual(result.returncode, 2)
+            self.assertEqual(json.loads(result.stderr)['error']['code'], 'router_request_rejected')
+            self.assertEqual([len(local), len(cloud)], [0, 0])
+            self.assert_normal_unchanged()
+
     def test_oversized_prompt_is_rejected_before_starting_or_contacting_any_router(self):
         self.prompt.write_bytes(b'x' * 65537)
         result = self.command('ask', '--prompt-file', str(self.prompt))

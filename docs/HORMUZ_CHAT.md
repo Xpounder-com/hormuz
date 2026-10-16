@@ -17,6 +17,10 @@ it does not replace the model running the whole Codex conversation.
    and `native_executable`. That home's `.hormuz-router/connection.json`
    records the gateway configuration path. Treat those as discovery hints, validate the same owner
    through the public status and connect preview, and leave the bridge disabled.
+   The chat task uses Hormuz's HTTP interface rather than the app engine's model
+   protocol. If the bundled engine has updated beyond its pinned qualification,
+   use an already installed supported terminal Codex CLI to validate the separate
+   router owner. Keep the desktop engine and its normal settings unchanged.
 2. List the choices:
 
    ```sh

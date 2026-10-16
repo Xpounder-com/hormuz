@@ -2,6 +2,7 @@
 from dataclasses import dataclass, replace
 from contextlib import contextmanager
 import json
+from pathlib import Path
 import threading
 import time
 import urllib.error
@@ -9,6 +10,7 @@ import urllib.request
 from types import MappingProxyType
 
 from .work_learning import contains_provider_state, request_characteristics
+from .coding_qualification import assess_coding_evidence, request_profile_digest
 
 
 @dataclass(frozen=True)
@@ -19,11 +21,18 @@ class LocalQualification:
     max_output_tokens: int
     task_types: tuple[str, ...]
 
+    coding_evidence: str | None = None
+
+    def automatic_task_types(self, coding):
+        return tuple(kind for kind in self.task_types if kind not in {"code_change", "code_review", "interactive"}
+                     or kind == "code_change" and coding.readiness == "qualified")
+
 
 @dataclass(frozen=True)
 class RouteAdmissionConfig:
     mode: str = "configured"
     local_routes: tuple[tuple[str, LocalQualification], ...] = ()
+    scorecard: str | None = None
 
 
 class RouteAdmissionError(Exception):
@@ -35,7 +44,7 @@ class RouteAdmissionError(Exception):
 def build_route_admission(raw, routes, upstreams):
     from .config import ConfigError
     value = raw.get("route_admission", {})
-    if type(value) is not dict or set(value) - {"mode", "local_routes"}:
+    if type(value) is not dict or set(value) - {"mode", "local_routes", "scorecard"}:
         raise ConfigError("route_admission is invalid")
     mode = value.get("mode", "configured")
     if type(mode) is not str or mode not in {"configured", "auto", "local_only"}:
@@ -50,7 +59,7 @@ def build_route_admission(raw, routes, upstreams):
         route = routes.get(alias)
         if route is None or upstreams[route.destination_id].locality != "local":
             raise ConfigError("route_admission must reference local model routes")
-        if type(record) is not dict or set(record) != fields:
+        if type(record) is not dict or set(record) - {"coding_evidence"} != fields:
             raise ConfigError("local qualification fields are invalid")
         for key in ("qualification_id", "model_revision"):
             text = record[key]
@@ -67,9 +76,26 @@ def build_route_admission(raw, routes, upstreams):
             raise ConfigError("local qualification task types are invalid")
         if "interactive" in kinds and "codex_llama_v1" not in route.capabilities:
             raise ConfigError("interactive qualification requires the Codex local transport")
+        evidence = record.get("coding_evidence")
+        if evidence is not None:
+            from .contracts import ContractValidationError, validate_contract
+            try:
+                if type(evidence) is not dict:
+                    raise ValueError()
+                validate_contract(evidence)
+                if evidence["schema_id"] != "hormuz.local-coding-evidence":
+                    raise ValueError()
+            except (ContractValidationError, ValueError, KeyError, TypeError, RecursionError):
+                raise ConfigError("local coding evidence is invalid") from None
         result.append((alias, LocalQualification(record["qualification_id"], record["model_revision"],
-            record["max_request_bytes"], record["max_output_tokens"], tuple(kinds))))
-    return RouteAdmissionConfig(mode, tuple(result))
+            record["max_request_bytes"], record["max_output_tokens"], tuple(kinds),
+            None if evidence is None else json.dumps(evidence, sort_keys=True, separators=(",", ":")))))
+    scorecard = value.get("scorecard")
+    if scorecard is not None and (type(scorecard) is not str or not 1 <= len(scorecard) <= 4096
+                                 or "\x00" in scorecard or not Path(scorecard).is_absolute()
+                                 or mode == "configured"):
+        raise ConfigError("route_admission.scorecard requires an absolute local path and automatic admission")
+    return RouteAdmissionConfig(mode, tuple(result), scorecard)
 
 
 def _text_envelope(value, protocol, endpoint):
@@ -171,11 +197,15 @@ class RouteAdmission:
         self.config, self.destinations = config, destinations
         self.settings = config.route_admission
         self.qualifications = MappingProxyType(dict(self.settings.local_routes))
+        self.coding = MappingProxyType({alias: assess_coding_evidence(qualification.coding_evidence, config,
+            config.model_routes[alias], qualification) for alias, qualification in self.qualifications.items()})
         self._health_lock = threading.Lock()
         self._health = {}
         self._local_capacity = threading.BoundedSemaphore(1)
         self._capacity_lock = threading.Lock()
         self._active_local = 0
+        from .scorecard_routing import ScorecardRouting
+        self.scorecards = ScorecardRouting(config)
 
     @staticmethod
     def _within_envelope(handler, route, qualification, value, output_field):
@@ -237,10 +267,26 @@ class RouteAdmission:
             self._health[destination.generation] = (time.monotonic(), ready)
             return ready
 
+    def _coding_request_matches(self, handler, alias, value, client):
+        coding = self.coding[alias]
+        agents = handler.headers.get_all("User-Agent", [])
+        agent = agents[0] if len(agents) == 1 else ""
+        return (coding.readiness == "qualified" and client == "codex"
+                and handler.path == "/v1/responses"
+                and 0 < len(agent) <= 512 and all(32 <= ord(character) < 127 for character in agent)
+                and agent.partition(" ")[0] == f"codex_exec/{coding.client_version}"
+                and request_profile_digest(value) == coding.request_profile_sha256)
+
     def select(self, handler, identity, decision, value, *, client, protocol, output_field):
         handler._route_admission_candidates = None
         handler._route_admission_selection_candidates = None
         handler._route_admission_headers = {}
+        handler._benchmark_forwarded = None
+        probes = handler.headers.get_all("X-Hormuz-Benchmark", [])
+        if len(probes) > 1 or probes and probes[0] != "1":
+            raise RouteAdmissionError("invalid_benchmark_mode")
+        if probes and self.config.shadow_router is not None:
+            raise RouteAdmissionError("invalid_benchmark_mode")
         requested = handler.headers.get_all("X-Hormuz-Routing-Mode", [])
         if len(requested) > 1 or requested and requested[0] != "local_only":
             raise RouteAdmissionError("invalid_routing_mode")
@@ -252,7 +298,13 @@ class RouteAdmission:
         work_headers = handler.headers.get_all("X-Hormuz-Work-Id", [])
         if continuation and (handler.server.work_runtime is None
                              or not (len(work_headers) == 1 or getattr(handler, "_work_id", None))
+                             or not getattr(handler, "_work_context_bound", False)
+                             or not getattr(handler, "_work_pinned_model", None)
                              or handler.path.split("?", 1)[0] == "/v1/messages/count_tokens"):
+            raise RouteAdmissionError("affinity_required", 409)
+        pinned = self.config.model_routes.get(getattr(handler, "_work_pinned_model", None))
+        if (continuation and mode == "local_only" and pinned is not None
+                and self.destinations.resolve(pinned).locality == "cloud"):
             raise RouteAdmissionError("affinity_required", 409)
         from .policy import PolicyEngine
         endpoint = handler.path.split("?", 1)[0]
@@ -266,11 +318,20 @@ class RouteAdmission:
             required.add(capability)
         limit = 0 if endpoint == "/v1/messages/count_tokens" else value.get(output_field)
         hint = request_characteristics(value)["task_hint"]
+        inherited_task = getattr(handler, "_work_task_hint", "unknown")
+        handler._route_admission_coding_required = (hint == "code_change"
+            or continuation and inherited_task == "code_change")
+        # Inherited state cannot establish a new coding context: the work
+        # retains its prior task until a self-contained request is admitted.
+        stateful_coding_switch = (continuation and hint == "code_change"
+            and inherited_task != "code_change")
         engine = PolicyEngine(self.config, handler.server.store,
             policy_runtime=handler.server.policy_engine.policy_runtime)
         candidates = {}
         for alias, qualification in self.qualifications.items():
             route = self.config.model_routes[alias]
+            if stateful_coding_switch:
+                continue
             if route.protocol != protocol or required is None or not required.issubset(route.capabilities):
                 continue
             destination = self.destinations.resolve(route)
@@ -278,9 +339,16 @@ class RouteAdmission:
                 continue
             if not self._within_envelope(handler, route, qualification, value, output_field):
                 continue
-            explicitly_selected = (alias == decision.requested_model and
-                                   "interactive" in qualification.task_types)
-            if not continuation and hint not in qualification.task_types and not explicitly_selected:
+            automatic_tasks = qualification.automatic_task_types(self.coding[alias])
+            explicitly_selected = (alias == decision.requested_model and "interactive" in qualification.task_types
+                and hint not in {"code_change", "code_review"}
+                and inherited_task not in {"code_change", "code_review"})
+            task_admitted = hint in automatic_tasks or continuation and hint == "unknown" or explicitly_selected
+            if (not automatic_tasks and not explicitly_selected or not task_admitted
+                    or continuation and inherited_task not in automatic_tasks and not explicitly_selected):
+                continue
+            if handler._route_admission_coding_required and (
+                    "code_change" not in automatic_tasks or not self._coding_request_matches(handler, alias, value, client)):
                 continue
             candidate = engine.evaluate(identity=identity, client=client, protocol=protocol,
                 requested_model=alias, requested_output_tokens=limit, snapshot=decision.snapshot)
@@ -289,6 +357,11 @@ class RouteAdmission:
                     candidates[alias] = candidate
         if continuation and mode == "auto" and self.destinations.resolve(decision.route).locality == "cloud":
             candidates[decision.resolved_alias] = decision
+        if probes:
+            # A benchmark must observe the requested alias, including its
+            # failures, rather than credit another admitted model's reply.
+            candidates = ({decision.requested_model: candidates[decision.requested_model]}
+                          if decision.requested_model in candidates else {})
         if candidates:
             selection_candidates = candidates
             if not continuation and decision.requested_model in candidates:
@@ -302,10 +375,22 @@ class RouteAdmission:
         else:
             selected, candidates, reason = decision, {decision.resolved_alias: decision}, "permitted_baseline"
             selection_candidates = candidates
+        scorecard_headers = {}
+        if self.settings.scorecard:
+            if continuation or probes:
+                scorecard_headers["X-Hormuz-Scorecard-Status"] = "affinity_preserved" if continuation else "benchmark_probe"
+            elif protocol != "openai" or endpoint != "/v1/responses":
+                scorecard_headers["X-Hormuz-Scorecard-Status"] = "no_target_match"
+            else:
+                alias, scorecard_headers = self.scorecards.choose(identity, candidates, value, handler._provider_body)
+                if alias is not None:
+                    selected = candidates[alias]
+                    selection_candidates = {alias: selected}
+                    reason = "benchmark_scorecard"
         handler._route_admission_candidates = candidates
         handler._route_admission_selection_candidates = selection_candidates
         handler._route_admission_headers = {"X-Hormuz-Routing-Mode": mode,
-                                            "X-Hormuz-Routing-Reason": reason}
+                                            "X-Hormuz-Routing-Reason": reason, **scorecard_headers}
         if selected.resolved_alias in self.qualifications:
             handler._route_admission_headers["X-Hormuz-Routing-Qualification"] = self.qualifications[selected.resolved_alias].qualification_id
         action = selected.action
@@ -337,31 +422,39 @@ class RouteAdmission:
             raise RouteAdmissionError("policy_changed")
         if destination.locality == "local":
             qualification = self.qualifications.get(decision.resolved_alias)
-            if not self._within_envelope(handler, decision.route, qualification, value, output_field) or not self._ready(decision.route):
+            if (not self._within_envelope(handler, decision.route, qualification, value, output_field)
+                    or handler._route_admission_coding_required and (
+                        "code_change" not in qualification.automatic_task_types(self.coding[decision.resolved_alias])
+                        or not self._coding_request_matches(handler, decision.resolved_alias, value, client))
+                    or not self._ready(decision.route)):
                 raise RouteAdmissionError("local_route_unavailable", 503)
         self.receipt(handler, decision.route)
 
     def contract_header(self, handler, route):
         if getattr(handler, "_route_admission_headers", {}):
-            return "hormuz.relay-metadata;v=3"
+            return "hormuz.relay-metadata;v=4" if self.settings.scorecard or handler.headers.get("X-Hormuz-Benchmark") == "1" else "hormuz.relay-metadata;v=3"
         return self.destinations.contract_header(route)
 
     def response_headers(self, handler, route):
         headers = dict(getattr(handler, "_route_admission_headers", {}))
         if not headers:
             return self.destinations.response_headers(route)
+        forwarded = getattr(handler, "_benchmark_forwarded", None)
+        if handler.headers.get("X-Hormuz-Benchmark") == "1" and forwarded is not None:
+            headers.update({"X-Hormuz-Benchmark-Request-Bytes": str(forwarded[0]),
+                            "X-Hormuz-Benchmark-Max-Output-Tokens": str(forwarded[1])})
         destination = self.destinations.resolve(route)
         headers.update({"X-Hormuz-Destination": destination.name,
                         "X-Hormuz-Destination-Locality": destination.locality,
                         "X-Hormuz-Destination-Generation": destination.generation})
         return headers
 
-    def status(self, handler, identity):
+    def status(self, identity, policy_engine):
         routes = []
         for alias, qualification in self.qualifications.items():
             route = self.config.model_routes[alias]
             client = "codex" if route.protocol == "openai" else "claude-code"
-            decision = handler.server.policy_engine.evaluate(identity=identity, client=client, protocol=route.protocol,
+            decision = policy_engine.evaluate(identity=identity, client=client, protocol=route.protocol,
                 requested_model=alias, requested_output_tokens=None)
             if not decision.allowed or decision.resolved_alias != alias:
                 continue
@@ -369,12 +462,27 @@ class RouteAdmission:
             with self._health_lock:
                 health = self._health.get(destination.generation)
             readiness = "unchecked" if health is None else "stale" if time.monotonic() - health[0] >= 5 else "ready" if health[1] else "unavailable"
+            coding = self.coding[alias]
             routes.append({"model": alias, "destination": destination.name, "generation": destination.generation,
                 "model_revision": qualification.model_revision, "qualification_id": qualification.qualification_id,
                 "evidence_basis": "operator_declared", "capabilities": list(route.capabilities),
                 "max_request_bytes": qualification.max_request_bytes, "max_output_tokens": qualification.max_output_tokens,
-                "task_types": list(qualification.task_types), "readiness": readiness})
+                "task_types": list(qualification.task_types), "readiness": readiness,
+                "coding_readiness": coding.readiness, "coding_evidence": coding.describe(),
+                "automatic_task_types": list(qualification.automatic_task_types(coding))})
         with self._capacity_lock:
             capacity = {"limit": 1, "active": self._active_local}
-        return {"schema_id": "hormuz.route-admission", "schema_version": 1, "mode": self.settings.mode,
+        return {"schema_id": "hormuz.route-admission", "schema_version": 2, "mode": self.settings.mode,
                 "task_classifier": "bounded_local_heuristic", "local_capacity": capacity, "routes": routes}
+
+    def benchmark_status(self, identity, policy_engine):
+        from .model_benchmark import benchmark_route_fingerprint
+        routes = self.status(identity, policy_engine)["routes"]
+        return {"schema_id": "hormuz.benchmark-runtime", "schema_version": 1,
+                "actor_id": identity.actor_id, "organization_id": identity.organization_id,
+                "shadow_router_enabled": self.config.shadow_router is not None,
+                "policy_content_sha256": self.config.policy_content_sha256,
+                "routes": [{"model": row["model"], "generation": row["generation"],
+                    "route_fingerprint": benchmark_route_fingerprint(self.config, self.config.model_routes[row["model"]]),
+                    "explicit_price_fields": sorted(self.config.model_routes[row["model"]].explicit_price_fields)}
+                    for row in routes]}

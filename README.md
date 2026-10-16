@@ -44,6 +44,22 @@ Opt-in [shadow routing](docs/SHADOW_ROUTING.md) records a local model's routing
 recommendation alongside the actual attempt. Shared setup accepts `--shadow-router`;
 recommendations preserve existing routing, local-only policy and conversation affinity.
 
+[Local coding qualification](docs/LOCAL_CODING_QUALIFICATION.md) now gates automatic
+coding admission on a pinned, predeclared campaign of actual edits, independent
+checks and normal completion. The bundled experiment remains unqualified for
+automatic coding. Engine health and shadow advice do not grant that qualification.
+
+The [first candidate setup](docs/CANDIDATE_SETUP.md) pins an experimental
+Codex 0.160.0/macOS arm64 combination and a sixteen-case preparation campaign.
+It has no new native coding outcomes or admission receipt.
+
+[Personal model scorecards](docs/MODEL_SCORECARDS.md) benchmark your own examples
+through the local router. Create a suite with reference checks and targets, compare
+quality, latency, streaming first-token timing, throughput, usage and configured
+cost estimates, then explicitly enable deterministic routing among already
+qualified local models. Scorecards stay local and preserve failed or unknown
+measurements. They do not grant coding qualification.
+
 ## Install in your agent
 
 The plugin manifests and shared CLI implementation are included in this source.
@@ -52,7 +68,7 @@ Installation remains subject to each coding client's plugin support and review.
 ### Codex
 
 ```sh
-codex plugin marketplace add Xpounder-com/hormuz
+codex plugin marketplace add mehrdadxzaker/hormuz
 codex plugin add hormuz@hormuz
 ```
 
@@ -62,7 +78,7 @@ the marketplace, select Hormuz in your client's plugin browser and install it.
 ### Gemini CLI
 
 ```sh
-gemini extensions install https://github.com/Xpounder-com/hormuz
+gemini extensions install https://github.com/mehrdadxzaker/hormuz
 ```
 
 Restart the Gemini CLI session after installation.
@@ -70,14 +86,14 @@ Restart the Gemini CLI session after installation.
 ### GitHub Copilot CLI
 
 ```sh
-copilot plugin marketplace add Xpounder-com/hormuz
+copilot plugin marketplace add mehrdadxzaker/hormuz
 copilot plugin install hormuz@hormuz
 ```
 
 ### Claude Code
 
 ```sh
-claude plugin marketplace add Xpounder-com/hormuz
+claude plugin marketplace add mehrdadxzaker/hormuz
 claude plugin install hormuz@hormuz
 ```
 
@@ -90,18 +106,21 @@ Use the [open Agent Skills installer](https://github.com/vercel-labs/skills)
 (requires Node.js/npm). Choose your agent when prompted:
 
 ```sh
-npx skills add Xpounder-com/hormuz --skill hormuz
+npx skills add mehrdadxzaker/hormuz --skill hormuz
 ```
 
 Or select it explicitly with `--agent cursor` or `--agent opencode`.
 
-After installation, ask: **“Use Hormuz to set up local-only routing for Codex.”**
-The skill checks the installed router, client version and route qualification
-before using shared setup. Plugin installation installs instructions; the
+After installation, ask: **“Use Hormuz in this chat. Let me choose the configured
+router or a qualified local model.”** Follow the [explicit chat workflow](docs/HORMUZ_CHAT.md)
+to preserve the native model, account, plugins, MCP and reasoning. Normal-app
+startup bridge activation is disabled. For an explicitly requested persistent
+CLI connection, the skill checks the router, client version and qualification
+before shared setup. Plugin installation installs instructions; the
 router runtime and a qualified local model are separate prerequisites. The
 implemented persistent connection supports Codex CLI 0.147.0 and the
 [0.160.0 single-agent HTTP profile](docs/CODEX_0160.md), plus the
-[Codex app engine 0.162.0-alpha.17.2](docs/CODEX_APP_COMPATIBILITY.md) with
+[isolated Codex app engine 0.162.0-alpha.17.2 qualification](docs/CODEX_APP_COMPATIBILITY.md) with
 plugins, MCP discovery and reasoning enabled. Other agents can
 use the skill to manage that connection; their own inference-routing adapters
 are not implemented. See [installation, updates, removal and compatibility](docs/AGENT_INSTALLATION.md).
@@ -150,6 +169,10 @@ no automatic fallback to billable API usage. Unknown costs remain unknown.
 
 Inspect [cloud authorization readiness](docs/CLOUD_READINESS.md) before changing
 settings with `hormuz --config hormuz.json client cloud-readiness codex`.
+The opt-in [native Codex catalog](docs/NATIVE_CODEX_CATALOG.md) adds separate
+gateway/native authentication for discovery. Separately enabled
+[native Responses](docs/NATIVE_CODEX_RESPONSES.md) adds bounded HTTP/SSE inference,
+continuation isolation and process-scoped usage with unknown plan cost.
 The read-only receipt distinguishes declared API access from the two separately
 authorized ChatGPT plan paths and reports their remaining blockers.
 

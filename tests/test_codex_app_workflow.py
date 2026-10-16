@@ -35,7 +35,7 @@ class CodexAppWorkflowTests(unittest.TestCase):
 
     def test_bundled_app_profile_accepts_native_automatic_review_without_dropping_parent_tags(self):
         profile = json.loads(files('hormuz').joinpath(
-            'local-setup-codex-app-0162-llama-b11617-qwen3-4b-v2.json').read_text())
+            'local-setup-codex-app-0162-llama-b11617-qwen3-4b-v3.json').read_text())
         thread = '11111111-1111-4111-8111-111111111111'
         parent = '22222222-2222-4222-8222-222222222222'
         tags = {'thread_id': thread, 'session_id': thread, 'turn_id': 'synthetic-review-turn',

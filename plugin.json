@@ -4,9 +4,9 @@
   "version": "0.2.1",
   "description": "Diagnose, explain and qualify local model routing with explicit privacy, budget and history controls.",
   "author": {
-    "name": "Xpounder-com"
+    "name": "mehrdadxzaker"
   },
-  "repository": "https://github.com/Xpounder-com/hormuz",
+  "repository": "https://github.com/mehrdadxzaker/hormuz",
   "license": "Apache-2.0",
   "extensions": {
     "com.openai": {
@@ -14,7 +14,7 @@
       "interface": {
         "displayName": "Hormuz",
         "shortDescription": "Choose local models in your chat",
-        "developerName": "Xpounder-com",
+        "developerName": "mehrdadxzaker",
         "category": "Developer Tools",
         "defaultPrompt": [
           "Use Hormuz in this chat. Let me choose the configured router or a qualified local model."

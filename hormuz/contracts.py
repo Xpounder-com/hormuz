@@ -60,13 +60,16 @@ from ._contract_schemas.connected_client import (
     _validate_status_v2 as _validate_connected_client_status_v2,
     _validate_preview_v2 as _validate_connected_client_preview_v2,
 )
+from ._contract_schemas.local_coding import EVIDENCE_FIELDS, validate_evidence as _validate_coding_evidence
+from ._contract_schemas.benchmark import FIELDS as BENCHMARK_FIELDS, validate_benchmark as _validate_benchmark
 from ._contract_schemas.cloud_readiness import FIELDS as CLOUD_READINESS_FIELDS, validate_readiness as _validate_cloud_readiness
 from ._contract_schemas.codex_app_bridge import FIELDS as APP_BRIDGE_FIELDS, validate_install as _validate_app_bridge_install
 from ._contract_schemas.chat_task import (TASK_FIELDS as CHAT_TASK_FIELDS, MODELS_FIELDS as CHAT_MODELS_FIELDS,
     ERROR_FIELDS as CHAT_ERROR_FIELDS, validate_task as _validate_chat_task, validate_models as _validate_chat_models,
     validate_error as _validate_chat_error)
+from ._contract_schemas.native_codex import FIELDS as NATIVE_STATUS_FIELDS, validate_status as _validate_native_status
 from ._contract_schemas.local_setup import (validate_profile as _validate_local_setup_profile,
-    validate_profile_v2 as _validate_local_setup_profile_v2,
+    validate_profile_v3 as _validate_local_setup_profile_v3,
     validate_setup as _validate_local_setup, validate_setup_v2 as _validate_local_setup_v2,
     validate_setup_v3 as _validate_local_setup_v3)
 from ._contract_schemas.local_acquisition import (CATALOG_FIELDS as ACQUISITION_CATALOG_FIELDS,
@@ -504,9 +507,26 @@ def contract_manifest() -> dict[str, object]:
                  "X-Hormuz-Routed-Model", "X-Hormuz-Redactions", "X-Hormuz-Error-Code",
                  "X-Hormuz-Destination", "X-Hormuz-Destination-Locality", "X-Hormuz-Destination-Generation",
                  "X-Hormuz-Routing-Mode", "X-Hormuz-Routing-Reason", "X-Hormuz-Routing-Qualification"]),
-            _manifest_schema(ROUTE_ADMISSION_SCHEMA_ID, ROUTE_ADMISSION_SCHEMA_VERSION, "response", "hormuz",
-                ["schema_id", "schema_version", "mode", "task_classifier", "local_capacity", "routes"]),
+            _manifest_schema(RELAY_METADATA_SCHEMA_ID, 4, "http-headers", "hormuz",
+                ["X-Hormuz-Contract", "X-Hormuz-Policy-Decision", "X-Hormuz-Requested-Model",
+                 "X-Hormuz-Routed-Model", "X-Hormuz-Redactions", "X-Hormuz-Error-Code",
+                 "X-Hormuz-Routing-Qualification", "X-Hormuz-Destination", "X-Hormuz-Destination-Locality",
+                 "X-Hormuz-Destination-Generation", "X-Hormuz-Routing-Mode", "X-Hormuz-Routing-Reason",
+                 "X-Hormuz-Scorecard-Status", "X-Hormuz-Scorecard-SHA256",
+                 "X-Hormuz-Benchmark-Request-Bytes", "X-Hormuz-Benchmark-Max-Output-Tokens"]),
+            *[_manifest_schema(schema, 1, "response" if schema == "hormuz.benchmark-runtime" else "cli-output", "hormuz", fields)
+              for schema, fields in BENCHMARK_FIELDS.items()],
+            *[_manifest_schema(ROUTE_ADMISSION_SCHEMA_ID, version, "response", "hormuz",
+                ["schema_id", "schema_version", "mode", "task_classifier", "local_capacity", "routes"])
+              for version in (1, 2)],
             _manifest_schema("hormuz.cloud-readiness", 1, "cli-output", "hormuz", sorted(CLOUD_READINESS_FIELDS)),
+            _manifest_schema(NATIVE_CATALOG_SCHEMA_ID, NATIVE_CATALOG_SCHEMA_VERSION, "http-headers", "hormuz",
+                ["X-Hormuz-Contract"]),
+            _manifest_schema(NATIVE_RESPONSES_SCHEMA_ID, 1, "http-headers", "hormuz",
+                ["X-Hormuz-Contract", "X-Hormuz-Billing", "X-Hormuz-Cost-Status", "X-Hormuz-Redactions",
+                 "X-Hormuz-Destination", "X-Hormuz-Destination-Locality", "X-Hormuz-Destination-Generation",
+                 "X-Hormuz-Policy-Decision", "X-Hormuz-Requested-Model", "X-Hormuz-Routed-Model"]),
+            _manifest_schema(NATIVE_STATUS_SCHEMA_ID, 1, "response", "hormuz", sorted(NATIVE_STATUS_FIELDS)),
             _manifest_schema(CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_STATUS_SCHEMA_VERSION,
                 "cli-output", "hormuz", ["schema_id", "schema_version", "phase", "router", "scope",
                 "configuration", "retained_settings", "generation", "client_version", "owned_settings"]),
@@ -534,18 +554,16 @@ def contract_manifest() -> dict[str, object]:
                 ["schema_id", "schema_version", "configuration", "connection"]),
             _manifest_schema(LOCAL_SETUP_SCHEMA_ID, 3, "cli-output", "hormuz",
                 ["schema_id", "schema_version", "configuration", "connection"]),
+            _manifest_schema("hormuz.local-coding-evidence", 1, "durable-evidence", "hormuz", sorted(EVIDENCE_FIELDS)),
             _manifest_schema("hormuz.shadow-routing", 1, "durable-evidence", "hormuz", sorted(SHADOW_FIELDS)),
             *[_manifest_schema("hormuz.ai-work-attempt-history", version, "response", "hormuz",
                 ["schema_id", "schema_version", "scope", "work_id", "attempts", "page_limit", "order", "next_before"])
               for version in (1, 2)],
-            _manifest_schema(LOCAL_SETUP_PROFILE_SCHEMA_ID, 1, "durable-evidence", "hormuz",
+            *[_manifest_schema(LOCAL_SETUP_PROFILE_SCHEMA_ID, version, "durable-evidence", "hormuz",
                 ["schema_id", "schema_version", "qualification_id", "client_version", "system", "machine",
                  "runtime_sha256", "model_sha256", "model", "capabilities", "max_request_bytes",
-                 "max_output_tokens", "task_types", "upstream_timeout_seconds", "startup_timeout_seconds"]),
-            _manifest_schema(LOCAL_SETUP_PROFILE_SCHEMA_ID, 2, "durable-evidence", "hormuz",
-                ["schema_id", "schema_version", "qualification_id", "client_version", "system", "machine",
-                 "runtime_sha256", "model_sha256", "model", "capabilities", "max_request_bytes",
-                 "max_output_tokens", "task_types", "upstream_timeout_seconds", "startup_timeout_seconds"]),
+                 "max_output_tokens", "task_types", "upstream_timeout_seconds", "startup_timeout_seconds"]
+                 + (["coding_evidence"] if version >= 2 else [])) for version in (1, 2, 3)],
         ],
         "policy_action_semantics": {
             "allowed": "The requested route was allowed without a route substitution or output cap.",
@@ -582,6 +600,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
     schema_id = _value_string(value, "schema_id")
     schema_version = _value_integer(value, "schema_version")
     validator = {
+        **{(schema, 1): _validate_benchmark for schema in BENCHMARK_FIELDS},
         ("hormuz.local-acquisition-catalog", 1): _validate_acquisition_catalog,
         ("hormuz.codex-app-bridge-install", 1): _validate_app_bridge_install,
         ("hormuz.chat-task", 1): _validate_chat_task,
@@ -590,20 +609,24 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         ("hormuz.local-acquisition", 1): _validate_acquisition_receipt,
         ("hormuz.local-acquisition-error", 1): _validate_acquisition_error,
         ("hormuz.cloud-readiness", 1): _validate_cloud_readiness,
+        (NATIVE_STATUS_SCHEMA_ID, 1): _validate_native_status,
         (LOCAL_SETUP_SCHEMA_ID, 1): _validate_local_setup,
         (LOCAL_SETUP_SCHEMA_ID, 2): _validate_local_setup_v2,
         (LOCAL_SETUP_SCHEMA_ID, 3): _validate_local_setup_v3,
+        ("hormuz.local-coding-evidence", 1): _validate_coding_evidence,
         ("hormuz.shadow-routing", 1): _validate_shadow,
         ("hormuz.ai-work-attempt-history", 1): _validate_attempt_history,
         ("hormuz.ai-work-attempt-history", 2): _validate_attempt_history,
         (LOCAL_SETUP_PROFILE_SCHEMA_ID, 1): _validate_local_setup_profile,
-        (LOCAL_SETUP_PROFILE_SCHEMA_ID, 2): _validate_local_setup_profile_v2,
+        (LOCAL_SETUP_PROFILE_SCHEMA_ID, 2): _validate_local_setup_profile,
+        (LOCAL_SETUP_PROFILE_SCHEMA_ID, 3): _validate_local_setup_profile_v3,
         (CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_STATUS_SCHEMA_VERSION): _validate_connected_client_status,
         (CONNECTED_CLIENT_PREVIEW_SCHEMA_ID, CONNECTED_CLIENT_PREVIEW_SCHEMA_VERSION): _validate_connected_client_preview,
         (CONNECTED_CLIENT_STATUS_SCHEMA_ID, 2): _validate_connected_client_status_v2,
         (CONNECTED_CLIENT_PREVIEW_SCHEMA_ID, 2): _validate_connected_client_preview_v2,
         (CONNECTED_CLIENT_ERROR_SCHEMA_ID, CONNECTED_CLIENT_ERROR_SCHEMA_VERSION): _validate_connected_client_error,
-        (ROUTE_ADMISSION_SCHEMA_ID, ROUTE_ADMISSION_SCHEMA_VERSION): _validate_route_admission,
+        (ROUTE_ADMISSION_SCHEMA_ID, 1): _validate_route_admission,
+        (ROUTE_ADMISSION_SCHEMA_ID, 2): _validate_route_admission,
         (HEALTH_SCHEMA_ID, 1): _validate_health,
         (READINESS_SCHEMA_ID, READINESS_SCHEMA_VERSION): _validate_readiness,
         (IDENTITY_SCHEMA_ID, 1): _validate_identity,

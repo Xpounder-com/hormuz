@@ -17,17 +17,17 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
 
-    def test_v2_setup_accepts_a_bounded_app_sized_request_without_changing_saved_features(self):
+    def test_v3_setup_accepts_a_bounded_app_sized_request_without_changing_saved_features(self):
         (self.fixture.root / 'client-version.txt').write_text('0.160.0')
         with lifetime.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, requests):
             value, _, _ = self.fixture.managed_configuration(cloud)
             options = self.fixture.local_setup_options(value)
             path = Path(options[1])
             original = json.loads(path.read_text())
-            profile = json.loads((Path(__file__).parent / 'fixtures/local-setup-profile-v2.json').read_text())
+            profile = json.loads((Path(__file__).parent / 'fixtures/local-setup-profile-v3.json').read_text())
             profile.update({key: original[key] for key in ('system', 'machine', 'runtime_sha256', 'model_sha256')})
             profile.update(client_version='0.160.0',
-                           qualification_id='synthetic-app-sized-v2', max_request_bytes=2 * 1024 * 1024)
+                           qualification_id='synthetic-app-sized-v3', max_request_bytes=2 * 1024 * 1024)
             path.write_text(json.dumps(profile))
             settings = self.fixture.home / 'config.toml'
             settings.write_text('model = "original-model"\nmodel_reasoning_effort = "max"\n'
@@ -47,14 +47,15 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
             self.assertEqual(tomllib.loads(settings.read_text()), before)
             self.assertEqual(requests, [])
 
-    def test_v2_managed_setup_allows_a_reasoning_budget_without_relaxing_legacy_profiles(self):
+    def test_v3_managed_setup_allows_a_reasoning_budget_without_relaxing_legacy_profiles(self):
         (self.fixture.root / 'client-version.txt').write_text('0.160.0')
         with lifetime.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, requests):
             value, _, _ = self.fixture.managed_configuration(cloud)
             options = self.fixture.local_setup_options(value)
             path = Path(options[1])
             profile = json.loads(path.read_text())
-            profile.update(schema_version=2, client_version='0.160.0', qualification_id='synthetic-reasoning-v2',
+            profile.update(schema_version=3, client_version='0.160.0', qualification_id='synthetic-reasoning-v3',
+                           coding_evidence=None,
                            max_request_bytes=2 * 1024 * 1024, max_output_tokens=8192,
                            upstream_timeout_seconds=180, capabilities=['responses', 'text', 'codex_llama_v1'])
             path.write_text(json.dumps(profile))
@@ -154,7 +155,7 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
              destination.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, cloud_requests):
             value = fixture.admission_configuration(local, cloud, mode='local_only')
             value['model_routes']['local-code']['capabilities'] = ['responses', 'text', 'streaming', 'tools', 'codex_http_0160']
-            value['route_admission']['local_routes']['local-code']['task_types'] = ['code_review']
+            value['route_admission']['local_routes']['local-code']['task_types'] = ['summarization']
             request = json.loads((Path(__file__).parent / 'fixtures/codex-http-request-0.160.json').read_text())
             with fixture.connected_client(value) as submit:
                 routed = submit(request=request)
@@ -192,7 +193,7 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
              destination.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, cloud_requests):
             value = fixture.admission_configuration(local, cloud, mode='local_only')
             value['model_routes']['local-code']['capabilities'] = ['responses', 'text', 'streaming', 'tools', 'codex_http_0160']
-            value['route_admission']['local_routes']['local-code']['task_types'] = ['code_review']
+            value['route_admission']['local_routes']['local-code']['task_types'] = ['summarization']
             with fixture.connected_client(value) as submit:
                 routed = submit(request=request)
                 self.assertEqual(routed['status'], 200, routed)
@@ -283,7 +284,7 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
              destination.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, cloud_requests):
             value = fixture.admission_configuration(local, cloud)
             value['model_routes']['local-code']['capabilities'].extend(['streaming', 'tools', 'codex_http_0160'])
-            value['route_admission']['local_routes']['local-code']['task_types'] = ['code_review']
+            value['route_admission']['local_routes']['local-code']['task_types'] = ['summarization']
             variants = [
                 {**request, 'reasoning': {'summary': 'auto'}},
                 {**request, 'tools': [{'type': 'namespace', 'name': 'multi_agent_v1', 'tools': []}]},

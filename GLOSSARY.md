@@ -8,6 +8,9 @@
   locality and model-qualification facts bound to one generation.
 - **Qualified local route:** Destination/model with evidence for its permitted
   request envelope and capabilities. A running process is not qualification.
+- **Coding qualification:** Reviewed outcome evidence that an exact local
+  execution envelope completed autonomous edits and independent checks under
+  predeclared criteria. Transport health and task-fit advice cannot establish it.
 - **Local-only:** Hard permission forbidding cloud execution for all intercepted
   model requests, including helpers. Unsupported work blocks.
 - **Automatic routing:** Selection among policy-eligible qualified destinations
@@ -25,3 +28,13 @@
   responses and usage, kept on their device for review, export and deletion.
 - **Spending estimate:** A calculation from observed usage and configured
   prices; it is distinct from an invoice or provider-confirmed charge.
+- **Gateway credential:** Credential authorizing a coding client as a Hormuz
+  identity, separate from that client's provider or native account credential.
+- **Native ChatGPT credential:** Client-owned account credential for the native
+  ChatGPT backend; its validity and permitted account scope belong to that backend.
+- **Native catalog:** Account-scoped model metadata available through the native
+  Codex path; discovery is separate from permission to execute model requests.
+- **Native response:** Model execution authorized by the coding client's native
+  account grant.
+- **Continuation affinity:** The association between provider state, tool results
+  and the identity, account and execution destination that produced them.

@@ -20,7 +20,7 @@ def main():
         names = archive.namelist()
         required = {'hormuz/codex-0160-base-instructions.json', 'hormuz/codex-0160-LICENSE.txt',
                     'hormuz/local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json',
-                    'hormuz/local-setup-codex-app-0162-llama-b11617-qwen3-4b-v2.json'}
+                    'hormuz/local-setup-codex-app-0162-llama-b11617-qwen3-4b-v3.json'}
         if not required <= set(names):
             raise SystemExit('Wheel is missing Codex CLI/app compatibility assets')
         if any('/migrations/postgresql/' in name or name.startswith(('clients/', 'apps/', 'deploy/'))
@@ -40,10 +40,11 @@ def main():
                        cwd=temporary, env=environment, check=True, timeout=10)
         subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
                         '-p', 'test_*workflow.py', '-f', '-v'],
-                       # The 250-test installed suite exceeded 540 seconds on
-                       # two CI runners. Keep a finite eleven-minute allowance
-                       # and one minute for build/artifacts in the package job.
-                       cwd=temporary, env=environment, check=True, timeout=660)
+                       # The 392-test installed CI suite passed in 1046 seconds.
+                       # Additional benchmark and managed-runtime cases need
+                       # a finite twenty-minute budget, leaving
+                       # two minutes for build, artifacts and job cleanup.
+                       cwd=temporary, env=environment, check=True, timeout=1200)
     print('Installed-wheel workflow passed outside the source checkout')
 
 

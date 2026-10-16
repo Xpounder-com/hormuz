@@ -21,7 +21,7 @@ from ._config_routing import build_model_route_domain, build_upstream_domain
 from ._config_work import build_ai_work
 from .route_admission import build_route_admission
 from .shadow_routing import build_shadow_router
-from ._config_values import _integer
+from ._config_values import _boolean, _integer
 from .config import (
     ConfigError,
     GatewayConfig,
@@ -132,6 +132,8 @@ def _build_gateway_config(
         route_admission=admission,
         managed_llama=build_managed_llama(raw, routes, upstreams, admission),
         shadow_router=build_shadow_router(raw, routes, upstreams, admission),
+        native_codex_catalog=_boolean(raw.get("native_codex_catalog", False), "native_codex_catalog"),
+        native_codex_responses=_boolean(raw.get("native_codex_responses", False), "native_codex_responses"),
     )
     config.validate_references()
     if not resolve_credentials:

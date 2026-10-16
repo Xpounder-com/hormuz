@@ -83,8 +83,16 @@ in an operator-selected document, equivalent to configuring a local
 qualification manually. It is not a new certificate or a way to infer task
 quality from filenames. Use existing evidence and independently trusted
 digests; agents must preserve the declared capabilities and limits. The
-[synthetic fixture](../tests/fixtures/local-setup-profile-v1.json) documents
+[version-2 synthetic fixture](../tests/fixtures/local-setup-profile-v2.json) documents
 the exact input shape; it does not identify a real runtime or model.
+
+Version-1 profiles retain unknown coding readiness. To install reviewed coding
+outcomes, explicitly select a version-2 profile with `--qualification`; the
+[bundled version-2 example](../hormuz/local-setup-codex-0147-llama-b11617-qwen3-4b-v2.json)
+has empty `coding_evidence` and therefore also remains unqualified. A healthy
+engine and matching artifacts do not grant coding admission. See the
+[coding qualification contract](LOCAL_CODING_QUALIFICATION.md) for the outcome
+gate, status, trust limits and migration rules.
 
 ## Creation, reuse and recovery
 
@@ -130,9 +138,12 @@ reuse. Removal of the plugin removes instructions; disconnect first.
 - `hormuz.local-setup-profile` version 1 is the strict, bounded input declaration.
   It includes exact digests, client/platform, model, capabilities, task types
   and request/output/startup/upstream limits. Unknown fields/versions fail.
-  Version 2 adds the explicit app transport, interactive local selection and
-  expanded limits; v1 limits remain unchanged. Its [fixture](../tests/fixtures/local-setup-profile-v2.json)
-  freezes that declaration. See the app compatibility document for managed
+  Version 2 adds nullable coding evidence and preserves the original limits;
+  its [fixture](../tests/fixtures/local-setup-profile-v2.json) stays unchanged.
+  Version 3 adds the explicit local transport, interactive local selection and
+  expanded limits while retaining coding evidence and admission safeguards.
+  Its [fixture](../tests/fixtures/local-setup-profile-v3.json) freezes that
+  declaration. See the app compatibility document for managed
   profile v2, metrics migration 20 and rollback boundaries.
 - `hormuz.local-setup` version 1 is the environment-backed, content-free receipt containing
   `configuration` and `connection`. Configuration has operation `create` or

@@ -1,5 +1,11 @@
 # Codex app local transport
 
+For the normal Codex app, use the [explicit Hormuz chat workflow](HORMUZ_CHAT.md).
+It keeps the native model, account and startup path intact. Normal-app bridge
+activation is disabled. The pinned transport qualification below is historical
+and is exercised only in separate control homes; it does not authorize replacing
+the normal app provider or downgrading an updated app.
+
 The macOS app engine `0.162.0-alpha.17.2` has a separate exact compatibility
 row from terminal Codex `0.160.0`. Select the executable actually bundled by
 the app for shared setup. Neither executable needs replacement or downgrade.
@@ -15,7 +21,7 @@ request to about 93 KiB while retaining access to deferred plugin/MCP tools.
 Increasing a byte limit alone would not fit the complete tool catalog in the
 model's 32,768-token context.
 
-`hormuz.local-setup-profile` version 2 permits a 2 MiB serialized request,
+`hormuz.local-setup-profile` version 3 permits a 2 MiB serialized request,
 8,192 output tokens and a 360-second request deadline. Managed llama profile
 version 2 uses the existing 32,768-token context and a positive 1,024-token
 reasoning budget, leaving room for tool calls and answers. Codex effort and
@@ -97,6 +103,14 @@ not provide ChatGPT-plan inference and is outside this profile.
 
 ## Durable compatibility and migration
 
+Setup profile version 2 retains main's nullable coding evidence and original
+limits. Version 3 retains that evidence field while adding the expanded app
+transport envelope; it is the first published version of that expansion.
+Existing coding qualification and request-profile checks remain in force.
+The earlier machine-local version-2 app declaration was unpublished and must be
+requalified as version 3 before a future setup. Existing generated gateway
+configurations and the installed runtime are not rewritten by this PR.
+
 Version-1 setup and managed profiles retain their original 64 KiB/512-token
 bounds and behavior. Version-2 profile fixtures live in `tests/fixtures`.
 Existing setup receipts, connection journals and work receipt shapes remain
@@ -112,7 +126,7 @@ or invented. The frozen v2 fixture documents the expanded-byte case.
 
 To migrate an existing connection, disconnect its recorded generation with its
 current owner, preserving returned retained-setting names. Use a new router
-configuration path and the app executable with shared setup preview, then run
+configuration path in a separate control home and the pinned executable with shared setup preview, then run
 the matching apply. All existing plugin/MCP/preferences remain in the client
 home. Keep old configuration, assets and evidence for rollback.
 

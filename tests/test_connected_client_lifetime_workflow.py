@@ -87,13 +87,56 @@ if "idle" in sys.argv:
     print(json.dumps({"closed": closed}), flush=True)
     sys.exit(0)
 try:
-    control = "work-state" in sys.argv
-    connection.request("GET" if control else "POST", origin.path.rstrip("/") + ("/work/state" if control else "/responses"),
-        None if control else json.dumps({"model": "local-code" if "request-local-model" in sys.argv else view["model"],
-                    "input": "Consider this fixture." if "unknown-task" in sys.argv else "Summarize this fixture.",
-                    "max_output_tokens": 8}),
-        {"Content-Type": "application/json", "Authorization": "Bearer " + credential,
-         **({"X-Hormuz-Routing-Mode": "local_only"} if "local-only" in sys.argv else {})})
+    control = "work-state" in sys.argv or "router-state" in sys.argv
+    request = {"model": "local-code" if "request-local-model" in sys.argv else view["model"], "max_output_tokens": 8,
+               "input": "Fix the arithmetic function in this Python code." if "code-change" in sys.argv else
+                        "Review this code diff." if "code-review" in sys.argv else
+                        "Consider this fixture." if "unknown-task" in sys.argv else "Summarize this fixture."}
+    if "request-file" in sys.argv:
+        request = json.loads(pathlib.Path(sys.argv[sys.argv.index("request-file") + 1]).read_text())
+    version_file = pathlib.Path(__file__).with_name("client-version.txt")
+    version = version_file.read_text().strip() if version_file.exists() else "0.147.0"
+    headers = {"Content-Type": "application/json", "Authorization": "Bearer " + credential,
+               "User-Agent": f"codex_exec/{version} (Mac OS 26.2.0; arm64) unknown (codex_exec; {version})"}
+    if "missing-client-version" in sys.argv:
+        headers.pop("User-Agent")
+    if "client-agent" in sys.argv:
+        headers["User-Agent"] = sys.argv[sys.argv.index("client-agent") + 1]
+    if "duplicate-client-version" in sys.argv:
+        class DuplicateAgent(dict):
+            def items(self):
+                return [*super().items(), ("User-Agent", self["User-Agent"])]
+        headers = DuplicateAgent(headers)
+    if "local-only" in sys.argv:
+        headers["X-Hormuz-Routing-Mode"] = "local_only"
+    if "work-id" in sys.argv:
+        headers["X-Hormuz-Work-Id"] = sys.argv[sys.argv.index("work-id") + 1]
+    if "coding-tools" in sys.argv:
+        request["tools"] = [{"type":"function","name":"fixture_tool","parameters":{"type":"object"}}]
+    if "bound-conversation" in sys.argv:
+        headers.update({"thread-id":"11111111-1111-4111-8111-111111111111",
+                        "session-id":"22222222-2222-4222-8222-222222222222"})
+        request["client_metadata"] = {"thread_id":headers["thread-id"], "session_id":headers["session-id"]}
+    if "tool-continuation" in sys.argv:
+        request["input"] = [{"type":"function_call_output","call_id":"fixture-call","output":"Fixture tool result"}]
+    if "instruction-drift" in sys.argv:
+        request["instructions"] = "Different unqualified agent instructions."
+    if "input-developer-pinned" in sys.argv:
+        items = request["input"] if isinstance(request["input"], list) else [{"role":"user","content":request["input"]}]
+        request["input"] = [{"role":"developer","content":"Pinned agent instructions."}, *items]
+    for role in ("system", "developer"):
+        if "input-" + role + "-drift" in sys.argv:
+            items = request["input"] if isinstance(request["input"], list) else [{"role":"user","content":request["input"]}]
+            if items and items[0].get("role") == role:
+                items = items[1:]
+            request["input"] = [{"role":role,"content":"Different unqualified agent instructions."}, *items]
+    body = json.dumps(request)
+    if "numeric-control" in sys.argv:
+        body = body[:-1] + ',"temperature":' + sys.argv[sys.argv.index("numeric-control") + 1] + '}'
+    request_path = ("/work/jobs" if "create-work" in sys.argv else "/router/state" if "router-state" in sys.argv
+                    else "/work/state" if control else "/responses")
+    connection.request("GET" if control else "POST", origin.path.rstrip("/") + request_path,
+                       None if control else body, headers)
     response = connection.getresponse()
     view.update(status=response.status, body=json.loads(response.read()),
                 headers={k.lower():v for k,v in response.getheaders()})
@@ -122,10 +165,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200);self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
     def do_POST(self):
         body=json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        data=json.dumps({"id":"managed-fixture","object":"response","status":"completed","model":model,
+        with pathlib.Path(__file__).with_name("inference-count").open("a") as observed:
+            observed.write("1\n")
+        result={"id":"managed-fixture","object":"response","status":"completed","model":model,
             "output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":
                 "LOCAL" if body.get("instructions", "").startswith("You assess coding task fit.") else "MANAGED_LOCAL"}]}],
-            "usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}).encode()
+            "usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}
+        items=body.get("input", [])
+        continuation=isinstance(items,list) and any(isinstance(item,dict) and item.get("type")=="function_call_output" for item in items)
+        if body.get("tools") and not continuation:
+            result["output"]=[{"type":"function_call","call_id":"fixture-call","name":"fixture_tool","arguments":"{}"}]
+        data=json.dumps(result).encode()
         self.send_response(200);self.send_header("Content-Type","application/json")
         self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
 server=http.server.HTTPServer(("127.0.0.1",port),Handler)
@@ -223,6 +273,704 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
         return ("--qualification", str(profile), "--runtime-archive", managed["runtime_archive"],
                 "--llama-executable", managed["executable"], "--model-file", managed["model_file"],
                 "--credential-env", "DESTINATION_WORKFLOW_TOKEN")
+
+    def coding_evidence(self, value):
+        evidence = json.loads((Path(__file__).parent / "fixtures/local-coding-evidence-v1.json").read_text())
+        subject = evidence["plan"]["subject"]
+        route = value["model_routes"]["local-code"]
+        qualification = value["route_admission"]["local_routes"]["local-code"]
+        subject.update(runtime_sha256=value["managed_llama"]["runtime_sha256"],
+                       model_revision=route["model_revision"], upstream_model=route["upstream_model"],
+                       capabilities=route["capabilities"], max_request_bytes=qualification["max_request_bytes"],
+                       max_output_tokens=qualification["max_output_tokens"],
+                       upstream_timeout_seconds=value.get("upstream_timeout_seconds", 6),
+                       system=platform.system(), machine=platform.machine())
+        evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+            separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+        return evidence
+
+    def test_complete_passing_coding_evidence_admits_only_its_pinned_execution_subject(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, port, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification["task_types"] = ["code_change", "code_review"]
+            qualification["coding_evidence"] = self.coding_evidence(value)
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                before = self.client("router-state")["body"]
+                self.assertEqual(before["routes"][0]["coding_readiness"], "qualified", before)
+                result = self.client("code-change")
+                self.assertEqual(result["status"], 200, result)
+                state = self.client("router-state")["body"]
+                validate_contract(state)
+                route = state["routes"][0]
+                self.assertEqual((route["coding_readiness"], route["automatic_task_types"]),
+                                 ("qualified", ["code_change"]))
+                self.assertEqual((route["coding_evidence"]["planned"], route["coding_evidence"]["passed"]), (16, 16))
+                self.assertEqual(route["coding_evidence"]["evidence_id"], "synthetic-passing-local-repair-v1")
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertEqual(json.loads(self.command("status").stdout)["phase"], "disconnected")
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+            self.assertTrue((engine / "stopped").is_file())
+
+    def test_coding_readiness_rejects_corrupt_public_evidence_summaries(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification.update(task_types=["code_change"], coding_evidence=self.coding_evidence(value))
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                self.assertEqual(self.client("code-change")["status"], 200)
+                state = self.client("router-state")["body"]
+                validate_contract(state)
+                for planned, evaluated, passed in ((1, 0, 0), (15, 15, 15), (16, 0, 0), (16, 16, 15)):
+                    with self.subTest(planned=planned, evaluated=evaluated, passed=passed):
+                        invalid = json.loads(json.dumps(state))
+                        invalid["routes"][0]["coding_evidence"].update(
+                            planned=planned, evaluated=evaluated, passed=passed)
+                        with self.assertRaises(ContractValidationError):
+                            validate_contract(invalid)
+                for readiness, counts, accepted in (
+                        ("incomplete", (0, 0, 0), False), ("failed", (0, 0, 0), False),
+                        ("subject_mismatch", (0, 0, 0), False),
+                        ("failed", (16, 0, 0), False), ("failed", (16, 15, 15), False),
+                        ("failed", (16, 16, 16), False), ("unknown", (16, 16, 16), False),
+                        ("incomplete", (1, 0, 0), True), ("incomplete", (16, 5, 4), True),
+                        ("incomplete", (16, 16, 16), True),
+                        ("failed", (1, 1, 0), True), ("failed", (16, 5, 4), True),
+                        ("subject_mismatch", (16, 0, 0), True),
+                        ("subject_mismatch", (16, 16, 16), True),
+                        ("subject_mismatch", (16, 5, 4), True),
+                        ("qualified", (16, 16, 16), True), ("qualified", (64, 64, 64), True)):
+                    with self.subTest(readiness=readiness, counts=counts, accepted=accepted):
+                        summary = json.loads(json.dumps(state))
+                        route = summary["routes"][0]
+                        route["coding_readiness"] = readiness
+                        route["automatic_task_types"] = ["code_change"] if readiness == "qualified" else []
+                        route["coding_evidence"].update(zip(("planned", "evaluated", "passed"), counts))
+                        if accepted:
+                            validate_contract(summary)
+                        else:
+                            with self.assertRaises(ContractValidationError):
+                                validate_contract(summary)
+                for readiness in ("unknown", "incomplete", "failed", "subject_mismatch", "qualified"):
+                    with self.subTest(null_evidence_readiness=readiness):
+                        summary = json.loads(json.dumps(state))
+                        summary["routes"][0].update(coding_evidence=None, coding_readiness=readiness,
+                                                   automatic_task_types=[])
+                        if readiness == "unknown":
+                            validate_contract(summary)
+                        else:
+                            with self.assertRaises(ContractValidationError):
+                                validate_contract(summary)
+                for identifier in (" ", "x" * 129, "\ud800", "invalid\nidentifier", "\U0001f9ea"):
+                    with self.subTest(evidence_identifier=ascii(identifier)):
+                        invalid = json.loads(json.dumps(state))
+                        invalid["routes"][0]["coding_evidence"]["evidence_id"] = identifier
+                        with self.assertRaises(ContractValidationError):
+                            validate_contract(invalid)
+                for automatic in (["code_change", "code_change"], ["unsupported"], ["code_review"]):
+                    with self.subTest(automatic_tasks=automatic):
+                        invalid = json.loads(json.dumps(state))
+                        invalid["routes"][0].update(task_types=automatic, automatic_task_types=automatic)
+                        with self.assertRaises(ContractValidationError):
+                            validate_contract(invalid)
+                for field in ("plan_sha256", "receipt_sha256"):
+                    for digest in ("x", "g" * 64, "A" * 64, "a" * 63, "a" * 65, "", None, [], {}):
+                        with self.subTest(field=field, digest=digest):
+                            invalid = json.loads(json.dumps(state))
+                            invalid["routes"][0]["coding_evidence"][field] = digest
+                            with self.assertRaises(ContractValidationError):
+                                validate_contract(invalid)
+                for field, corrupt in (("coding_readiness", []), ("coding_readiness", {}),
+                                       ("coding_readiness", None), ("coding_readiness", True),
+                                       ("coding_readiness", 1), ("coding_readiness", "unsupported"),
+                                       ("task_types", None), ("task_types", 1), ("task_types", {})):
+                    with self.subTest(field=field, corrupt=corrupt):
+                        invalid = json.loads(json.dumps(state))
+                        invalid["routes"][0][field] = corrupt
+                        with self.assertRaises(ContractValidationError):
+                            validate_contract(invalid)
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+
+    def test_current_client_coding_evidence_pins_version_and_rejects_unknown_campaigns(self):
+        from hormuz.client_versions import SUPPORTED_CODEX_VERSION
+
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification["task_types"] = ["code_change"]
+            version_file = self.root / "client-version.txt"
+            version_file.write_text(SUPPORTED_CODEX_VERSION)
+            for version, expected in ((SUPPORTED_CODEX_VERSION, "qualified"), ("0.999.0", "subject_mismatch")):
+                with self.subTest(campaign_version=version):
+                    evidence = self.coding_evidence(value)
+                    evidence["plan"]["subject"]["client_version"] = version
+                    evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                        separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+                    qualification["coding_evidence"] = evidence
+                    self.path.write_text(json.dumps(value))
+                    try:
+                        self.command("connect")
+                        route = self.client("router-state")["body"]["routes"][0]
+                        self.assertEqual(route["coding_readiness"], expected)
+                        self.assertEqual(self.client("code-change")["status"], 200 if expected == "qualified" else 503)
+                        if expected == "qualified":
+                            version_file.write_text("0.999.0")
+                            self.assertEqual(self.client("code-change")["status"], 503)
+                            version_file.write_text(SUPPORTED_CODEX_VERSION)
+                        self.assertEqual(requests, [])
+                    finally:
+                        self.command("disconnect")
+            self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"])
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+
+    def test_coding_requests_reject_nonfinite_controls_without_losing_the_connection_owner(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3")}
+            value["model_routes"]["local-code"]["capabilities"].extend(["tools", "codex_http"])
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            valid_request = {"model": "local-code", "max_output_tokens": 8,
+                "input": "Fix the arithmetic function in this Python code.",
+                "instructions": "Pinned agent instructions. \U0001f9ea",
+                "tools": [{"type": "function", "name": "fixture_tool", "parameters": {
+                    "type": "object", "properties": {"\U0001f9ea": {"type": "string", "description": "Pinned \U0001f9ea"}}}}]}
+            evidence = self.coding_evidence(value)
+            controls = {key: valid_request[key] for key in ("instructions", "tools")}
+            controls.update(store=False, service_tier="default")
+            evidence["plan"]["subject"]["request_profile_sha256"] = hashlib.sha256(json.dumps(
+                controls, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+            evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+            qualification.update(task_types=["code_change"], coding_evidence=evidence)
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                for number in ("NaN", "Infinity", "-Infinity", "1e999", "-1e999"):
+                    for options in ((), ("bound-conversation",)):
+                        with self.subTest(number=number, bound=bool(options)):
+                            result = self.client("code-change", "numeric-control", number, *options)
+                            self.assertEqual((result["status"], result["body"]["error"]["code"]),
+                                             (400, "invalid_json"))
+                request_path = self.root / "unicode-request.json"
+                for surrogate in ("\ud800", "\udfff"):
+                    for field in ("instructions", "developer-input", "tool-description", "schema-key"):
+                        invalid = json.loads(json.dumps(valid_request))
+                        if field == "instructions":
+                            invalid["instructions"] = surrogate
+                        elif field == "developer-input":
+                            invalid["input"] = [{"role": "developer", "content": surrogate},
+                                                {"role": "user", "content": valid_request["input"]}]
+                        elif field == "tool-description":
+                            invalid["tools"][0]["description"] = surrogate
+                        else:
+                            invalid["tools"][0]["parameters"]["properties"] = {surrogate: {"type": "string"}}
+                        request_path.write_text(json.dumps(invalid))
+                        for options in ((), ("bound-conversation",)):
+                            with self.subTest(unicode_control=field, surrogate=ascii(surrogate), bound=bool(options)):
+                                result = self.client("request-file", str(request_path), *options)
+                                self.assertEqual((result["status"], result["body"]["error"]["code"]),
+                                                 (400, "invalid_json"))
+                self.assertFalse((engine / "inference-count").exists())
+                self.assertEqual(self.client("work-state")["body"]["works"], [])
+                # json.dumps emits the valid astral characters as surrogate
+                # pairs; decoding must preserve their reviewed UTF-8 digest.
+                request_path.write_text(json.dumps(valid_request))
+                for options in ((), ("bound-conversation",)):
+                    accepted = self.client("request-file", str(request_path), *options)
+                    self.assertEqual(accepted["status"], 200, accepted)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1", "1"])
+                self.assertEqual(self.client("router-state")["status"], 200)
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+
+    def test_routing_diagnostics_survive_storage_failure_and_recover_the_owned_engine(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            database = Path(value["database"])
+            backup = self.root / "saved-usage.sqlite3"
+
+            @contextmanager
+            def unavailable_storage():
+                database.rename(backup)
+                database.mkdir()
+                try:
+                    yield
+                finally:
+                    database.rmdir()
+                    backup.rename(database)
+
+            try:
+                connected = json.loads(self.command("connect").stdout)
+                self.assertEqual(self.client()["status"], 200)
+                with unavailable_storage():
+                    failed = self.command("status", "--routing", check=False)
+                    self.assertEqual(failed.returncode, 2)
+                    self.assertEqual(json.loads(failed.stderr)["error"]["code"], "connected_client_router_unavailable")
+                recovered = json.loads(self.command("status", "--routing").stdout)
+                self.assertEqual(recovered["mode"], "local_only")
+                self.assertFalse((engine / "stopped").exists())
+                with unavailable_storage():
+                    state = self.client("router-state")
+                    self.assertEqual((state["status"], state["body"]["error"]["code"]),
+                                     (503, "hormuz_storage_unavailable"))
+                recovered = json.loads(self.command("status", "--routing").stdout)
+                self.assertEqual(recovered["mode"], "local_only")
+                status = json.loads(self.command("status").stdout)
+                self.assertEqual((status["generation"], status["router"]), (connected["generation"], "ready"))
+                self.assertEqual(self.client()["status"], 200)
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+
+    def test_qualified_coding_conversation_preserves_affinity_and_blocks_unqualified_request_drift(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, port, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3"),
+                                "tool_capable_aliases": ["local-code"]}
+            value["model_routes"]["local-code"]["capabilities"].extend(["tools", "codex_http"])
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification["task_types"] = ["code_change", "code_review"]
+            evidence = self.coding_evidence(value)
+            request_profile = {"store": False, "service_tier": "default", "tools": [
+                {"type": "function", "name": "fixture_tool", "parameters": {"type": "object"}}],
+                "input_instructions": [{"position": 0, "message": {"role": "developer", "content": "Pinned agent instructions."}}]}
+            evidence["plan"]["subject"]["request_profile_sha256"] = hashlib.sha256(json.dumps(
+                request_profile, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+            qualification["coding_evidence"] = evidence
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                first = self.client("code-change", "coding-tools", "bound-conversation", "input-developer-pinned")
+                self.assertEqual(first["status"], 200, first)
+                self.assertEqual(first["body"]["output"][0]["type"], "function_call")
+                second = self.client("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned")
+                self.assertEqual(second["status"], 200, second)
+                self.assertEqual(second["headers"]["x-hormuz-routing-reason"], "session_affinity")
+                for header in ("x-hormuz-work-id", "x-hormuz-destination-generation"):
+                    self.assertEqual(second["headers"][header], first["headers"][header])
+                request_options = (("code-change", "coding-tools", "input-developer-pinned"),
+                                   ("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned"))
+                version_file = self.root / "client-version.txt"
+                version_file.write_text("0.148.0")
+                try:
+                    for options in request_options:
+                        self.assertEqual(self.client(*options)["status"], 503)
+                finally:
+                    version_file.unlink()
+                for client_options in (("missing-client-version",), ("duplicate-client-version",),
+                                       ("client-agent", "other/0.147.0"),
+                                       ("client-agent", "codex_exec/0.147.0unexpected"),
+                                       ("client-agent", "codex_exec/0.147.0 " + "x" * 512)):
+                    for options in request_options:
+                        with self.subTest(client=client_options, request=options):
+                            self.assertEqual(self.client(*options, *client_options)["status"], 503)
+                drift = self.client("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned", "instruction-drift")
+                self.assertEqual(drift["status"], 503, drift)
+                for role in ("system", "developer"):
+                    for request_options in (("code-change", "coding-tools", "input-developer-pinned"),
+                                            ("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned")):
+                        with self.subTest(role=role, request=request_options):
+                            altered = self.client(*request_options, "input-" + role + "-drift")
+                            self.assertEqual(altered["status"], 503, altered)
+                missing = self.client("tool-continuation", "coding-tools", "bound-conversation")
+                self.assertEqual(missing["status"], 503, missing)
+                review = self.client("code-review", "coding-tools", "input-developer-pinned")
+                self.assertEqual(review["status"], 503, review)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1", "1"])
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+
+    def test_mixed_coding_route_preserves_noncoding_profiles_and_checks_coding_continuations(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            value["ai_work"] = {"enabled": True, "database": str(self.root / "work.sqlite3"),
+                                "tool_capable_aliases": ["local-code"]}
+            value["model_routes"]["local-code"]["capabilities"].extend(["tools", "codex_http"])
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification["task_types"] = ["summarization", "code_change", "code_review"]
+            evidence = self.coding_evidence(value)
+            controls = {"store": False, "service_tier": "default", "tools": [
+                {"type": "function", "name": "fixture_tool", "parameters": {"type": "object"}}],
+                "input_instructions": [{"position": 0, "message": {"role": "developer", "content": "Pinned agent instructions."}}]}
+            evidence["plan"]["subject"]["request_profile_sha256"] = hashlib.sha256(json.dumps(
+                controls, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+            qualification["coding_evidence"] = evidence
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                state = self.client("router-state")["body"]["routes"][0]
+                self.assertEqual(state["coding_readiness"], "qualified")
+                self.assertEqual(set(state["automatic_task_types"]), {"summarization", "code_change"})
+                summary = self.client("missing-client-version", "instruction-drift")
+                self.assertEqual(summary["status"], 200, summary)
+                first = self.client("coding-tools", "bound-conversation")
+                self.assertEqual(first["status"], 200, first)
+                self.assertEqual(first["body"]["output"][0]["type"], "function_call")
+                second = self.client("tool-continuation", "coding-tools", "bound-conversation")
+                self.assertEqual(second["status"], 200, second)
+                self.assertEqual(second["headers"]["x-hormuz-routing-reason"], "session_affinity")
+                self.assertEqual(second["headers"]["x-hormuz-work-id"], first["headers"]["x-hormuz-work-id"])
+                history_path = self.root / "stateful-task-switch.json"
+                for task in ("Fix the arithmetic function in this Python code.", "Review this code diff."):
+                    with self.subTest(stateful_task_switch=task):
+                        history_path.write_text(json.dumps({"model": "local-code", "max_output_tokens": 8,
+                            "input": [{"role": "assistant", "content": "The previous summary is complete."},
+                                      {"role": "user", "content": task}]}))
+                        denied = self.client("request-file", str(history_path), "coding-tools",
+                                             "bound-conversation", "input-developer-pinned")
+                        self.assertEqual(denied["status"], 503, denied)
+                        self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"] * 3)
+                        works = self.client("work-state")["body"]["works"]
+                        observed = next(work for work in works if work["work_id"] == first["headers"]["x-hormuz-work-id"])
+                        self.assertEqual(observed["task_characteristics"]["task_hint"], "summarization")
+                coding = self.client("code-change", "coding-tools", "bound-conversation", "input-developer-pinned")
+                self.assertEqual(coding["status"], 200, coding)
+                for options in (("missing-client-version",), ("instruction-drift",)):
+                    with self.subTest(coding_drift=options):
+                        denied = self.client("tool-continuation", "coding-tools", "bound-conversation",
+                                             "input-developer-pinned", *options)
+                        self.assertEqual(denied["status"], 503, denied)
+                continued = self.client("tool-continuation", "coding-tools", "bound-conversation", "input-developer-pinned")
+                self.assertEqual(continued["status"], 200, continued)
+                self.assertEqual(continued["headers"]["x-hormuz-routing-reason"], "session_affinity")
+                self.assertEqual(continued["headers"]["x-hormuz-work-id"], coding["headers"]["x-hormuz-work-id"])
+                self.assertEqual(self.client("code-review")["status"], 503)
+                declared_path = self.root / "declared-review-work.json"
+                declared_path.write_text(json.dumps({"repository": "example/repository", "task_type": "code_review"}))
+                declared = self.client("create-work", "request-file", str(declared_path))
+                self.assertEqual(declared["status"], 201, declared)
+                declared_id = declared["body"]["work_id"]
+                self.assertEqual(self.client("coding-tools", "work-id", declared_id)["status"], 200)
+                for options in ((), ("input-developer-pinned",)):
+                    with self.subTest(declared_review_controls=options):
+                        denied = self.client("tool-continuation", "coding-tools", "work-id", declared_id, *options)
+                        self.assertEqual(denied["status"], 503, denied)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"] * 6)
+                for task_type, origin in (("unattributed", "inferred_characteristics"), ("code_change", "declared")):
+                    with self.subTest(coding_origin=origin):
+                        declared_path.write_text(json.dumps({"repository": "example/repository", "task_type": task_type}))
+                        created = self.client("create-work", "request-file", str(declared_path))
+                        self.assertEqual(created["status"], 201, created)
+                        work_id = created["body"]["work_id"]
+                        coding = self.client("code-change", "coding-tools", "work-id", work_id, "input-developer-pinned")
+                        self.assertEqual(coding["status"], 200, coding)
+                        summary = self.client("coding-tools", "work-id", work_id, "missing-client-version", "instruction-drift")
+                        self.assertEqual(summary["status"], 200, summary)
+                        continued = self.client("tool-continuation", "coding-tools", "work-id", work_id,
+                                                "missing-client-version", "instruction-drift")
+                        self.assertEqual(continued["status"], 200 if origin == "inferred_characteristics" else 503, continued)
+                        observed = next(work for work in self.client("work-state")["body"]["works"] if work["work_id"] == work_id)
+                        self.assertEqual((observed["task_type"], observed["task_origin"],
+                                          observed["task_characteristics"]["task_hint"]),
+                                         ("code_change", origin, "summarization"))
+                        for header in ("x-hormuz-work-id", "x-hormuz-destination-generation"):
+                            self.assertEqual(summary["headers"][header], coding["headers"][header])
+                            if origin == "inferred_characteristics":
+                                self.assertEqual(continued["headers"][header], coding["headers"][header])
+                        if origin == "declared":
+                            matching = self.client("tool-continuation", "coding-tools", "work-id", work_id,
+                                                   "input-developer-pinned")
+                            self.assertEqual(matching["status"], 200, matching)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"] * 12)
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+
+    def test_unsuccessful_or_incomplete_coding_campaigns_never_admit_local_inference(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, port, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            qualification["task_types"] = ["code_change"]
+            for variant, expected in (("unchanged", "failed"), ("timeout", "failed"),
+                                      ("changed-checks", "failed"), ("missing", "incomplete"),
+                                      ("coverage", "incomplete"), ("model", "subject_mismatch"),
+                                      ("runtime", "subject_mismatch")):
+                with self.subTest(variant=variant):
+                    evidence = self.coding_evidence(value)
+                    if variant == "unchanged":
+                        evidence["outcomes"][0].update(implementation_changed=False, patch_sha256=None)
+                    elif variant == "timeout":
+                        evidence["outcomes"][0].update(termination="timeout", client_exit_code=-15)
+                    elif variant == "changed-checks":
+                        evidence["outcomes"][0]["checks_sha256"] = "c" * 64
+                    elif variant == "missing":
+                        evidence["outcomes"].pop()
+                    elif variant == "coverage":
+                        evidence["plan"]["cases"][-1]["family"] = "arithmetic"
+                    elif variant == "model":
+                        evidence["plan"]["subject"]["model_revision"] = "sha256:" + "c" * 64
+                    elif variant == "runtime":
+                        evidence["plan"]["subject"]["runtime_sha256"] = "c" * 64
+                    evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                        separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+                    qualification["coding_evidence"] = evidence
+                    self.path.write_text(json.dumps(value))
+                    try:
+                        self.command("connect")
+                        route = self.client("router-state")["body"]["routes"][0]
+                        self.assertEqual((route["coding_readiness"], route["automatic_task_types"]),
+                                         (expected, []))
+                        denied = self.client("code-change")
+                        self.assertEqual(denied["status"], 503, denied)
+                    finally:
+                        self.command("disconnect")
+                    self.assertFalse((engine / "inference-count").exists())
+                    self.assertEqual(requests, [])
+
+    def test_cli_and_plugin_can_inspect_live_coding_readiness_without_exporting_credentials(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, port, engine = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)[:-2]
+            profile_path = Path(options[1])
+            profile = json.loads(profile_path.read_text())
+            profile.update(schema_version=2, task_types=["code_change"], coding_evidence=None)
+            profile_path.write_text(json.dumps(profile))
+            self.environment.pop("DESTINATION_WORKFLOW_TOKEN")
+            self.environment.pop("DESTINATION_CLOUD_KEY")
+            try:
+                self.command("setup", *options)
+                connected = json.loads(self.command("status").stdout)
+                self.assertEqual((connected["router"], connected["local_runtime"]["state"]), ("ready", "ready"))
+                state = json.loads(self.command("status", "--routing").stdout)
+                validate_contract(json.loads((Path(__file__).parent / "fixtures/local-setup-profile-v2.json").read_text()))
+                validate_contract(state)
+                self.assertEqual((state["schema_id"], state["schema_version"]), ("hormuz.route-admission", 2))
+                route = state["routes"][0]
+                self.assertEqual((route["coding_readiness"], route["automatic_task_types"]), ("unknown", []))
+                self.assertEqual(self.client("code-change")["status"], 503)
+                self.assertFalse((engine / "inference-count").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            stopped = self.command("status", "--routing", check=False)
+            self.assertEqual(stopped.returncode, 2)
+            self.assertEqual(json.loads(stopped.stderr)["error"]["code"], "connected_client_router_unavailable")
+
+    def test_shared_setup_rejects_altered_plans_and_leaked_cases_before_activation(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, port, engine = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)
+            profile_path = Path(options[1])
+            original = json.loads(profile_path.read_text())
+            settings = (self.home / "config.toml").read_bytes()
+            for variant in ("changed-plan", "held-out-leak", "duplicate-outcome", "invalid-shape",
+                            "surrogate-identifier", "surrogate-subject"):
+                with self.subTest(variant=variant):
+                    evidence = self.coding_evidence(value)
+                    if variant == "changed-plan":
+                        evidence["plan"]["subject"]["max_output_tokens"] = 9
+                    elif variant == "held-out-leak":
+                        evidence["plan"]["cases"][-1]["task_sha256"] = evidence["plan"]["cases"][0]["task_sha256"]
+                    elif variant == "duplicate-outcome":
+                        evidence["outcomes"][-1]["case_id"] = evidence["outcomes"][0]["case_id"]
+                    elif variant == "invalid-shape":
+                        evidence["plan"]["cases"][0]["family"] = {"protected-marker": "must-not-appear"}
+                    elif variant == "surrogate-identifier":
+                        evidence["evidence_id"] = "\ud800protected-marker"
+                    elif variant == "surrogate-subject":
+                        evidence["plan"]["subject"]["client_version"] = "\udfffprotected-marker"
+                    if variant not in {"changed-plan", "surrogate-subject"}:
+                        evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                            separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()).hexdigest()
+                    profile_path.write_text(json.dumps({**original, "schema_version": 2, "coding_evidence": evidence}))
+                    denied = self.command("setup", *options, check=False)
+                    self.assertEqual(denied.returncode, 2, denied)
+                    self.assertEqual(json.loads(denied.stderr)["error"]["code"], "connected_client_router_configuration_unsupported")
+                    self.assertNotIn("protected-marker", denied.stderr)
+                    self.assertNotIn("Traceback", denied.stderr)
+                    self.assertFalse(self.path.exists())
+                    self.assertFalse((engine / "inference-count").exists())
+                    self.assertEqual((self.home / "config.toml").read_bytes(), settings)
+            self.assertEqual(requests, [])
+
+    def test_direct_configuration_rejects_non_object_coding_evidence_without_effects(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            settings = (self.home / "config.toml").read_bytes()
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            for evidence in ([], "PRIVATE_EVIDENCE_SENTINEL", 1, False):
+                with self.subTest(evidence=evidence):
+                    qualification["coding_evidence"] = evidence
+                    self.path.write_text(json.dumps(value))
+                    failed = self.command("connect", "--dry-run", check=False)
+                    self.assertEqual(failed.returncode, 2, failed.stderr)
+                    validate_contract(json.loads(failed.stderr))
+                    self.assertEqual(json.loads(failed.stderr)["error"]["code"],
+                                     "connected_client_setup_unavailable")
+                    self.assertNotIn("PRIVATE_EVIDENCE_SENTINEL", failed.stderr)
+                    self.assertNotIn("Traceback", failed.stderr)
+                    self.assertEqual((self.home / "config.toml").read_bytes(), settings)
+                    self.assertFalse((engine / "inference-count").exists())
+            self.assertEqual(requests, [])
+
+    def test_extreme_elapsed_integers_reject_config_and_profile_without_effects(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            options = self.local_setup_options(value)
+            profile_path = Path(options[1])
+            original = json.loads(profile_path.read_text())
+            settings = (self.home / "config.toml").read_bytes()
+            for elapsed in (10**400, -(10**400)):
+                for operation in ("connect", "setup"):
+                    with self.subTest(elapsed=elapsed, operation=operation):
+                        evidence = self.coding_evidence(value)
+                        evidence["outcomes"][0]["elapsed_ms"] = elapsed
+                        if operation == "connect":
+                            value["route_admission"]["local_routes"]["local-code"]["coding_evidence"] = evidence
+                            self.path.write_text(json.dumps(value))
+                            failed = self.command("connect", "--dry-run", check=False)
+                            expected = "connected_client_setup_unavailable"
+                        else:
+                            self.path.unlink(missing_ok=True)
+                            profile_path.write_text(json.dumps({**original, "schema_version": 2,
+                                                                "coding_evidence": evidence}))
+                            failed = self.command("setup", *options, "--dry-run", check=False)
+                            expected = "connected_client_router_configuration_unsupported"
+                            self.assertFalse(self.path.exists())
+                        self.assertEqual(failed.returncode, 2, failed.stderr)
+                        validate_contract(json.loads(failed.stderr))
+                        self.assertEqual(json.loads(failed.stderr)["error"]["code"], expected)
+                        self.assertNotIn("Traceback", failed.stderr)
+                        self.assertEqual((self.home / "config.toml").read_bytes(), settings)
+                        self.assertFalse((engine / "inference-count").exists())
+            self.assertEqual(requests, [])
+
+    def test_routing_status_preserves_supported_large_route_metadata(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            route = value["model_routes"]["local-code"]
+            qualification = value["route_admission"]["local_routes"]["local-code"]
+            for index in range(7):
+                alias = f"extra-{index}-" + "x" * 5000
+                value["model_routes"][alias] = dict(route)
+                value["route_admission"]["local_routes"][alias] = dict(qualification)
+                value["policies"]["organization"]["allowed_models"].append(alias)
+            self.path.write_text(json.dumps(value))
+            try:
+                self.command("connect")
+                public = self.client("router-state")["body"]
+                validate_contract(public)
+                self.assertEqual(len(public["routes"]), 8)
+                self.assertGreater(len(json.dumps(public).encode()), 32768)
+                routing = json.loads(self.command("status", "--routing").stdout)
+                self.assertEqual(routing, public)
+                self.assertEqual(self.client()["status"], 200)
+                self.assertFalse((engine / "stopped").exists())
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+
+    def test_shared_setup_preserves_reviewed_coding_evidence_without_manual_configuration(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, port, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            value["model_routes"]["local-code"]["upstream_model"] = "local-code"
+            evidence = self.coding_evidence(value)
+            options = self.local_setup_options(value)
+            profile_path = Path(options[1])
+            profile = json.loads(profile_path.read_text())
+            profile.update(schema_version=2, task_types=["code_change"], coding_evidence=evidence)
+            profile_path.write_text(json.dumps(profile))
+            try:
+                first = json.loads(self.command("setup", *options).stdout)
+                result = self.client("code-change")
+                self.assertEqual(result["status"], 200, result)
+                route = self.client("router-state")["body"]["routes"][0]
+                self.assertEqual(route["coding_readiness"], "qualified")
+                self.assertEqual(route["coding_evidence"]["evidence_id"], "synthetic-passing-local-repair-v1")
+                repeated = json.loads(self.command("setup", *options).stdout)
+                self.assertEqual(repeated["connection"]["generation"], first["connection"]["generation"])
+                self.assertEqual(requests, [])
+            finally:
+                self.command("disconnect")
+            self.assertTrue((engine / "stopped").is_file())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
+
+    def test_codex_0160_setup_admits_only_matching_reviewed_native_wire_evidence(self):
+        with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):
+            value, _, engine = self.managed_configuration(cloud)
+            value["upstream_timeout_seconds"] = 6
+            route = value["model_routes"]["local-code"]
+            route.update(upstream_model="local-code",
+                         capabilities=["responses", "text", "tools", "codex_http_0160"])
+            evidence = self.coding_evidence(value)
+            request = json.loads((Path(__file__).parent / "fixtures/codex-http-request-0.160.json").read_text())
+            request["input"][0]["content"][0]["text"] = "Fix the arithmetic in this Python function."
+            request.update(instructions="Fix the supplied arithmetic function.", stream=False,
+                           reasoning={"effort": "none"}, max_output_tokens=8)
+            # This explicit control mapping follows the documented receipt
+            # contract; ordinary task text and client identifiers vary.
+            controls = {"instructions": "Fix the supplied arithmetic function.", "tools": request["tools"],
+                        "tool_choice": "auto", "reasoning": {"effort": "none"},
+                        "include": ["reasoning.encrypted_content"], "parallel_tool_calls": False,
+                        "store": False, "service_tier": "default", "stream": False}
+            subject = evidence["plan"]["subject"]
+            subject.update(client_version="0.160.0", request_profile_sha256=hashlib.sha256(json.dumps(
+                controls, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest())
+            evidence["plan_sha256"] = hashlib.sha256(json.dumps(evidence["plan"], sort_keys=True,
+                separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+            options = self.local_setup_options(value)
+            profile_path = Path(options[1])
+            profile = json.loads(profile_path.read_text())
+            profile.update(schema_version=2, client_version="0.160.0", capabilities=route["capabilities"],
+                           task_types=["code_change"])
+            request_path = self.root / "native-request.json"
+            request_path.write_text(json.dumps(request))
+            version_file = self.root / "client-version.txt"
+            version_file.write_text("0.160.0")
+            for receipt, readiness in ((None, "unknown"), (evidence, "qualified")):
+                with self.subTest(coding_readiness=readiness):
+                    self.path.unlink(missing_ok=True)
+                    profile_path.write_text(json.dumps({**profile, "coding_evidence": receipt}))
+                    try:
+                        self.command("setup", *options)
+                        status = json.loads(self.command("status", "--routing").stdout)
+                        self.assertEqual(status["routes"][0]["coding_readiness"], readiness)
+                        result = self.client("request-file", str(request_path))
+                        self.assertEqual(result["status"], 200 if receipt else 503, result)
+                        if receipt:
+                            self.assertEqual(result["headers"]["x-hormuz-destination-locality"], "local")
+                            version_file.write_text("0.147.0")
+                            self.assertEqual(self.client("request-file", str(request_path))["status"], 503)
+                            version_file.write_text("0.160.0")
+                            self.assertEqual(self.client("request-file", str(request_path), "instruction-drift")["status"], 503)
+                        else:
+                            self.assertFalse((engine / "inference-count").exists())
+                        self.assertEqual(requests, [])
+                    finally:
+                        self.command("disconnect")
+            self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1"])
+            self.assertTrue((engine / "stopped").is_file())
+            self.assertEqual(self.client("inspect")["model"], "original-model")
 
     def test_local_setup_denies_missing_model_before_changing_settings_or_starting_engine(self):
         with provider("CLOUD_MUST_STAY_UNUSED") as (cloud, requests):

@@ -4,7 +4,7 @@ Hormuz is experimental and has not received an independent security audit. Keep
 the local router on loopback. Do not expose it as an internet service or infer
 production certification from routine tests.
 
-Report vulnerabilities through GitHub's [private reporting form](https://github.com/Xpounder-com/hormuz/security/advisories/new).
+Report vulnerabilities through GitHub's [private reporting form](https://github.com/mehrdadxzaker/hormuz/security/advisories/new).
 If that channel is unavailable, open a content-free installation issue saying
 only that private reporting is unavailable. Never put vulnerabilities, real keys,
 tokens, prompts, responses, customer data, private hostnames or raw logs in public

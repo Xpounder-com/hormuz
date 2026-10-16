@@ -13,7 +13,7 @@ import subprocess
 
 from .connected_client import _read, _parse_record, _lock_descriptor
 from .config import GatewayConfig
-from .server import GatewayServer
+from .server import GatewayServer, _STORAGE_FAILURES
 from .managed_llama import OwnedLlama
 
 
@@ -125,7 +125,12 @@ def main(record_path, generation):
                     with client.makefile("rb") as stream:
                         data = stream.readline(4097)
                     request = json.loads(data) if len(data) <= 4096 else {}
-                    if not isinstance(request, dict) or request.get("command") not in {"stop", "status"} or request.get("generation") != record["generation"]:
+                    if not isinstance(request, dict) or request.get("command") not in {"stop", "status", "routing"} or request.get("generation") != record["generation"]:
+                        continue
+                    if request.get("command") == "routing":
+                        identity = config.identities_by_actor[record["actor_id"]]
+                        admission = server.route_admission.status(identity, server.policy_engine)
+                        client.sendall(json.dumps({"generation": record["generation"], "admission": admission}).encode() + b"\n")
                         continue
                     if request.get("command") == "stop":
                         server.begin_drain()
@@ -133,7 +138,7 @@ def main(record_path, generation):
                     client.sendall(json.dumps({"generation": record["generation"],
                         "router": "stopping" if stopping.is_set() else "ready" if server.readiness_reason() is None
                         and (engine is None or engine.ready()) else "unavailable"}).encode() + b"\n")
-                except (OSError, ValueError):
+                except (*_STORAGE_FAILURES, OSError, ValueError):
                     continue
     finally:
         if engine is not None:

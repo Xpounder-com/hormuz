@@ -50,15 +50,18 @@ successful destination/model affinity. An explicit local choice retains the
 configured, qualified same-destination capacity alternate after HTTP 429/529;
 initial ranking does not remove that governed fallback.
 
-Qualification is an **operator declaration**, not a benchmark result. Before
-adding it, qualify the exact runtime, model weights, client/protocol, request
+The transport envelope is an **operator declaration**, not a benchmark result.
+Fresh automatic coding additionally requires [passing coding evidence](LOCAL_CODING_QUALIFICATION.md).
+A declaration of `code_change`/`code_review` alone cannot admit coding. Before
+adding an envelope, qualify the exact runtime, model weights, client/protocol, request
 features, byte/output envelope, tool and streaming behavior, and runtime egress.
 The revision must match the route. Configurations accept at most eight records;
 unknown fields, malformed bounds and mismatched revisions fail startup.
 Available task labels are `summarization`, `translation`, `structured_extraction`,
 `code_change` and `code_review`. The opt-in [Codex app transport](CODEX_APP_COMPATIBILITY.md)
-also permits `interactive` for explicitly selected local models; it does not
-admit arbitrary automatic cloud-to-local redirection. A fixed, bounded local heuristic recognizes
+also permits `interactive` for explicitly selected ordinary local tasks; coding
+requests still require the existing evidence and request-profile checks. It does
+not admit arbitrary automatic cloud-to-local redirection. A fixed, bounded local heuristic recognizes
 leading instructions; it neither measures task difficulty nor calls a model.
 Unknown work never gains local qualification merely from its size.
 
@@ -147,11 +150,16 @@ quality claim follows from these synthetic workflow tests.
 
 ## Status, compatibility and rollback
 
-Authenticated `GET /v1/router/state` returns `hormuz.route-admission;v=1`, even
+Authenticated `GET /v1/router/state` returns `hormuz.route-admission;v=2`, even
 with AI Work disabled. It exposes policy-permitted qualification records, opaque
 generation, declared feature/bounds and readiness (`unchecked`, `ready`,
 `unavailable`, `stale`). Reading status does not send a probe or inference call.
 `local_capacity` reports the configured limit and actual active lease count.
+Version 2 additionally separates `coding_readiness`, content-free `coding_evidence`
+and the actually admissible `automatic_task_types`. Version-1 status fixtures
+remain readable. CLI and plugin callers can inspect the same live owner through
+`hormuz client status codex --client-home /path/to/codex-home --routing`, without
+exporting a token or making an inference call.
 
 Admitted responses and exact-answer hits declare `hormuz.relay-metadata;v=3`.
 Provider bodies remain unchanged. Destination fields retain version 2 meanings;
@@ -162,7 +170,7 @@ Protocol-shaped admission errors carry `X-Hormuz-Error-Code: hormuz_route_*`.
 Legacy provider relay metadata keeps its prior version 1/2 shapes. The separate
 AI Work state envelope is v3 in the 2.0 line; see [migration](MIGRATION_2.md). The canonical
 manifest retains both historical relay versions and adds version 3 plus router
-status version 1. No ledger schema, transcript store or credential format changes.
+status versions 1 and 2. No ledger schema, transcript store or credential format changes.
 
 Changing qualification or mode requires a router restart. Removing the admission
 settings restores legacy configured selection; an older binary rejects these

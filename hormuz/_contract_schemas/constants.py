@@ -12,7 +12,7 @@ RELAY_METADATA_SCHEMA_VERSION = 1
 
 ROUTE_ADMISSION_SCHEMA_ID = "hormuz.route-admission"
 
-ROUTE_ADMISSION_SCHEMA_VERSION = 1
+ROUTE_ADMISSION_SCHEMA_VERSION = 2
 
 CONNECTED_CLIENT_STATUS_SCHEMA_ID = "hormuz.connected-client-status"
 
@@ -92,6 +92,10 @@ IDENTITY_SCHEMA_ID = "hormuz.gateway-identity"
 USAGE_SUMMARY_SCHEMA_ID = "hormuz.gateway-usage-summary"
 
 ERROR_SCHEMA_ID = "hormuz.gateway-error"
+NATIVE_CATALOG_SCHEMA_ID = "hormuz.native-codex-catalog"
+NATIVE_CATALOG_SCHEMA_VERSION = 1
+NATIVE_RESPONSES_SCHEMA_ID = "hormuz.native-codex-responses"
+NATIVE_STATUS_SCHEMA_ID = "hormuz.native-codex-status"
 
 ERROR_SCHEMA_VERSION = 3
 
@@ -194,6 +198,7 @@ PUBLIC_ERROR_CODES_V1 = frozenset(
 PUBLIC_ERROR_CODES_V2 = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unavailable"})
 
 ROUTE_ADMISSION_ERROR_CODES = frozenset({
+    "hormuz_route_invalid_benchmark_mode",
     "hormuz_route_invalid_routing_mode", "hormuz_route_affinity_required",
     "hormuz_route_local_route_unavailable", "hormuz_route_local_capacity_busy",
     "hormuz_route_destination_not_admitted", "hormuz_route_policy_changed",
@@ -208,9 +213,14 @@ _CURRENT_SCHEMA_VERSIONS = {
     "hormuz.chat-models": 1,
     "hormuz.chat-error": 1,
     "hormuz.codex-app-bridge-install": 1,
+    "hormuz.personal-model-scorecard": 1, "hormuz.benchmark-suite": 1,
+    "hormuz.benchmark-routing-configuration": 1, "hormuz.benchmark-error": 1,
+    "hormuz.benchmark-runtime": 1,
+    NATIVE_STATUS_SCHEMA_ID: 1,
+    "hormuz.local-coding-evidence": 1,
     "hormuz.cloud-readiness": 1,
     LOCAL_SETUP_SCHEMA_ID: 1,
-    LOCAL_SETUP_PROFILE_SCHEMA_ID: 2,
+    LOCAL_SETUP_PROFILE_SCHEMA_ID: 3,
     CONNECTED_CLIENT_STATUS_SCHEMA_ID: CONNECTED_CLIENT_STATUS_SCHEMA_VERSION,
     CONNECTED_CLIENT_PREVIEW_SCHEMA_ID: CONNECTED_CLIENT_PREVIEW_SCHEMA_VERSION,
     CONNECTED_CLIENT_ERROR_SCHEMA_ID: CONNECTED_CLIENT_ERROR_SCHEMA_VERSION,

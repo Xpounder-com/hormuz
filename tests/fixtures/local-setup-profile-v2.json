@@ -1,8 +1,8 @@
 {
   "schema_id": "hormuz.local-setup-profile",
   "schema_version": 2,
-  "qualification_id": "synthetic-app-profile-v2",
-  "client_version": "0.162.0-alpha.17.2",
+  "qualification_id": "synthetic-managed-v1",
+  "client_version": "0.147.0",
   "system": "Darwin",
   "machine": "arm64",
   "runtime_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -10,18 +10,14 @@
   "model": "local-code",
   "capabilities": [
     "responses",
-    "text",
-    "streaming",
-    "tools",
-    "codex_http_0160",
-    "codex_llama_v1",
-    "structured_output"
+    "text"
   ],
-  "max_request_bytes": 2097152,
-  "max_output_tokens": 8192,
+  "max_request_bytes": 4096,
+  "max_output_tokens": 8,
   "task_types": [
-    "interactive"
+    "summarization"
   ],
-  "upstream_timeout_seconds": 360,
-  "startup_timeout_seconds": 3
+  "upstream_timeout_seconds": 6,
+  "startup_timeout_seconds": 3,
+  "coding_evidence": null
 }
