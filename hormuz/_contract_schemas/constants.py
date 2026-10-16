@@ -93,6 +93,8 @@ USAGE_SUMMARY_SCHEMA_ID = "hormuz.gateway-usage-summary"
 ERROR_SCHEMA_ID = "hormuz.gateway-error"
 NATIVE_CATALOG_SCHEMA_ID = "hormuz.native-codex-catalog"
 NATIVE_CATALOG_SCHEMA_VERSION = 1
+NATIVE_RESPONSES_SCHEMA_ID = "hormuz.native-codex-responses"
+NATIVE_STATUS_SCHEMA_ID = "hormuz.native-codex-status"
 
 ERROR_SCHEMA_VERSION = 3
 
@@ -209,6 +211,7 @@ _CURRENT_SCHEMA_VERSIONS = {
     "hormuz.model-scorecard": 1, "hormuz.benchmark-suite": 1,
     "hormuz.benchmark-routing-configuration": 1, "hormuz.benchmark-error": 1,
     "hormuz.benchmark-runtime": 1,
+    NATIVE_STATUS_SCHEMA_ID: 1,
     "hormuz.local-coding-evidence": 1,
     "hormuz.cloud-readiness": 1,
     LOCAL_SETUP_SCHEMA_ID: 1,

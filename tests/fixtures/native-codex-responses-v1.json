@@ -1,0 +1,35 @@
+{
+  "response_header": "hormuz.native-codex-responses;v=1",
+  "delivery": "incremental-http-sse",
+  "request": {
+    "method": "POST",
+    "path": "/backend-api/codex/responses",
+    "gateway_credential_header": "X-Gateway-Key",
+    "native_credential_headers": ["Authorization", "ChatGPT-Account-ID"],
+    "stream": true,
+    "store": false,
+    "content_profile": "qualified-text-only",
+    "message_text_parts": ["input_text", "output_text", "refusal"],
+    "assistant_only_message_parts": ["output_text", "refusal"],
+    "tool_result_text_parts": ["input_text"],
+    "active_media_or_provider_reference_parts": false,
+    "tool_declaration_kinds": ["function", "custom", "namespace"],
+    "provider_hosted_tools": false,
+    "reasoning_summary_parts": ["summary_text"],
+    "reasoning_content_parts": ["reasoning_text"],
+    "issued_provider_status_preserved": true,
+    "client_originated_provider_ids": false,
+    "retired_external_proxy_ingress": false,
+    "redact_mode_marker_overlap": "deny-before-egress",
+    "marker_overlap_protected_values": "all-configured-literals-including-native-grant",
+    "protected_member_names": "deny-before-egress-in-redact-and-deny-modes"
+  },
+  "status_fields": [
+    "schema_id", "schema_version", "scope", "generation", "enabled", "billing", "cost_status", "cost_usd",
+    "requests", "active", "succeeded", "failed", "outcome_unknown", "observed_input_tokens",
+    "observed_output_tokens", "observed_usage_requests", "usage_unknown_requests"
+  ],
+  "billing": "chatgpt_plan",
+  "cost_status": "unknown",
+  "real_account_or_client_qualification": false
+}

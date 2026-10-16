@@ -149,6 +149,8 @@ alias when the requested route is unready. A configuration with `shadow_router` 
 rejected before execution because its extra helper calls exceed this benchmark's
 controlled request envelope.
 
+The routing boundary is recorded in [ADR 0029](decisions/0029-personal-benchmark-scorecard-routing.md).
+
 ## Enable scorecard-based routing
 
 Running a benchmark does not activate routing. Preview and stage the change in

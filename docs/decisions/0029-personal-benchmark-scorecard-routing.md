@@ -1,4 +1,4 @@
-# ADR 0027: Rank admitted local models using personal benchmark scorecards
+# ADR 0029: Rank admitted local models using personal benchmark scorecards
 
 - Status: Accepted for implementation by product owner
 - Date: 2026-10-16

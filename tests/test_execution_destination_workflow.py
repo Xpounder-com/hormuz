@@ -59,14 +59,23 @@ try:
         print(json.dumps({"status": "cancelled", "body": None, "headers": {}}))
         sys.exit(0)
     response = connection.getresponse()
+    if value.get("headers_signal"):
+        with open(value["headers_signal"], "w") as signal:
+            signal.write("client received headers")
     if value.get("stall_after_headers"):
-        time.sleep(1.8)
+        time.sleep(value.get("stall_seconds", 1.8))
         connection.close()
         print(json.dumps({"status": response.status,
                           "headers": dict((k.lower(), v) for k, v in response.getheaders()),
                           "body": None}))
         sys.exit(0)
-    data = response.readline() if value.get("cancel_after_event") else response.read()
+    if value.get("first_event_signal"):
+        data = response.readline()
+        with open(value["first_event_signal"], "w") as signal:
+            signal.write("client received first event")
+        data += response.read()
+    else:
+        data = response.readline() if value.get("cancel_after_event") else response.read()
     print(json.dumps({"status": response.status,
                       "headers": dict((k.lower(), v) for k, v in response.getheaders()),
                       "body": json.loads(data) if "application/json" in response.getheader("Content-Type", "") else data.decode()}))

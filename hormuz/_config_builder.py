@@ -133,6 +133,7 @@ def _build_gateway_config(
         managed_llama=build_managed_llama(raw, routes, upstreams, admission),
         shadow_router=build_shadow_router(raw, routes, upstreams, admission),
         native_codex_catalog=_boolean(raw.get("native_codex_catalog", False), "native_codex_catalog"),
+        native_codex_responses=_boolean(raw.get("native_codex_responses", False), "native_codex_responses"),
     )
     config.validate_references()
     if not resolve_credentials:
