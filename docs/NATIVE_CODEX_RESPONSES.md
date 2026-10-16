@@ -76,7 +76,7 @@ results and encrypted reasoning/compaction content require retained successful
 native affinity. It binds the Hormuz identity, exact native credential/account,
 model/destination generation, body thread/session/cache identity and any
 `thread-id`/`session-id` headers. Tool kind, namespace, direct/program caller and
-async execution mode retain their validated issued values. Absent/null optional
+async execution mode and status retain their validated issued values. Absent/null optional
 values are equivalent. Supplied result names/namespaces/callers must match the
 issued call; results and provider item IDs cannot change their item type.
 Opaque values stay paired with their issued item kind/ID, and tool item IDs stay
@@ -91,14 +91,20 @@ rebind it. Plain text can start fresh.
 The process keeps at most 1,024 keyed continuation digests for 15 minutes,
 evicting the oldest when full. It retains no native token, response text or
 transcript in that cache. Expired/evicted state requires a fresh conversation.
-One request owns a native conversation at a time; another gets 429. Independent
-sessions can proceed within the shared eight-worker catalog/Responses limit.
+One request owns an identified native conversation or continuation at a time;
+another gets 429. Fresh requests without thread/session/cache identifiers have
+independent attempt leases while keeping stable continuation affinity.
+Independent requests can proceed within the shared eight-request
+catalog/Responses limit, which covers body processing and worker execution.
 
 Transport bounds are three seconds for system DNS/TCP/TLS, then 30 seconds for
 provider headers and idle reads, and a whole transport deadline of the smaller
 of `upstream_timeout_seconds` and 600 seconds. The whole deadline wins over
 phase deadlines. Requests are bounded by the smaller of the configured limit
-and 25 MiB; streams by 64 MiB; each SSE line/event by 1 MiB. Downstream writes
+and 25 MiB, including transformed egress JSON. Secret replacements reserve
+their exact serialized expansion before allocating replacement strings, and
+exceeding that byte limit returns 413 before egress. Streams are bounded by
+64 MiB; each SSE line/event by 1 MiB. Downstream writes
 have a separate three-second timeout. Cancellation is checked while awaiting
 headers or stream data. Every exit closes pipes/connections and reaps its owned
 worker: 0.2 seconds for termination, then a one-second kill/reap bound and a

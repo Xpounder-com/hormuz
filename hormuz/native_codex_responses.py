@@ -13,7 +13,7 @@ from ._native_responses_worker import RESPONSES_PATH
 from .native_responses_transport import NativeClientCanceled, stream_native_response
 from .compaction_contract import CONTEXT_FORMAT_HEADER
 from .compaction_enforcement import inspect_request
-from .redaction import SecretRedactor
+from .redaction import RedactionLimitError, SecretRedactor
 from .native_codex_stream import NativeCodexStream
 from .native_codex_state import NativeConversationBusy
 
@@ -88,10 +88,21 @@ def handle_native_responses(handler):
         return
     try:
         credentials = native_credentials(handler)
-        identity, authorization, account = credentials.identity, credentials.authorization, credentials.account
     except (AuthenticationError, ValueError):
         handler._send_error("unauthorized", "Separate gateway and native ChatGPT credentials are required.", 401)
         return
+    if not server.native_catalog_slots.acquire(blocking=False):
+        handler._send_error("gateway_upstream_error", "Native capacity is unavailable.", 429)
+        return
+    try:
+        _dispatch_native_responses(handler, credentials)
+    finally:
+        server.native_catalog_slots.release()
+
+
+def _dispatch_native_responses(handler, credentials):
+    server = handler.server
+    identity, authorization, account = credentials.identity, credentials.authorization, credentials.account
     value = _native_request(handler)
     if value is None:
         return
@@ -121,9 +132,13 @@ def handle_native_responses(handler):
     try:
         context = single_header(handler.headers, CONTEXT_FORMAT_HEADER, required=False, limit=128)
         redactor = SecretRedactor(server.config.secret_controls,
-            server.secret_redactor.protected_values + (("native_chatgpt_credential", authorization[7:]),))
+            server.secret_redactor.protected_values + (("native_chatgpt_credential", authorization[7:]),),
+            max_output_bytes=min(server.config.max_request_bytes, 25 * 1024 * 1024))
         redaction = inspect_request(value, protocol="openai", redactor=redactor,
             mode=decision.snapshot.secret_mode, declared_version=context).redaction
+    except RedactionLimitError:
+        handler._send_error("request_too_large", "Native request exceeds its egress byte limit.", 413)
+        return
     except ValueError:
         handler._send_error("invalid_request", "The native request context is invalid.", 400)
         return
@@ -132,8 +147,8 @@ def handle_native_responses(handler):
         return
     value = redaction.value
     destination = server.destinations.resolve(route)
-    binding = server.native_codex_state.binding(credentials, destination, value,
-        {name: handler.headers.get(name) for name in ("thread-id", "session-id")})
+    session_headers = {name: handler.headers.get(name) for name in ("thread-id", "session-id")}
+    binding = server.native_codex_state.binding(credentials, destination, value, session_headers)
     try:
         permitted = server.native_codex_state.permits(binding, value.get("input"))
     except ValueError:
@@ -141,13 +156,9 @@ def handle_native_responses(handler):
     if not permitted:
         handler._send_error("hormuz_policy_denied", "Native continuation requires retained successful affinity for the same identity, account credential, session and model.", 403)
         return
-    if not server.native_catalog_slots.acquire(blocking=False):
-        handler._send_error("gateway_upstream_error", "Native capacity is unavailable.", 429)
-        return
     try:
-        server.native_codex_state.begin(identity, binding)
+        lease = server.native_codex_state.begin(identity, binding, value, session_headers)
     except NativeConversationBusy:
-        server.native_catalog_slots.release()
         handler._send_error("gateway_upstream_error", "The native conversation already has an active request.", 429)
         return
     parser = NativeCodexStream(route.upstream_model)
@@ -196,5 +207,4 @@ def handle_native_responses(handler):
         if not handler._response_started:
             handler._send_error("gateway_upstream_error", "Native response is unavailable.", 502)
     finally:
-        server.native_codex_state.finish(identity, binding, outcome, parser.finish())
-        server.native_catalog_slots.release()
+        server.native_codex_state.finish(identity, lease, outcome, parser.finish())

@@ -187,6 +187,23 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                 self.assertEqual((result["status"], result["body"]["error"]["code"]), (403, "hormuz_secret_detected"))
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
 
+    def test_native_redaction_cannot_expand_a_request_beyond_its_egress_byte_limit(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            value = self.configuration(local, cloud)
+            value["max_request_bytes"] = 1024
+            with self.fixture.connected_client(value) as submit:
+                oversized = self.native(submit, headers={"Authorization": "Bearer q"},
+                    request={"input": "q" * 100})
+                self.assertEqual(oversized["status"], 413, oversized)
+                self.assertEqual(native_requests, [], "expanded secret material reached the native provider")
+                small = self.native(submit, headers={"Authorization": "Bearer q"}, request={"input": "q"})
+                self.assertEqual(small["status"], 200, small)
+                self.assertEqual(native_requests[0]["body"]["input"], "[REDACTED:HORMUZ_SECRET]")
+                self.assertLessEqual(len(json.dumps(native_requests[0]["body"], separators=(",", ":")).encode()), 1024)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
+
     def test_native_status_counts_completed_execution_and_observed_usage_with_unknown_cost(self):
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
@@ -502,6 +519,44 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                         self.assertEqual(len(native_requests), 2)
             self.assertEqual((local_requests, cloud_requests), ([], []))
 
+    def test_native_tool_status_cannot_be_changed_or_removed_during_full_replay(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for kind in ("function_call", "custom_tool_call"):
+                for issued_status in ("completed", None):
+                    with self.subTest(kind=kind, issued_status=issued_status):
+                        field = "arguments" if kind == "function_call" else "input"
+                        call = {"type": kind, "call_id": "status-call", "name": "fixture_tool",
+                                field: "{}", "status": issued_status}
+                        data = ("data: " + json.dumps(completed(output=[call])) + "\n\n").encode()
+                        def reply(handler, value, number):
+                            if number != 1:
+                                return stream_reply(handler, value, number)
+                            handler.send_response(200)
+                            handler.send_header("Content-Type", "text/event-stream")
+                            handler.send_header("Content-Length", str(len(data)))
+                            handler.end_headers()
+                            handler.wfile.write(data)
+                        with native_backend({}, response_handler=reply) as native_requests:
+                            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                                self.assertEqual(self.native(submit)["body"], data.decode())
+                                result = {"type": kind + "_output", "call_id": "status-call", "output": "result"}
+                                for status in ("in_progress", "incomplete", 7, "unsupported", "missing", None):
+                                    if issued_status is None and status in {"missing", None}:
+                                        continue
+                                    with self.subTest(changed_status=status):
+                                        changed = {**call, "status": status}
+                                        if status == "missing":
+                                            changed.pop("status")
+                                        denied = self.native(submit, request={"input": [changed, result]})
+                                        self.assertEqual(denied["status"], 403, denied)
+                                        self.assertEqual(len(native_requests), 1)
+                                for replay in (call, {k: v for k, v in call.items() if v is not None}):
+                                    accepted = self.native(submit, request={"input": [replay, result]})
+                                    self.assertEqual(accepted["status"], 200, accepted)
+                            self.assertEqual(len(native_requests), 3)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_native_tool_execution_metadata_is_validated_and_bound_to_the_issued_call(self):
         metadata = {"namespace": "functions", "caller": {"type": "program", "caller_id": "issued-program"}, "async": True}
         malformed = [{"namespace": 17}, {"caller": {}}, {"caller": {"type": "program"}},
@@ -763,6 +818,31 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                 finally:
                     release.set()
                 self.assertEqual(first.result(timeout=5)["status"], 200)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
+
+    def test_fresh_native_requests_without_session_identifiers_can_proceed_independently(self):
+        entered, release = threading.Event(), threading.Event()
+        def reply(handler, value, number):
+            if number == 1:
+                entered.set()
+                release.wait(3)
+            stream_reply(handler, value, number)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit, ThreadPoolExecutor(max_workers=1) as clients:
+                first = clients.submit(self.native, submit, request={"input": "first independent task"})
+                try:
+                    self.assertTrue(entered.wait(2), "first native request did not arrive")
+                    second = self.native(submit, request={"input": "second independent task"})
+                    self.assertEqual(second["status"], 200, second)
+                    self.assertEqual(len(native_requests), 2)
+                finally:
+                    release.set()
+                self.assertEqual(first.result(timeout=5)["status"], 200)
+                status = submit(method="GET", path="/v1/router/native-codex", absolute_path=True,
+                    headers={"X-Gateway-Key": NATIVE_HEADERS["X-Gateway-Key"]})["body"]
+                self.assertEqual((status["requests"], status["active"], status["succeeded"]), (2, 0, 2))
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
 
     def test_native_contracts_are_public_versioned_and_reject_cost_or_scope_invention(self):

@@ -71,7 +71,10 @@ def continuation_tags(items):
                 field = "arguments" if kind == "function_call" else "input"
                 if type(item.get("name")) is not str or type(item.get(field)) is not str:
                     raise ValueError("native_call_invalid")
-                tags.append(("tool", [kind, call, item["name"], item[field], execution, item.get("id")]))
+                status = item.get("status")
+                if status is not None and (type(status) is not str or status not in {"in_progress", "completed", "incomplete"}):
+                    raise ValueError("native_call_invalid")
+                tags.append(("tool", [kind, call, item["name"], item[field], execution, item.get("id"), status]))
                 tags.extend((field, [call_kind, call, value]) for field, value in context)
             else:
                 if (type(item.get("output")) not in {str, list} or execution[2] is not None
@@ -140,18 +143,26 @@ class NativeCodexState:
         owner = (identity.organization_id, identity.team_id, identity.actor_id)
         return self._counts.setdefault(owner, dict.fromkeys(COUNTERS, 0))
 
-    def begin(self, identity, binding):
+    def begin(self, identity, binding, value, session_headers):
+        metadata = value.get("client_metadata", {})
+        identifiers = [metadata.get("thread_id"), metadata.get("session_id"),
+                       value.get("prompt_cache_key"), *session_headers.values()]
+        # Affinity stays stable for replay. An identifier-free fresh attempt has
+        # no shared conversation to serialize, so its active lease is separate.
+        lease = (binding if any(item is not None for item in identifiers) or continuation_tags(value.get("input"))
+                 else secrets.token_bytes(32))
         with self._lock:
-            if binding in self._active:
+            if lease in self._active:
                 raise NativeConversationBusy()
-            self._active.add(binding)
+            self._active.add(lease)
             counters = self._counters(identity)
             counters["requests"] += 1
             counters["active"] += 1
+        return lease
 
-    def finish(self, identity, binding, outcome, usage):
+    def finish(self, identity, lease, outcome, usage):
         with self._lock:
-            self._active.discard(binding)
+            self._active.discard(lease)
             counters = self._counters(identity)
             counters["active"] -= 1
             counters[outcome] += 1
