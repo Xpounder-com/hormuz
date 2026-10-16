@@ -16,6 +16,10 @@ Message and tool-result content use a qualified text profile. Active media/file
 and nested provider references remain closed until their ownership path is
 qualified. Assistant text/refusal replay and passive citation metadata remain
 supported; a citation is not an input-file retrieval authority.
+Reasoning summaries/content share their terminal text-part validation on replay,
+and issued provider item status stays bound to its identity. Redaction refuses
+native grants contained in its replacement marker rather than retaining a
+credential in transformed egress.
 Tool declarations and selectors likewise remain limited to host-owned
 function/custom tools and their namespaces, without provider-hosted state.
 

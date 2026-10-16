@@ -14,7 +14,7 @@ from .native_responses_transport import NativeClientCanceled, stream_native_resp
 from .compaction_contract import CONTEXT_FORMAT_HEADER
 from .compaction_enforcement import inspect_request
 from .compaction_formats import MAX_REQUEST_BYTES as MAX_COMPACT_INSPECTION_BYTES
-from .redaction import RedactionLimitError, SecretRedactor
+from .redaction import REPLACEMENT, RedactionLimitError, SecretRedactor
 from .native_codex_stream import NativeCodexStream
 from .native_codex_state import NativeConversationBusy
 from .native_codex_tools import validate_native_tools
@@ -128,6 +128,9 @@ def _dispatch_native_responses(handler, credentials):
                                  decision.snapshot.actor_policy) if scope is not None
                    for field in ("monthly_token_limit", "monthly_budget_usd", "per_actor_monthly_budget_usd"))):
         handler._send_error("hormuz_policy_denied", "Native execution is not permitted by the selected policy or budget controls.", 403)
+        return
+    if decision.snapshot.secret_mode == "redact" and authorization[7:] in REPLACEMENT:
+        handler._send_error("hormuz_secret_detected", "The native credential cannot be safely protected by the configured redaction marker.", 403)
         return
     value = {**value, "model": route.upstream_model}
     if decision.max_output_tokens is not None:

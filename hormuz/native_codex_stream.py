@@ -146,14 +146,6 @@ class NativeCodexStream:
                         raise ValueError("native_output_invalid")
                     if field == "text":
                         validate_annotations(part.get("annotations"))
-            elif kind == "reasoning":
-                for field, part_type in (("summary", "summary_text"), ("content", "reasoning_text")):
-                    parts = item.get(field)
-                    if field == "content" and parts is None:
-                        continue
-                    if type(parts) is not list or any(type(part) is not dict or part.get("type") != part_type
-                            or type(part.get("text")) is not str for part in parts):
-                        raise ValueError("native_output_invalid")
             elif kind == "compaction" and type(item.get("encrypted_content")) is not str:
                 raise ValueError("native_output_invalid")
         continuation_tags(output)

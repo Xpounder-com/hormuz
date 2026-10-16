@@ -51,7 +51,9 @@ slug selects one immutable destination. Policy fallback and operational failover
 Identity, organization, team and actor Codex/model restrictions apply; hard or
 request-level local-only blocks before egress. Shared output caps and compacted
 context/secret redaction or denial apply before transport. Native credentials
-are also protected during request redaction. Requests with monthly token/dollar
+are also protected during request redaction. Redact mode rejects native grants
+contained in the replacement marker, since replacing such a grant could retain
+the credential. Requests with monthly token/dollar
 limits or per-actor dollar caps fail closed: this path cannot safely reserve
 those limits from unknown native plan charges. Explicit work ID/scope headers
 also fail. Optional work selection, caching, shadow routing, content history and
@@ -96,6 +98,11 @@ issued call; results and provider item IDs cannot change their item type.
 Opaque values stay paired with their issued item kind/ID, and tool item IDs stay
 paired with their complete issued call. Individually known IDs and blobs cannot
 be recombined, and non-null issued state cannot be stripped on replay.
+Provider-issued assistant messages require their original validated status;
+reasoning and other provider item statuses likewise retain their issued value.
+Replayed reasoning summaries and optional content use the same typed
+`summary_text`/`reasoning_text` profile as terminal output, so nested active
+references cannot gain authority from a retained reasoning ID or opaque value.
 Those session headers constrain affinity and
 are consumed locally. Changed arguments or opaque bytes, unknown provider IDs,
 failed turns, restart, expiry or another owner block before egress. Native

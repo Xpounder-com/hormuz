@@ -63,10 +63,20 @@ def continuation_tags(items):
             raise ValueError("native_item_invalid")
         if message:
             validate_text_content(item["content"], assistant=item["role"] == "assistant")
+        status = item.get("status")
+        if (status is not None and (type(status) is not str or status not in {"in_progress", "completed", "incomplete"})
+                or message and item["role"] == "assistant" and "id" in item and status is None):
+            raise ValueError("native_item_invalid")
         if kind in {"reasoning", "compaction"} and "id" not in item:
             raise ValueError("native_item_invalid")
-        if kind == "reasoning" and type(item.get("summary")) is not list:
-            raise ValueError("native_item_invalid")
+        if kind == "reasoning":
+            for field, part_type in (("summary", "summary_text"), ("content", "reasoning_text")):
+                parts = item.get(field)
+                if field == "content" and parts is None:
+                    continue
+                if type(parts) is not list or any(type(part) is not dict or part.get("type") != part_type
+                        or type(part.get("text")) is not str for part in parts):
+                    raise ValueError("native_item_invalid")
         if kind == "compaction" and "encrypted_content" not in item:
             raise ValueError("native_item_invalid")
         if kind in {"function_call", "custom_tool_call", "function_call_output", "custom_tool_call_output"}:
@@ -80,9 +90,6 @@ def continuation_tags(items):
             if kind in {"function_call", "custom_tool_call"}:
                 field = "arguments" if kind == "function_call" else "input"
                 if type(item.get("name")) is not str or type(item.get(field)) is not str:
-                    raise ValueError("native_call_invalid")
-                status = item.get("status")
-                if status is not None and (type(status) is not str or status not in {"in_progress", "completed", "incomplete"}):
                     raise ValueError("native_call_invalid")
                 tags.append(("tool", [kind, call, item["name"], item[field], execution, item.get("id"), status]))
                 tags.extend((field, [call_kind, call, value]) for field, value in context)
@@ -107,7 +114,7 @@ def continuation_tags(items):
             if (type(item["id"]) is not str or not 1 <= len(item["id"]) <= 256
                     or any(not 33 <= ord(c) <= 126 for c in item["id"])):
                 raise ValueError("native_item_invalid")
-            tags.append(("item", ["message" if message else kind, item["id"]]))
+            tags.append(("item", ["message" if message else kind, item["id"], status]))
         if len(tags) > 256:
             raise ValueError("native_continuation_oversized")
     return tags

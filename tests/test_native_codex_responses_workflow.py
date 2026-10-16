@@ -187,6 +187,26 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                 self.assertEqual((result["status"], result["body"]["error"]["code"]), (403, "hormuz_secret_detected"))
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
 
+    def test_native_credentials_contained_in_the_redaction_marker_fail_closed(self):
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                for token in ("HORMUZ_SECRET", "REDACTED", "SECRET", "R"):
+                    with self.subTest(token=token):
+                        denied = self.native(submit, headers={"Authorization": "Bearer " + token},
+                            request={"input": "Do not forward this credential: " + token})
+                        self.assertEqual(denied["status"], 403, denied)
+                        self.assertEqual(len(native_requests), 0)
+                denied = self.native(submit, headers={"Authorization": "Bearer HORMUZ_SECRET"},
+                    request={"input": "A clean prompt cannot make an unsafe redaction grant usable."})
+                self.assertEqual(denied["status"], 403, denied)
+                accepted = self.native(submit, request={"input": "Do not forward NATIVE_CHATGPT_SENTINEL"})
+                self.assertEqual(accepted["status"], 200, accepted)
+                self.assertEqual(accepted["headers"]["x-hormuz-redactions"], "1")
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
+            self.assertNotIn("NATIVE_CHATGPT_SENTINEL", json.dumps(native_requests[0]["body"]))
+
     def test_native_redaction_cannot_expand_a_request_beyond_its_egress_byte_limit(self):
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
@@ -411,6 +431,79 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
                 self.assertIn("NATIVE_RESULT", final["body"])
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
             self.assertEqual(native_requests[1]["body"]["input"], replay)
+
+    def test_reasoning_replay_only_admits_qualified_summary_and_content_parts(self):
+        reasoning = {"id": "qualified-reasoning", "type": "reasoning", "encrypted_content": "OPAQUE_REASONING",
+            "summary": [{"type": "summary_text", "text": "A supported summary"}],
+            "content": [{"type": "reasoning_text", "text": "Supported reasoning text"}]}
+        data = ("data: " + json.dumps(completed(output=[reasoning])) + "\n\n").encode()
+        def reply(handler, value, number):
+            if number != 1:
+                return stream_reply(handler, value, number)
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                self.assertEqual(self.native(submit)["body"], data.decode())
+                for field, parts in (("summary", None), ("summary", [17]),
+                        ("summary", [{"type": "item_reference", "id": "foreign-summary"}]),
+                        ("summary", [{"type": "summary_text", "text": 17}]),
+                        ("content", {"type": "reasoning_text", "text": "not a list"}),
+                        ("content", [{"type": "item_reference", "id": "foreign-content"}]),
+                        ("content", [{"type": "reasoning_text", "text": 17}]),
+                        ("content", [{"type": "summary_text", "text": "wrong kind"}])):
+                    with self.subTest(field=field, parts=parts):
+                        denied = self.native(submit, request={"input": [{**reasoning, field: parts}]})
+                        self.assertEqual(denied["status"], 403, denied)
+                        self.assertEqual(len(native_requests), 1)
+                for content in (reasoning["content"], None):
+                    replay = {**reasoning, "content": content}
+                    accepted = self.native(submit, request={"input": [replay]})
+                    self.assertEqual(accepted["status"], 200, accepted)
+                    self.assertEqual(native_requests[-1]["body"]["input"], [replay])
+                replay = {key: value for key, value in reasoning.items() if key != "content"}
+                self.assertEqual(self.native(submit, request={"input": [replay]})["status"], 200)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 4))
+
+    def test_provider_message_and_reasoning_status_cannot_change_or_be_stripped_on_replay(self):
+        message = {"id": "status-message", "type": "message", "role": "assistant", "status": "completed",
+            "content": [{"type": "output_text", "text": "An issued message", "annotations": []}]}
+        reasoning = {"id": "status-reasoning", "type": "reasoning", "status": "completed",
+            "summary": [], "encrypted_content": "OPAQUE_STATUS"}
+        nullable = {"id": "nullable-status-reasoning", "type": "reasoning", "status": None, "summary": []}
+        output = [message, reasoning, nullable]
+        data = ("data: " + json.dumps(completed(output=output)) + "\n\n").encode()
+        def reply(handler, value, number):
+            if number != 1:
+                return stream_reply(handler, value, number)
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Content-Length", str(len(data)))
+            handler.end_headers()
+            handler.wfile.write(data)
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=reply) as native_requests:
+            with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                self.assertEqual(self.native(submit)["body"], data.decode())
+                for item in (message, reasoning):
+                    variants = [{**item, "status": status} for status in ("in_progress", "incomplete", None, 17, {}, "invalid")]
+                    variants.append({key: value for key, value in item.items() if key != "status"})
+                    for replay in variants:
+                        with self.subTest(kind=item["type"], replay=replay):
+                            denied = self.native(submit, request={"input": [replay]})
+                            self.assertEqual(denied["status"], 403, denied)
+                            self.assertEqual(len(native_requests), 1)
+                for replay in (output, [message, reasoning, {key: value for key, value in nullable.items() if key != "status"}]):
+                    accepted = self.native(submit, request={"input": replay})
+                    self.assertEqual(accepted["status"], 200, accepted)
+                    self.assertEqual(native_requests[-1]["body"]["input"], replay)
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 3))
 
     def test_redacted_conversation_identifiers_cannot_collapse_distinct_native_owners(self):
         call = {"id": "secret-thread-tool", "type": "function_call", "call_id": "secret-thread-call",
