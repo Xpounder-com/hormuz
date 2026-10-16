@@ -206,6 +206,10 @@ PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restrict
 
 _CURRENT_SCHEMA_VERSIONS = {
     "hormuz.local-coding-evidence": 1,
+    "hormuz.coding-probe-plan": 1,
+    "hormuz.coding-probe-status": 1,
+    "hormuz.coding-probe-error": 1,
+    "hormuz.coding-probe-relay": 1,
     "hormuz.cloud-readiness": 1,
     LOCAL_SETUP_SCHEMA_ID: 1,
     LOCAL_SETUP_PROFILE_SCHEMA_ID: 2,

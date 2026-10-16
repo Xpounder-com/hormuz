@@ -61,6 +61,8 @@ from ._contract_schemas.connected_client import (
     _validate_preview_v2 as _validate_connected_client_preview_v2,
 )
 from ._contract_schemas.local_coding import EVIDENCE_FIELDS, validate_evidence as _validate_coding_evidence
+from ._contract_schemas.coding_probe import (PLAN_FIELDS as PROBE_PLAN_FIELDS, STATUS_FIELDS as PROBE_STATUS_FIELDS,
+    validate_plan as _validate_probe_plan, validate_status as _validate_probe_status, validate_error as _validate_probe_error)
 from ._contract_schemas.cloud_readiness import FIELDS as CLOUD_READINESS_FIELDS, validate_readiness as _validate_cloud_readiness
 from ._contract_schemas.local_setup import (validate_profile as _validate_local_setup_profile,
     validate_setup as _validate_local_setup, validate_setup_v2 as _validate_local_setup_v2,
@@ -530,6 +532,13 @@ def contract_manifest() -> dict[str, object]:
             _manifest_schema(LOCAL_SETUP_SCHEMA_ID, 3, "cli-output", "hormuz",
                 ["schema_id", "schema_version", "configuration", "connection"]),
             _manifest_schema("hormuz.local-coding-evidence", 1, "durable-evidence", "hormuz", sorted(EVIDENCE_FIELDS)),
+            _manifest_schema("hormuz.coding-probe-plan", 1, "durable-evidence", "hormuz", sorted(PROBE_PLAN_FIELDS)),
+            _manifest_schema("hormuz.coding-probe-status", 1, "cli-output", "hormuz", sorted(PROBE_STATUS_FIELDS)),
+            _manifest_schema("hormuz.coding-probe-error", 1, "cli-output", "hormuz", ["schema_id", "schema_version", "error"]),
+            _manifest_schema("hormuz.coding-probe-relay", 1, "http-headers", "hormuz",
+                ["X-Hormuz-Contract", "X-Hormuz-Requested-Model", "X-Hormuz-Routed-Model",
+                 "X-Hormuz-Destination", "X-Hormuz-Destination-Locality", "X-Hormuz-Destination-Generation",
+                 "X-Hormuz-Routing-Mode", "X-Hormuz-Routing-Reason", "X-Hormuz-Qualification-Probe"]),
             _manifest_schema("hormuz.shadow-routing", 1, "durable-evidence", "hormuz", sorted(SHADOW_FIELDS)),
             *[_manifest_schema("hormuz.ai-work-attempt-history", version, "response", "hormuz",
                 ["schema_id", "schema_version", "scope", "work_id", "attempts", "page_limit", "order", "next_before"])
@@ -583,6 +592,9 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (LOCAL_SETUP_SCHEMA_ID, 2): _validate_local_setup_v2,
         (LOCAL_SETUP_SCHEMA_ID, 3): _validate_local_setup_v3,
         ("hormuz.local-coding-evidence", 1): _validate_coding_evidence,
+        ("hormuz.coding-probe-plan", 1): _validate_probe_plan,
+        ("hormuz.coding-probe-status", 1): _validate_probe_status,
+        ("hormuz.coding-probe-error", 1): _validate_probe_error,
         ("hormuz.shadow-routing", 1): _validate_shadow,
         ("hormuz.ai-work-attempt-history", 1): _validate_attempt_history,
         ("hormuz.ai-work-attempt-history", 2): _validate_attempt_history,

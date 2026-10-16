@@ -125,7 +125,17 @@ def main(record_path, generation):
                     with client.makefile("rb") as stream:
                         data = stream.readline(4097)
                     request = json.loads(data) if len(data) <= 4096 else {}
-                    if not isinstance(request, dict) or request.get("command") not in {"stop", "status", "routing"} or request.get("generation") != record["generation"]:
+                    if not isinstance(request, dict) or request.get("command") not in {"stop", "status", "routing", "qualify"} or request.get("generation") != record["generation"]:
+                        continue
+                    if request.get("command") == "qualify":
+                        from .coding_probe import ProbeError
+                        identity = config.identities_by_actor[record["actor_id"]]
+                        try:
+                            probe = server.route_admission.probe.control(identity, request.get("plan"), request.get("revoke", False))
+                        except ProbeError as error:
+                            probe = {"schema_id": "hormuz.coding-probe-error", "schema_version": 1,
+                                     "error": {"code": str(error)}}
+                        client.sendall(json.dumps({"generation": record["generation"], "probe": probe}).encode() + b"\n")
                         continue
                     if request.get("command") == "routing":
                         identity = config.identities_by_actor[record["actor_id"]]

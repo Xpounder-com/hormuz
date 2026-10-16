@@ -148,6 +148,11 @@ admission receipt. Exact native request-profile binding and a reviewed outcome
 collection path precede inference. The existing unqualified-coding denial is
 intentional and remains in force.
 
+An [explicit bounded probe](BOUNDED_CODING_PROBES.md) provides the operator-invoked
+collection path without changing ordinary coding admission. It binds one frozen
+case and native profile to a local conversation with finite request/time budgets.
+Probe permission is not an outcome or passing receipt.
+
 ## Contracts, migration and rollback
 
 The version-1 `hormuz.local-coding-evidence` receipt contains a frozen `plan`, its
