@@ -216,6 +216,18 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                         self.assertFalse(self.report_path.exists())
         self.assertEqual(received, [])
 
+    def test_task_labels_cannot_certify_a_different_classified_workload(self):
+        suite = self.suite()
+        for case in suite["cases"]:
+            case["task_type"] = "translation"
+        with workflow.provider("7") as (endpoint, received):
+            value = self.fixture.admission_configuration(endpoint, endpoint)
+            value["route_admission"]["local_routes"]["local-code"]["task_types"].append("translation")
+            with self.fixture.connected_client(value):
+                result = self.run_benchmark("local-code", suite=suite, expected=2)
+        self.assertEqual((result["error"]["code"], received, self.report_path.exists()),
+                         ("benchmark_suite_invalid", [], False))
+
     def test_streaming_scorecard_measures_first_token_delivery_separately_from_total_latency(self):
         suite = self.suite()
         for case in suite["cases"]:
@@ -308,6 +320,31 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                                   result["headers"].get("x-hormuz-scorecard-status")),
                                  (200, "7", "benchmark_scorecard", "selected"))
             self.assertEqual((len(first_requests), len(second_requests)), (1, 2))
+
+    def test_routing_matches_the_effective_policy_cap_not_the_uncapped_request(self):
+        for measured_budget, expected_model, expected_status in (
+                (8, "fixture-local-model", "no_target_match"),
+                (4, "fixture-second-model", "selected")):
+            with self.subTest(measured_budget=measured_budget):
+                self.report_path = self.root / f"policy-cap-{measured_budget}.json"
+                suite = self.suite()
+                suite["cases"] = suite["cases"][:1]
+                suite["cases"][0]["request"]["max_output_tokens"] = measured_budget
+                suite["targets"]["min_cases"] = 1
+                with workflow.provider("0") as (first, first_requests), workflow.provider("7") as (second, second_requests):
+                    value = self.two_local_configuration(first, second)
+                    value["route_admission"]["scorecard"] = str(self.report_path)
+                    with self.fixture.connected_client(value):
+                        self.run_benchmark("local-code", "local-better", suite=suite)
+                    value["policies"]["organization"]["max_output_tokens"] = 4
+                    with self.fixture.connected_client(value) as submit:
+                        result = submit(request={"input": "Summarize seven boxes as a digit.",
+                                                 "max_output_tokens": 8})
+                delivered = (first_requests if expected_model == "fixture-local-model" else second_requests)[-1]
+                self.assertEqual((result["status"], result["headers"].get("x-hormuz-routed-model"),
+                                  result["headers"].get("x-hormuz-scorecard-status"),
+                                  delivered["body"]["max_output_tokens"]),
+                                 (200, expected_model, expected_status, 4))
 
     def test_larger_prepared_requests_do_not_inherit_a_smaller_workloads_score(self):
         suite = self.suite()

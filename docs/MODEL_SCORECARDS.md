@@ -70,6 +70,10 @@ execution checks use the separate
 [local coding qualification](LOCAL_CODING_QUALIFICATION.md) workflow. A benchmark
 label or successful answer check cannot grant coding qualification.
 
+Each task label must match the router's deterministic classification of its
+user input. Recognized wording includes `Summarize ...`, `Translate ... into ...`,
+and `Extract ... JSON ...`; ambiguous or mismatched labels fail before model calls.
+
 ## Run and compare
 
 Start the router through the normal connection workflow. Select existing local
@@ -89,7 +93,8 @@ hormuz benchmark show --scorecard "$PWD/scorecard.json" --format markdown
 Omit `--format markdown` for JSON. `show` works without the configuration,
 credentials or a live router. If the configuration has several actors, select
 one explicitly with `run --actor ACTOR_ID`.
-The running router and CLI use the configured static gateway identity. OIDC-only
+A run uses a loopback listener, `ingress.mode: local`, and the configured static
+gateway identity. OIDC-only
 configurations are outside the current local-router configuration contract.
 
 | Recorded metric | Interpretation |

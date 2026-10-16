@@ -124,7 +124,8 @@ def validate_suite(suite):
                 or type(case.get("checks")) is not list or not 1 <= len(case["checks"]) <= 16
                 or any(not valid_check(check) for check in case["checks"])):
             raise BenchmarkError("benchmark_suite_invalid")
-        if len({check["metric"] for check in case["checks"]}) != len(case["checks"]):
+        if (len({check["metric"] for check in case["checks"]}) != len(case["checks"])
+                or request_characteristics(case["request"])["task_hint"] != case["task_type"]):
             raise BenchmarkError("benchmark_suite_invalid")
         seen.add(case["id"])
     return suite

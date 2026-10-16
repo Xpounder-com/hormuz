@@ -39,6 +39,8 @@ class ScorecardRouting:
             return result("owner_mismatch")
         if report["machine"] != self.machine:
             return result("machine_changed")
+        # The server applies the shared local policy cap before admission.
+        # LocalPolicyRuntime does not populate model-specific output limits.
         characteristics = request_characteristics(value)
         profile = benchmark_profile_digest(value)
         eligible = []
