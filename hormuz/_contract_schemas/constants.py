@@ -205,8 +205,8 @@ PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restrict
                               *ROUTE_ADMISSION_ERROR_CODES, *CONNECTED_CLIENT_ERROR_ACTIONS})
 
 _CURRENT_SCHEMA_VERSIONS = {
-    "hormuz.local-coding-evidence": 1,
-    "hormuz.coding-probe-plan": 1,
+    "hormuz.local-coding-evidence": 2,
+    "hormuz.coding-probe-plan": 2,
     "hormuz.coding-probe-status": 1,
     "hormuz.coding-probe-error": 1,
     "hormuz.coding-probe-relay": 1,

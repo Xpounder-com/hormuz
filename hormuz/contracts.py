@@ -531,8 +531,10 @@ def contract_manifest() -> dict[str, object]:
                 ["schema_id", "schema_version", "configuration", "connection"]),
             _manifest_schema(LOCAL_SETUP_SCHEMA_ID, 3, "cli-output", "hormuz",
                 ["schema_id", "schema_version", "configuration", "connection"]),
-            _manifest_schema("hormuz.local-coding-evidence", 1, "durable-evidence", "hormuz", sorted(EVIDENCE_FIELDS)),
-            _manifest_schema("hormuz.coding-probe-plan", 1, "durable-evidence", "hormuz", sorted(PROBE_PLAN_FIELDS)),
+            *[_manifest_schema("hormuz.local-coding-evidence", version, "durable-evidence", "hormuz", sorted(EVIDENCE_FIELDS))
+              for version in (1, 2)],
+            *[_manifest_schema("hormuz.coding-probe-plan", version, "durable-evidence", "hormuz", sorted(PROBE_PLAN_FIELDS))
+              for version in (1, 2)],
             _manifest_schema("hormuz.coding-probe-status", 1, "cli-output", "hormuz", sorted(PROBE_STATUS_FIELDS)),
             _manifest_schema("hormuz.coding-probe-error", 1, "cli-output", "hormuz", ["schema_id", "schema_version", "error"]),
             _manifest_schema("hormuz.coding-probe-relay", 1, "http-headers", "hormuz",
@@ -592,7 +594,9 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (LOCAL_SETUP_SCHEMA_ID, 2): _validate_local_setup_v2,
         (LOCAL_SETUP_SCHEMA_ID, 3): _validate_local_setup_v3,
         ("hormuz.local-coding-evidence", 1): _validate_coding_evidence,
+        ("hormuz.local-coding-evidence", 2): _validate_coding_evidence,
         ("hormuz.coding-probe-plan", 1): _validate_probe_plan,
+        ("hormuz.coding-probe-plan", 2): _validate_probe_plan,
         ("hormuz.coding-probe-status", 1): _validate_probe_status,
         ("hormuz.coding-probe-error", 1): _validate_probe_error,
         ("hormuz.shadow-routing", 1): _validate_shadow,

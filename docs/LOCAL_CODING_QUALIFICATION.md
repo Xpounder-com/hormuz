@@ -172,13 +172,26 @@ outcomes remain in the planned denominator. The runtime never executes a receipt
 `parallel_tool_calls`, `store`, `service_tier` and `stream`, after privacy
 normalization. Input-carried `system`/`developer` messages are additionally bound
 as `input_instructions`: an ordered list of `{position, message}` entries, using
-the zero-based input position and entire message. Adding, removing, moving or
+the zero-based input position and entire message in version 1. Version-2
+`hormuz.local-coding-evidence` retains the same acceptance criteria and shape,
+but normalizes recognized native client message IDs as described in
+[bounded probes](BOUNDED_CODING_PROBES.md). Ordinary admission selects the digest
+algorithm from the installed receipt version; v1 remains strict. Fresh Codex
+launches assign new IDs to otherwise identical developer instructions, so v2
+binds their semantic profile rather than those launch-specific labels.
+Adding, removing, moving or
 changing an instruction message changes the profile; ordinary user and tool
 content remains variable. Missing `store` becomes false and absent/null `service_tier` becomes
 `default`; other present fields retain their exact JSON values. This captures the
 effective agent instructions and tool schema rather than a possibly ignored
 command-line model-catalog flag. Client/plugin activation, hardware support and
 statistical task success remain separate release qualification decisions.
+
+The [v2 compatibility fixture](../tests/fixtures/local-coding-evidence-v2.json)
+does not identify a qualified model. Older binaries reject version-2 evidence;
+disconnect and remove that record before downgrade. Existing v1 records are not
+rewritten or reinterpreted. Freeze a separately versioned v2 campaign before
+collecting new evidence; retained failures keep their original treatment.
 
 Local route declarations may embed `coding_evidence`. Version-1 declarations
 without it remain readable and explicitly unqualified for coding. Setup profile

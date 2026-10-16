@@ -18,6 +18,21 @@ def canonical_digest(value):
                                     ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 
 
+def coding_input(value, *, schema_version=1):
+    """V2 ignores only native client-assigned IDs on inline instruction/user messages."""
+    if schema_version == 1 or type(value) is not list:
+        return value
+    result = []
+    for item in value:
+        if (type(item) is dict and item.get("type") == "message"
+                and item.get("role") in {"system", "developer", "user"}
+                and type(item.get("id")) is str
+                and re.fullmatch(r"msg_[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}", item["id"])):
+            item = {key: part for key, part in item.items() if key != "id"}
+        result.append(item)
+    return result
+
+
 def _digest(value):
     if type(value) is not str or re.fullmatch(r"[a-f0-9]{64}", value) is None:
         raise ContractValidationError("invalid coding evidence digest")
@@ -52,7 +67,7 @@ def validate_subject(subject):
 
 def validate_evidence(value):
     _exact_keys(value, EVIDENCE_FIELDS)
-    if value["schema_id"] != "hormuz.local-coding-evidence" or type(value["schema_version"]) is not int or value["schema_version"] != 1:
+    if value["schema_id"] != "hormuz.local-coding-evidence" or type(value["schema_version"]) is not int or value["schema_version"] not in (1, 2):
         raise ContractValidationError("invalid coding evidence version")
     validate_identifier(value["evidence_id"])
     plan = value["plan"]

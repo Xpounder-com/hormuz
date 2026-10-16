@@ -42,3 +42,20 @@ be separate files, including failures, timeouts, missing edits and unknowns.
 Ordinary unqualified coding stays blocked, local-only and conversation affinity
 remain enforced, and advice has no execution authority. One development result
 cannot qualify this candidate; all sixteen planned outcomes are required.
+
+## Observed integration denial after preregistration
+
+The [native attempt](development-result.json) exited 1 on HTTP 403 before any
+probe submission or upstream inference. Its implementation stayed unchanged;
+independent checks remained failing. Settings restored and owned listeners closed.
+This is an invalid execution treatment, not evidence about the model's repair
+quality. It is retained rather than relabelled or overwritten.
+
+A separately retained [zero-inference diagnosis](diagnostic.json) found that
+Codex creates fresh `msg_<UUID>` IDs on developer/user messages for each launch.
+Text, tools and controls were unchanged; message IDs alone changed both hashes.
+The [versioned correction](../../BOUNDED_CODING_PROBES.md) uses version 2 plans
+and receipts to normalize only recognized native client message IDs, preserving
+all other content and provider/tool state. Version 1 remains strict.
+A corrected source/profile freeze and actual model repair belong to version 5.
+No model inference or held-out episode was consumed in version 4.

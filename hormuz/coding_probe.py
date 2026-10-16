@@ -4,7 +4,7 @@ import secrets
 import threading
 import time
 
-from ._contract_schemas.local_coding import canonical_digest
+from ._contract_schemas.local_coding import canonical_digest, coding_input
 from .coding_qualification import matches_coding_subject, request_profile_digest
 from .contracts import ContractValidationError, validate_contract
 from .work_learning import contains_provider_state
@@ -93,10 +93,10 @@ class CodingProbe:
             if (len(agents) != 1 or not 0 < len(agents[0]) <= 512
                     or any(not 32 <= ord(c) < 127 for c in agents[0])
                     or agents[0].partition(" ")[0] != "codex_exec/" + plan["subject"]["client_version"]
-                    or request_profile_digest(value) != plan["subject"]["request_profile_sha256"]
+                    or request_profile_digest(value, schema_version=plan["schema_version"]) != plan["subject"]["request_profile_sha256"]
                     or getattr(handler, "_work_conversation", None) is None):
                 raise ProbeError("probe_request_mismatch")
-            items = value.get("input")
+            items = coding_input(value.get("input"), schema_version=plan["schema_version"])
             first = self.work_id is None or claimed and getattr(handler, "_coding_probe_first", False)
             if first:
                 if contains_provider_state(value) or canonical_digest(items) != plan["first_input_sha256"]:

@@ -261,7 +261,7 @@ class RouteAdmission:
                 and handler.path == "/v1/responses"
                 and 0 < len(agent) <= 512 and all(32 <= ord(character) < 127 for character in agent)
                 and agent.partition(" ")[0] == f"codex_exec/{coding.client_version}"
-                and request_profile_digest(value) == coding.request_profile_sha256)
+                and request_profile_digest(value, schema_version=coding.profile_schema_version) == coding.request_profile_sha256)
 
     def select(self, handler, identity, decision, value, *, client, protocol, output_field):
         handler._coding_probe = handler._coding_probe_claimed = False

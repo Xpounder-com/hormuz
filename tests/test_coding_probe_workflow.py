@@ -5,6 +5,7 @@ import platform
 import socket
 import time
 import unittest
+from pathlib import Path
 
 from tests import test_connected_client_lifetime_workflow as lifetime
 from hormuz.contracts import validate_contract
@@ -248,6 +249,101 @@ class CodingProbeWorkflowTests(unittest.TestCase):
                 self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1", "1"])
                 route = json.loads(self.command("status", "--routing").stdout)["routes"][0]
                 self.assertEqual((route["coding_readiness"], route["automatic_task_types"]), ("unknown", ["summarization"]))
+                self.assertEqual(cloud_requests, [])
+            finally:
+                self.command("disconnect")
+
+    def test_observed_native_profile_can_collect_a_bounded_probe_without_coding_evidence(self):
+        with lifetime.provider("CLOUD_MUST_STAY_UNUSED") as (cloud, cloud_requests):
+            value, engine, _, request_file, plan, plan_file = self.prepare(cloud)
+            frozen = Path(__file__).resolve().parents[1] / "docs/campaigns/local-repair-20261016-v4"
+            profile = json.loads((frozen / "request-profile.json").read_text())
+            profile.pop("input_instructions")
+            native_input = json.loads((frozen / "first-input.json").read_text())
+            # Codex assigns fresh native message IDs on every launch. Text,
+            # order, permissions and tool schema are identical to preflight.
+            canonical_input = [{key: value for key, value in item.items() if key != "id"}
+                               for item in native_input]
+            for index, item in enumerate(native_input):
+                item["id"] = "msg_33333333-3333-4333-8333-" + f"{index:012d}"
+            request = {**profile, "input": native_input, "model": "local-code", "max_output_tokens": 8}
+            value["model_routes"]["local-code"]["capabilities"].append("streaming")
+            value["route_admission"]["local_routes"]["local-code"]["max_request_bytes"] = 65536
+            plan["schema_version"] = 2
+            plan["max_requests"] = 3
+            plan["subject"].update(capabilities=value["model_routes"]["local-code"]["capabilities"],
+                max_request_bytes=65536, request_profile_sha256=digest({**profile, "input_instructions": [
+                    {"position": 0, "message": canonical_input[0]}]}))
+            plan["first_input_sha256"] = digest(canonical_input)
+            self.path.write_text(json.dumps(value))
+            plan_file.write_text(json.dumps(plan))
+            request_file.write_text(json.dumps(request))
+            try:
+                self.command("connect")
+                legacy = json.loads(json.dumps(plan))
+                legacy["schema_version"] = 1
+                legacy["subject"]["request_profile_sha256"] = digest(json.loads((frozen / "request-profile.json").read_text()))
+                legacy["first_input_sha256"] = digest(json.loads((frozen / "first-input.json").read_text()))
+                plan_file.write_text(json.dumps(legacy))
+                old = json.loads(self.command("qualify", "--plan", str(plan_file)).stdout)
+                self.assertEqual(self.client("request-file", str(request_file), "bound-conversation",
+                    "qualification-probe", old["probe_id"])["status"], 403)
+                self.command("qualify", "--revoke")
+                plan_file.write_text(json.dumps(plan))
+                armed = json.loads(self.command("qualify", "--plan", str(plan_file)).stdout)
+                original_id = request["input"][0]["id"]
+                request["input"][0]["id"] = "unrecognized-message-id"
+                request_file.write_text(json.dumps(request))
+                self.assertEqual(self.client("request-file", str(request_file), "bound-conversation",
+                    "qualification-probe", armed["probe_id"])["status"], 403)
+                request["input"][0]["id"] = original_id
+                request_file.write_text(json.dumps(request))
+                result = self.client("request-file", str(request_file), "bound-conversation",
+                                     "qualification-probe", armed["probe_id"])
+                self.assertEqual(result["status"], 200, result)
+                first_call_index = len(request["input"])
+                request["input"] += result["body"]["output"] + [
+                    {"type": "function_call_output", "call_id": "fixture-call", "output": "Tool result"}]
+                request_file.write_text(json.dumps(request))
+                second = self.client("request-file", str(request_file), "bound-conversation",
+                                     "qualification-probe", armed["probe_id"])
+                self.assertEqual(second["status"], 200, second)
+                self.assertEqual(second["headers"]["x-hormuz-work-id"], result["headers"]["x-hormuz-work-id"])
+                request["input"][first_call_index]["call_id"] = "changed-provider-call"
+                request["input"] += second["body"]["output"]
+                request_file.write_text(json.dumps(request))
+                self.assertEqual(self.client("request-file", str(request_file), "bound-conversation",
+                    "qualification-probe", armed["probe_id"])["status"], 403)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1", "1"])
+                self.assertEqual(cloud_requests, [])
+            finally:
+                self.command("disconnect")
+
+    def test_v2_outcome_evidence_ignores_only_native_message_identity(self):
+        with lifetime.provider("CLOUD_MUST_STAY_UNUSED") as (cloud, cloud_requests):
+            value, engine, request, request_file, _, _ = self.prepare(cloud)
+            message = {"type": "message", "role": "developer", "content": "Pinned agent instructions."}
+            controls = {"store": False, "service_tier": "default", "tools": request["tools"],
+                        "input_instructions": [{"position": 0, "message": message}]}
+            evidence = lifetime.ConnectedClientLifetimeWorkflowTests.coding_evidence(self, value)
+            evidence["schema_version"] = 2
+            evidence["plan"]["subject"].update(client_version="0.160.0", request_profile_sha256=digest(controls))
+            evidence["plan_sha256"] = digest(evidence["plan"])
+            value["route_admission"]["local_routes"]["local-code"]["coding_evidence"] = evidence
+            self.path.write_text(json.dumps(value))
+            request["input"] = [{**message, "id": "msg_33333333-3333-4333-8333-333333333333"}, *request["input"]]
+            request_file.write_text(json.dumps(request))
+            try:
+                self.command("connect")
+                first = self.client("request-file", str(request_file))
+                self.assertEqual(first["status"], 200, first)
+                request["input"][0]["id"] = "msg_44444444-4444-4444-8444-444444444444"
+                request_file.write_text(json.dumps(request))
+                self.assertEqual(self.client("request-file", str(request_file))["status"], 200)
+                request["input"][0]["content"] = "Changed instructions."
+                request_file.write_text(json.dumps(request))
+                self.assertEqual(self.client("request-file", str(request_file))["status"], 503)
+                self.assertEqual((engine / "inference-count").read_text().splitlines(), ["1", "1"])
                 self.assertEqual(cloud_requests, [])
             finally:
                 self.command("disconnect")

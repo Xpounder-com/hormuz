@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import json
 import platform
 
-from ._contract_schemas.local_coding import FAMILIES, canonical_digest
+from ._contract_schemas.local_coding import FAMILIES, canonical_digest, coding_input
 from . import client_versions
 
 
@@ -18,6 +18,7 @@ class CodingQualification:
     passed: int = 0
     request_profile_sha256: str | None = None
     client_version: str | None = None
+    profile_schema_version: int = 1
 
     def describe(self):
         if self.evidence_id is None:
@@ -28,13 +29,13 @@ class CodingQualification:
                 "evaluated": self.evaluated, "passed": self.passed}
 
 
-def request_profile_digest(value):
+def request_profile_digest(value, *, schema_version=1):
     # Task text and turn identifiers vary; instructions, tools and generation
     # controls do not inherit qualification from another experiment.
     fields = {"instructions", "tools", "tool_choice", "temperature", "top_p", "reasoning", "include",
               "text", "parallel_tool_calls", "store", "service_tier", "stream"}
     profile = {key: item for key, item in value.items() if key in fields}
-    items = value.get("input", [])
+    items = coding_input(value.get("input", []), schema_version=schema_version)
     if not isinstance(items, list):
         items = [items]
     instructions = [{"position": index, "message": item} for index, item in enumerate(items)
@@ -95,4 +96,5 @@ def assess_coding_evidence(serialized, config, route, qualification):
     readiness = ("subject_mismatch" if not matched else "failed" if failed else
                  "qualified" if covered and passed == len(plan["cases"]) else "incomplete")
     return CodingQualification(readiness, evidence["evidence_id"], evidence["plan_sha256"], canonical_digest(evidence),
-                               len(plan["cases"]), len(outcomes), passed, subject["request_profile_sha256"], subject["client_version"])
+                               len(plan["cases"]), len(outcomes), passed, subject["request_profile_sha256"], subject["client_version"],
+                               evidence["schema_version"])

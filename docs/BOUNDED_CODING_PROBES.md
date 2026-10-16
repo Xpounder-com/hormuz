@@ -15,10 +15,11 @@ The [qualification criteria](LOCAL_CODING_QUALIFICATION.md) still govern readine
    model. Freeze source/wheel, client/runtime/model/hardware, instructions and
    inline tools, full case inventory, task/checker hashes and bounds. Preserve
    earlier failures; keep independent checks outside the writable model project.
-3. Create a content-free version-1 plan (see the [fixture](../tests/fixtures/coding-probe-plan-v1.json)).
+3. Create a content-free version-2 plan (see the [fixture](../tests/fixtures/coding-probe-plan-v2.json)).
    `plan_sha256` refers to the full preregistered campaign plan;
    `first_input_sha256` binds the actual first Responses `input`. Canonical JSON
-   uses sorted keys, compact separators, UTF-8 and finite numbers.
+   uses sorted keys, compact separators, UTF-8 and finite numbers. Version 2
+   first applies the client-message ID normalization below.
 4. Explicitly authorize that case over the existing private owner channel:
 
    ```sh
@@ -79,7 +80,7 @@ held-out tasks. One development repair cannot qualify a model.
 
 ## Contracts, migration and rollback
 
-The manifest discovers these new version-1 contracts:
+The manifest discovers these contracts (status/error/relay remain version 1):
 
 | Contract | Meaning |
 | --- | --- |
@@ -103,6 +104,22 @@ outcomes. There is no durable campaign ledger, journal migration or config flag.
 Invalid plans do not change settings. Older binaries lack this command. Revoke
 and disconnect before downgrade; retain all evidence. Downgrading past the coding
 evidence gate has the separate risks documented in the qualification guide.
+
+Version-2 probe plans and coding-evidence receipts ignore only the top-level
+`id` of an inline `type: "message"` with role `system`, `developer` or `user`
+when that ID has the exact lowercase `msg_<8-4-4-4-12 hex UUID>` shape emitted by
+native Codex. Normalize before hashing the first input, continuation prefixes,
+and profile `input_instructions`. Content, roles, positions, other fields and
+all assistant/function/provider IDs stay bound. Unknown ID formats stay bound.
+This permits a zero-inference preflight and fresh launch to describe the same
+semantic instructions without treating provider continuation state as fungible.
+
+Version 1 remains readable with its original exact-message digest, including
+IDs. A v1 record is never silently promoted; freeze a new v2 campaign/profile
+before inference. Version-1 fixtures are retained. Older binaries reject v2
+plans/receipts; revoke and disconnect before downgrade and remove v2 records.
+Do not rewrite failed v1 observations as v2 successes. The v4 integration denial
+and zero-inference diagnosis are retained in the campaign records.
 
 Controlled external workflow fixtures establish isolation, affinity, no replay
 and finite lifecycle behavior, not native coding quality.
