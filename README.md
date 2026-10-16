@@ -148,6 +148,8 @@ no automatic fallback to billable API usage. Unknown costs remain unknown.
 
 Inspect [cloud authorization readiness](docs/CLOUD_READINESS.md) before changing
 settings with `hormuz --config hormuz.json client cloud-readiness codex`.
+The opt-in [native Codex catalog](docs/NATIVE_CODEX_CATALOG.md) adds separate
+gateway/native authentication for discovery; native inference remains blocked.
 The read-only receipt distinguishes declared API access from the two separately
 authorized ChatGPT plan paths and reports their remaining blockers.
 

@@ -393,7 +393,8 @@ def prepare(handler, identity, decision, request_value, *, client, protocol, out
         policy_runtime=handler.server.policy_engine.policy_runtime)
     # The same policy snapshot gates every destination before local selection.
     for alias, route in handler.server.config.model_routes.items():
-        if route.protocol != protocol:
+        if (route.protocol != protocol
+                or handler.server.config.upstreams[route.destination_id].authentication == "codex_chatgpt"):
             continue
         candidate = engine.evaluate(
             identity=identity, client=client, protocol=protocol,

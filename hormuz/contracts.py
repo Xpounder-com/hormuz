@@ -502,6 +502,8 @@ def contract_manifest() -> dict[str, object]:
             _manifest_schema(ROUTE_ADMISSION_SCHEMA_ID, ROUTE_ADMISSION_SCHEMA_VERSION, "response", "hormuz",
                 ["schema_id", "schema_version", "mode", "task_classifier", "local_capacity", "routes"]),
             _manifest_schema("hormuz.cloud-readiness", 1, "cli-output", "hormuz", sorted(CLOUD_READINESS_FIELDS)),
+            _manifest_schema(NATIVE_CATALOG_SCHEMA_ID, NATIVE_CATALOG_SCHEMA_VERSION, "http-headers", "hormuz",
+                ["X-Hormuz-Contract"]),
             _manifest_schema(CONNECTED_CLIENT_STATUS_SCHEMA_ID, CONNECTED_CLIENT_STATUS_SCHEMA_VERSION,
                 "cli-output", "hormuz", ["schema_id", "schema_version", "phase", "router", "scope",
                 "configuration", "retained_settings", "generation", "client_version", "owned_settings"]),

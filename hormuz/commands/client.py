@@ -152,6 +152,7 @@ def _client_config(
                 alias
                 for alias, route in config.model_routes.items()
                 if route.protocol == "openai" and (allowed_models is None or alias in allowed_models)
+                and config.upstreams[route.destination_id].authentication != "codex_chatgpt"
             ),
             None,
         )

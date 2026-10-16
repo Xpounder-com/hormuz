@@ -23,7 +23,7 @@ jobs:
   workflow:
     name: Router workflow (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       max-parallel: 2

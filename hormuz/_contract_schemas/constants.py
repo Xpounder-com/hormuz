@@ -91,6 +91,8 @@ IDENTITY_SCHEMA_ID = "hormuz.gateway-identity"
 USAGE_SUMMARY_SCHEMA_ID = "hormuz.gateway-usage-summary"
 
 ERROR_SCHEMA_ID = "hormuz.gateway-error"
+NATIVE_CATALOG_SCHEMA_ID = "hormuz.native-codex-catalog"
+NATIVE_CATALOG_SCHEMA_VERSION = 1
 
 ERROR_SCHEMA_VERSION = 3
 
