@@ -10,10 +10,12 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import pwd
 import re
 import secrets
 import selectors
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -153,7 +155,7 @@ def _qualify_client(program):
         if value is not None:
             environment[variable] = value
     process = subprocess.Popen([program, "--version"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                               stdin=subprocess.DEVNULL, env=environment)
+                               stdin=subprocess.DEVNULL, env=environment, start_new_session=True)
     deadline = time.monotonic() + 3
     output = bytearray()
     try:
@@ -174,13 +176,27 @@ def _qualify_client(program):
             raise ConnectedClientError("version_unsupported")
     finally:
         process.stdout.close()
-        if process.poll() is None:
-            process.terminate()
+        # The direct executable can exit while a descendant keeps stdout open.
+        # Only this new session's process group belongs to the version check.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            os.killpg(process.pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            time.sleep(1)
             try:
-                process.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=1)
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        process.wait(timeout=1)
 
 
 def _read(path: Path, *, private=False) -> str | None:
@@ -238,8 +254,12 @@ def _require_unmanaged(home):
     candidates = [home / "requirements.toml", home / "managed_config.toml",
                   Path("/etc/codex/requirements.toml"), Path("/etc/codex/managed_config.toml")]
     if sys.platform == "darwin":
+        try:
+            account = pwd.getpwuid(os.getuid()).pw_name
+        except (KeyError, OSError) as error:
+            raise ConnectedClientError("managed_configuration_unknown") from error
         candidates.extend([Path("/Library/Managed Preferences/com.openai.codex.plist"),
-                           Path("/Library/Managed Preferences") / home.owner() / "com.openai.codex.plist"])
+                           Path("/Library/Managed Preferences") / account / "com.openai.codex.plist"])
     for path in candidates:
         try:
             path.lstat()
@@ -395,6 +415,13 @@ class ConnectedClientLifetime:
             yield
         finally:
             os.close(descriptor)
+
+    def cloud_readiness(self, config_path: Path, *, executable="codex", actor_id=None, surface="cli"):
+        """Inspect the same setup boundary without entering a write transaction."""
+        from .cloud_readiness import inspect_cloud_readiness
+
+        return inspect_cloud_readiness(self.home, config_path, executable=executable,
+                                       actor_id=actor_id, surface=surface)
 
     def _record(self):
         text = _read(self.record_path, private=True)

@@ -6,7 +6,7 @@ import os
 from dataclasses import replace
 from pathlib import Path
 
-from ._config_input import ConfigurationInputError, load_configuration_input
+from ._config_input import ConfigurationInputError, load_configuration_input, parse_configuration_input
 from ._config_identity import (
     build_identity_domain,
     resolve_static_identity_tokens,
@@ -86,12 +86,19 @@ def build_policy_analysis_context(
     )
 
 
+def build_preflight_config(config_type: type[GatewayConfig], path: str | Path, text: str) -> GatewayConfig:
+    """Build one metadata snapshot without resolving any credential source."""
+    return _build_gateway_config(config_type, path, environ=None, resolve_credentials=False,
+                                 configuration_text=text)
+
+
 def _build_gateway_config(
     config_type: type[GatewayConfig],
     path: str | Path,
     *,
     environ: dict[str, str] | None,
     resolve_credentials: bool,
+    configuration_text: str | None = None,
 ) -> GatewayConfig:
     """Construct and validate configuration, optionally resolving credential values."""
 
@@ -99,7 +106,8 @@ def _build_gateway_config(
 
     source_path = Path(path).expanduser().resolve()
     try:
-        raw = load_configuration_input(source_path)
+        raw = (load_configuration_input(source_path) if configuration_text is None
+               else parse_configuration_input(configuration_text.encode("utf-8")))
     except ConfigurationInputError as error:
         raise ConfigError(error.code) from None
     ingress = build_ingress_domain(raw)
