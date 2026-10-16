@@ -256,10 +256,10 @@ class CodingProbeWorkflowTests(unittest.TestCase):
     def test_observed_native_profile_can_collect_a_bounded_probe_without_coding_evidence(self):
         with lifetime.provider("CLOUD_MUST_STAY_UNUSED") as (cloud, cloud_requests):
             value, engine, _, request_file, plan, plan_file = self.prepare(cloud)
-            frozen = Path(__file__).resolve().parents[1] / "docs/campaigns/local-repair-20261016-v4"
-            profile = json.loads((frozen / "request-profile.json").read_text())
+            frozen = json.loads((Path(__file__).parent / "fixtures/codex-probe-request-0.160-v2.json").read_text())
+            profile = json.loads(json.dumps(frozen["profile"]))
             profile.pop("input_instructions")
-            native_input = json.loads((frozen / "first-input.json").read_text())
+            native_input = json.loads(json.dumps(frozen["input"]))
             # Codex assigns fresh native message IDs on every launch. Text,
             # order, permissions and tool schema are identical to preflight.
             canonical_input = [{key: value for key, value in item.items() if key != "id"}
@@ -282,8 +282,8 @@ class CodingProbeWorkflowTests(unittest.TestCase):
                 self.command("connect")
                 legacy = json.loads(json.dumps(plan))
                 legacy["schema_version"] = 1
-                legacy["subject"]["request_profile_sha256"] = digest(json.loads((frozen / "request-profile.json").read_text()))
-                legacy["first_input_sha256"] = digest(json.loads((frozen / "first-input.json").read_text()))
+                legacy["subject"]["request_profile_sha256"] = digest(frozen["profile"])
+                legacy["first_input_sha256"] = digest(json.loads(json.dumps(frozen["input"])))
                 plan_file.write_text(json.dumps(legacy))
                 old = json.loads(self.command("qualify", "--plan", str(plan_file)).stdout)
                 self.assertEqual(self.client("request-file", str(request_file), "bound-conversation",
