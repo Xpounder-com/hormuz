@@ -18,7 +18,8 @@
     "reasoning_summary_parts": ["summary_text"],
     "reasoning_content_parts": ["reasoning_text"],
     "issued_provider_status_preserved": true,
-    "redact_mode_marker_overlap": "deny-before-egress"
+    "redact_mode_marker_overlap": "deny-before-egress",
+    "protected_member_names": "deny-before-egress-in-redact-and-deny-modes"
   },
   "status_fields": [
     "schema_id", "schema_version", "scope", "generation", "enabled", "billing", "cost_status", "cost_usd",

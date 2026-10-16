@@ -207,6 +207,35 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 1))
             self.assertNotIn("NATIVE_CHATGPT_SENTINEL", json.dumps(native_requests[0]["body"]))
 
+    def test_native_protected_member_names_are_denied_without_rewriting_schema_keys(self):
+        token = "NATIVE_CHATGPT_SENTINEL"
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \
+             native_backend({}, response_handler=stream_reply) as native_requests:
+            for mode in ("redact", "deny"):
+                value = self.configuration(local, cloud)
+                value["egress_controls"] = {"secrets": {"mode": mode}}
+                with self.fixture.connected_client(value) as submit:
+                    requests = [{"metadata": {token: "synthetic value"}},
+                        {"metadata": {"prefix-" + token + "-suffix": "synthetic value"}},
+                        {"metadata": {"sk-proj-" + "a" * 24: "synthetic value"}},
+                        {"tools": [{"type": "function", "name": "fixture_tool", "parameters": {
+                            "type": "object", "properties": {token: {"type": "string"}}}}]}]
+                    for request in requests:
+                        with self.subTest(mode=mode, request=request):
+                            before = len(native_requests)
+                            denied = self.native(submit, request=request)
+                            self.assertEqual(denied["status"], 403, denied)
+                            self.assertEqual(denied["body"]["error"]["code"], "hormuz_secret_detected")
+                            self.assertEqual(len(native_requests), before)
+                    tools = [{"type": "function", "name": "fixture_tool", "parameters": {
+                        "type": "object", "properties": {"safe_schema_name": {"type": "string"}}}}]
+                    accepted = self.native(submit, request={"tools": tools, "metadata": {"safe_name": "safe value"}})
+                    self.assertEqual(accepted["status"], 200, accepted)
+                    self.assertEqual(native_requests[-1]["body"]["tools"], tools)
+                    self.assertEqual(native_requests[-1]["body"]["metadata"], {"safe_name": "safe value"})
+            self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
+
     def test_native_redaction_cannot_expand_a_request_beyond_its_egress_byte_limit(self):
         with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
              workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests), \

@@ -53,8 +53,11 @@ request-level local-only blocks before egress. Shared output caps and compacted
 context/secret redaction or denial apply before transport. Native credentials
 are also protected during request redaction. Redact mode rejects native grants
 contained in the replacement marker, since replacing such a grant could retain
-the credential. Requests with monthly token/dollar
-limits or per-actor dollar caps fail closed: this path cannot safely reserve
+the credential. Redact and deny modes also reject protected JSON member names,
+including metadata and schema keys, rather than changing their meaning by
+renaming them. The same guard applies during reconstructed compact inspection.
+Requests with monthly token/dollar limits or per-actor dollar caps fail closed:
+this path cannot safely reserve
 those limits from unknown native plan charges. Explicit work ID/scope headers
 also fail. Optional work selection, caching, shadow routing, content history and
 API configured-rate accounting do not claim native coverage.

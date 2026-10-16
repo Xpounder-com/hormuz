@@ -14,7 +14,7 @@ from .native_responses_transport import NativeClientCanceled, stream_native_resp
 from .compaction_contract import CONTEXT_FORMAT_HEADER
 from .compaction_enforcement import inspect_request
 from .compaction_formats import MAX_REQUEST_BYTES as MAX_COMPACT_INSPECTION_BYTES
-from .redaction import REPLACEMENT, RedactionLimitError, SecretRedactor
+from .redaction import REPLACEMENT, RedactionKeyError, RedactionLimitError, SecretRedactor
 from .native_codex_stream import NativeCodexStream
 from .native_codex_state import NativeConversationBusy
 from .native_codex_tools import validate_native_tools
@@ -147,13 +147,16 @@ def _dispatch_native_responses(handler, credentials):
         context = single_header(handler.headers, CONTEXT_FORMAT_HEADER, required=False, limit=128)
         redactor = SecretRedactor(server.config.secret_controls,
             server.secret_redactor.protected_values + (("native_chatgpt_credential", authorization[7:]),),
-            max_output_bytes=25 * 1024 * 1024)
+            max_output_bytes=25 * 1024 * 1024, reject_protected_keys=True)
         redaction = inspect_request(value, protocol="openai", redactor=redactor,
             mode=decision.snapshot.secret_mode, declared_version=context,
             inspection_max_bytes=MAX_COMPACT_INSPECTION_BYTES).redaction
         body = json.dumps(redaction.value, separators=(",", ":"), allow_nan=False).encode()
         if len(body) > min(server.config.max_request_bytes, 25 * 1024 * 1024):
             raise RedactionLimitError("Selected native egress exceeds its byte limit")
+    except RedactionKeyError:
+        handler._send_error("hormuz_secret_detected", "Native request member names contain protected secret material.", 403)
+        return
     except RedactionLimitError:
         handler._send_error("request_too_large", "Native request exceeds its egress byte limit.", 413)
         return

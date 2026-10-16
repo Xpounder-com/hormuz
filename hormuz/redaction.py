@@ -20,6 +20,10 @@ class RedactionLimitError(RedactionError):
     pass
 
 
+class RedactionKeyError(RedactionError):
+    pass
+
+
 class _RedactionBudget:
     """Track the exact ASCII JSON size before allocating replacements."""
 
@@ -79,10 +83,12 @@ class SecretRedactor:
         protected_values: tuple[tuple[str, str], ...] = (),
         *,
         max_output_bytes: int | None = None,
+        reject_protected_keys: bool = False,
     ):
         self.controls = controls
         self.protected_values = controls.custom_secret_values + protected_values
         self.max_output_bytes = max_output_bytes
+        self.reject_protected_keys = reject_protected_keys
 
     def inspect(self, value: dict[str, Any], *, mode: str | None = None,
                 max_output_bytes: int | None = None) -> RedactionResult:
@@ -127,6 +133,11 @@ class SecretRedactor:
             total = 0
             rules: set[str] = set()
             for key, item in value.items():
+                if self.reject_protected_keys and (any(secret in key for _, secret in self.protected_values)
+                        or self.controls.builtins and any(pattern.search(key) for _, pattern in _BUILTIN_PATTERNS)):
+                    # Member names carry schema meaning; do not rewrite them or
+                    # allocate a replacement merely to detect protected content.
+                    raise RedactionKeyError("Request member name contains protected secret material")
                 transformed, count, item_rules = self._transform(item, depth=depth + 1, budget=budget)
                 transformed_object[key] = transformed
                 total += count

@@ -20,6 +20,8 @@ Reasoning summaries/content share their terminal text-part validation on replay,
 and issued provider item status stays bound to its identity. Redaction refuses
 native grants contained in its replacement marker rather than retaining a
 credential in transformed egress.
+Native inspection also rejects protected member names under redact/deny modes,
+preserving schema semantics without forwarding a credential in a key.
 Tool declarations and selectors likewise remain limited to host-owned
 function/custom tools and their namespaces, without provider-hosted state.
 
