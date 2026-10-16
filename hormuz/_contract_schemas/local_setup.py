@@ -24,7 +24,7 @@ def validate_profile(value, *, extended=False):
             raise ContractValidationError("invalid local setup digest")
     for key, maximum in (("max_request_bytes", 2 * 1024 * 1024 if extended else 65536),
                          ("max_output_tokens", 8192 if extended else 512),
-                         ("upstream_timeout_seconds", 180 if extended else 90), ("startup_timeout_seconds", 60)):
+                         ("upstream_timeout_seconds", 360 if extended else 90), ("startup_timeout_seconds", 60)):
         if type(value[key]) is not int or not 1 <= value[key] <= maximum:
             raise ContractValidationError("invalid local setup limit")
     choices = {

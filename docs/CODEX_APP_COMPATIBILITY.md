@@ -16,13 +16,19 @@ Increasing a byte limit alone would not fit the complete tool catalog in the
 model's 32,768-token context.
 
 `hormuz.local-setup-profile` version 2 permits a 2 MiB serialized request,
-8,192 output tokens and a 180-second request deadline. Managed llama profile
+8,192 output tokens and a 360-second request deadline. Managed llama profile
 version 2 uses the existing 32,768-token context and a positive 1,024-token
 reasoning budget, leaving room for tool calls and answers. Codex effort and
 summary controls remain enabled and reach the model. Native local-model effort
 semantics differ from GPT models. Explicit `effort: none` is still respected.
 Byte admission does not measure tokenizer context; an over-context request
 blocks or fails locally and never enables cloud-model fallback.
+The adapter also sends that positive thinking bound on each provider request,
+capped below a smaller requested output limit. Explicit `effort: none` alone
+uses a zero thinking budget. Callers cannot inject an unrestricted runtime
+budget. This retains reasoning while bounding individual generations; a
+timed-out native experiment remains an unknown attempt and is never silently
+retried.
 
 The opt-in `codex_llama_v1` capability translates Responses features to this
 runtime's inline function interface and reverses tool identities in output:

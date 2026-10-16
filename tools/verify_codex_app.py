@@ -156,7 +156,7 @@ def main():
         if args.capture_wire or args.capture_shapes:
             gateway = json.loads(config.read_text())
             class Capture(BaseHTTPRequestHandler):
-                timeout = 190
+                timeout = gateway['upstream_timeout_seconds'] + 10
                 requests = 0
                 def log_message(self, *_):
                     pass
@@ -175,10 +175,17 @@ def main():
                             'max_output_tokens': value.get('max_output_tokens'), 'reasoning': value.get('reasoning'),
                             'include': value.get('include'), 'tool_types': dict(Counter(tool.get('type') for tool in value.get('tools', []))),
                             'input_types': dict(Counter(item.get('type') for item in value.get('input', []) if isinstance(item, dict))),
+                            'discovered_tools': [
+                                {'namespace': tool.get('name') if tool.get('type') == 'namespace' else None,
+                                 'names': [child.get('name') for child in tool.get('tools', [])]
+                                          if tool.get('type') == 'namespace' else [tool.get('name')]}
+                                for item in value.get('input', []) if isinstance(item, dict) and item.get('type') == 'tool_search_output'
+                                for tool in item.get('tools', [])],
                             'text_format': value.get('text', {}).get('format', {}).get('type'),
                             'metadata_keys': sorted(value.get('client_metadata', {}))}
                         (root / ('request-' + str(Capture.requests) + '-shape.json')).write_text(json.dumps(shape, indent=2))
-                    upstream = http.client.HTTPConnection('127.0.0.1', gateway['listen']['port'], timeout=185)
+                    upstream = http.client.HTTPConnection('127.0.0.1', gateway['listen']['port'],
+                                                         timeout=gateway['upstream_timeout_seconds'] + 5)
                     try:
                         headers = {key: value for key, value in self.headers.items()
                                    if key.lower() not in {'host', 'connection', 'content-length', 'transfer-encoding'}}

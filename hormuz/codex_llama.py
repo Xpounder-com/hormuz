@@ -36,12 +36,15 @@ class CodexLlamaRequest:
                 for key in PARENT_TAGS):
             raise CodexLlamaError('invalid_parent_metadata')
         reasoning = value.get('reasoning', {})
-        if ('chat_template_kwargs' in value or type(reasoning) is not dict
+        if ('chat_template_kwargs' in value or 'reasoning_budget_tokens' in value or type(reasoning) is not dict
                 or set(reasoning) - {'effort', 'summary'}
                 or reasoning.get('effort', 'medium') not in {'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'}
                 or reasoning.get('summary', 'auto') not in {'auto', 'concise', 'detailed'}):
             raise CodexLlamaError('unsupported_reasoning')
         self.value['chat_template_kwargs'] = {'enable_thinking': reasoning.get('effort') != 'none'}
+        limit = value.get('max_output_tokens', 8192)
+        budget = min(1024, max(1, limit // 2)) if type(limit) is int and limit > 0 else 1024
+        self.value['reasoning_budget_tokens'] = budget if reasoning.get('effort') != 'none' else 0
         tools = value.get('tools', [])
         if type(tools) is not list or len(tools) > 1024:
             raise CodexLlamaError('invalid_tools')
@@ -175,7 +178,7 @@ class CodexLlamaRequest:
         return result
 
     def admission_value(self):
-        result = {key: value for key, value in self.value.items() if key != 'chat_template_kwargs'}
+        result = {key: value for key, value in self.value.items() if key not in {'chat_template_kwargs', 'reasoning_budget_tokens'}}
         if 'reasoning' in result:
             result['reasoning'] = {}
         if isinstance(result.get('client_metadata'), dict):

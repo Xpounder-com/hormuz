@@ -1,7 +1,7 @@
 {
   "schema_id": "hormuz.local-setup-profile",
   "schema_version": 2,
-  "qualification_id": "codex-app0162-llamab11617-qwen3-4b-interactive-review-http-v2",
+  "qualification_id": "codex-app0162-llamab11617-qwen3-4b-interactive-review-360s-v2",
   "client_version": "0.162.0-alpha.17.2",
   "system": "Darwin",
   "machine": "arm64",
@@ -23,6 +23,6 @@
   "task_types": [
     "interactive"
   ],
-  "upstream_timeout_seconds": 180,
+  "upstream_timeout_seconds": 360,
   "startup_timeout_seconds": 60
 }

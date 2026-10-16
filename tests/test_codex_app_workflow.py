@@ -71,6 +71,7 @@ class CodexAppWorkflowTests(unittest.TestCase):
             self.assertEqual(requests[0]['body']['text'], request['text'])
             self.assertEqual(requests[0]['body']['reasoning']['effort'], 'low')
             self.assertIs(requests[1]['body']['chat_template_kwargs']['enable_thinking'], False)
+            self.assertEqual(requests[1]['body']['reasoning_budget_tokens'], 0)
             self.assertEqual(cloud_requests, [])
 
     def test_large_namespaced_tool_request_and_response_keep_the_client_tool_identity(self):
@@ -183,6 +184,9 @@ class CodexAppWorkflowTests(unittest.TestCase):
                 injected = submit(request={'input': 'Summarize the fixture.', 'reasoning': {'effort': 'max'},
                                            'chat_template_kwargs': {'enable_thinking': False}})
                 self.assertEqual(injected['status'], 503)
+                unbounded = submit(request={'input': 'Summarize the fixture.', 'reasoning': {'effort': 'max'},
+                                            'reasoning_budget_tokens': -1})
+                self.assertEqual(unbounded['status'], 503)
             self.assertEqual((requests, cloud_requests), ([], []))
 
     def test_invalid_provider_tool_identity_settles_as_unknown_without_exposing_a_call(self):
@@ -278,6 +282,8 @@ class CodexAppWorkflowTests(unittest.TestCase):
             self.assertEqual(len(requests), 2)
             self.assertTrue(all(request['body']['chat_template_kwargs']['enable_thinking'] for request in requests))
             self.assertEqual(requests[0]['body']['reasoning']['effort'], 'max')
+            self.assertGreater(requests[0]['body']['reasoning_budget_tokens'], 0)
+            self.assertLess(requests[0]['body']['reasoning_budget_tokens'], requests[0]['body']['max_output_tokens'])
             self.assertEqual(requests[1]['body']['input'][0]['content'][0]['text'], 'I checked the fixture.')
             self.assertEqual(cloud_requests, [])
 
