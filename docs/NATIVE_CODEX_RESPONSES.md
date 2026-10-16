@@ -48,7 +48,10 @@ API configured-rate accounting do not claim native coverage.
 
 SSE bytes are delivered incrementally through bounded private pipes. A complete,
 strict `response.completed` data event with matching model, ID and completed
-status establishes success after delivery. A bare event name, `[DONE]`, EOF,
+status establishes success after delivery. Response envelopes and response-ID
+fields must keep the same identity throughout the stream. Terminal output items
+must be typed objects; assistant messages require typed text/refusal content.
+A bare event name, `[DONE]`, EOF,
 invalid/mismatched JSON or truncation cannot establish success. Native failed,
 incomplete and error events retain their payload and establish failure. A valid
 terminal ends the owned transport without waiting for provider EOF. Partial

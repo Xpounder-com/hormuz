@@ -291,6 +291,73 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
             self.assertEqual(native_requests[1]["body"]["input"], replay)
 
+    def test_stream_identity_must_match_before_success_or_tool_affinity_is_granted(self):
+        call = {"id": "bound-tool", "type": "function_call", "call_id": "bound-call",
+                "name": "fixture_tool", "arguments": "{}"}
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for case in ("matching", "created_id", "created_model", "delta_id"):
+                with self.subTest(case=case):
+                    created = {"type": "response.created", "response": {
+                        "id": "different-response" if case == "created_id" else "bound-response",
+                        "model": "different-model" if case == "created_model" else "fixture-cloud-model",
+                        "status": "in_progress", "output": []}}
+                    delta = {"type": "response.output_text.delta", "response_id":
+                             "different-response" if case == "delta_id" else "bound-response", "delta": "part"}
+                    events = [created, delta, completed("bound-response", output=[call])]
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        data = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                            self.native(submit)
+                            status = submit(method="GET", path="/v1/router/native-codex", absolute_path=True,
+                                headers={"X-Gateway-Key": NATIVE_HEADERS["X-Gateway-Key"]})["body"]
+                            expected = (1, 0) if case == "matching" else (0, 1)
+                            self.assertEqual((status["succeeded"], status["outcome_unknown"]), expected, status)
+                            replay = self.native(submit, request={"input": [call,
+                                {"type": "function_call_output", "call_id": "bound-call", "output": "result"}]})
+                            self.assertEqual(replay["status"], 200 if case == "matching" else 403, replay)
+                        self.assertEqual(len(native_requests), 2 if case == "matching" else 1)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_malformed_terminal_output_cannot_grant_success_or_tool_affinity(self):
+        call = {"id": "untrusted-tool", "type": "function_call", "call_id": "untrusted-call",
+                "name": "fixture_tool", "arguments": "{}"}
+        invalid_items = [17, {}, {"type": "message", "role": "user", "content": []},
+            {"type": "message", "role": "assistant", "content": 17},
+            {"type": "message", "role": "assistant", "content": [17]},
+            {"type": "message", "role": "assistant", "content": [{"type": []}]},
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text"}]}]
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for item in invalid_items:
+                with self.subTest(item=item):
+                    data = ("data: " + json.dumps(completed(output=[call, item])) + "\n\n").encode()
+                    def reply(handler, _value, _number):
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        with self.fixture.connected_client(self.configuration(local, cloud)) as submit:
+                            self.native(submit)
+                            status = submit(method="GET", path="/v1/router/native-codex", absolute_path=True,
+                                headers={"X-Gateway-Key": NATIVE_HEADERS["X-Gateway-Key"]})["body"]
+                            self.assertEqual((status["succeeded"], status["outcome_unknown"]), (0, 1), status)
+                            replay = self.native(submit, request={"input": [call,
+                                {"type": "function_call_output", "call_id": "untrusted-call", "output": "result"}]})
+                            self.assertEqual(replay["status"], 403, replay)
+                        self.assertEqual(len(native_requests), 1)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_unsupported_or_ambiguous_native_request_envelopes_never_reach_a_provider(self):
         cases = [
             {"request": {"stream": False}}, {"request": {"store": True}}, {"request": {"background": True}},
