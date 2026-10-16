@@ -39,7 +39,10 @@ results. Unqualified computer/MCP/shell/reference or other provider-state types
 are blocked before egress; a role-less object cannot masquerade as fresh text.
 Message content and tool-result lists use a closed text profile: strings or
 typed `input_text`, plus assistant `output_text`/`refusal` replay with validated
-passive citations. Active file/image/media inputs and nested provider reference
+passive citations. Fresh assistant input uses strings or `input_text` without
+provider IDs/status. Provider output text/refusal requires a typed `message`,
+its issued ID/status and retained successful affinity; removing those fields
+cannot turn output into fresh input. Active file/image/media inputs and nested provider reference
 parts remain unsupported until separately qualified. Literal text mentioning
 file IDs is still text; passive citation metadata does not fetch a file.
 Tool declarations accept host-owned `function`/`custom` tools, optionally grouped
@@ -109,6 +112,9 @@ paired with their complete issued call. Individually known IDs and blobs cannot
 be recombined, and non-null issued state cannot be stripped on replay.
 Provider-issued assistant messages require their original validated status;
 reasoning and other provider item statuses likewise retain their issued value.
+Message phase accepts only `commentary`/`final_answer` or null/omission. An issued
+assistant phase stays bound to replay, with null/omission equivalent. Fresh
+assistant text may also carry a valid phase without gaining provider identity.
 Replayed reasoning summaries and optional content use the same typed
 `summary_text`/`reasoning_text` profile as terminal output, so nested active
 references cannot gain authority from a retained reasoning ID or opaque value.
@@ -167,6 +173,14 @@ unknown-usage count. Billing is always `chatgpt_plan`, monetary cost is always
 unknown/null, and native attempts are excluded from generic API cost estimates.
 These observations reset on restart and are not a durable usage or billing
 ledger. A successful response does not establish subscription entitlement.
+
+Native redactions append `+redacted` to the selected policy-action header.
+Completed secret inspections also contribute content-free events to the shared
+security totals, including deny-mode events before egress. A protected-member
+guard records one observed guard detection and denial when it stops inspection.
+These existing security events contain identity/policy/route metadata, counts
+and detector names; no native authorization, account header, matched value or
+payload is recorded. They do not create priced API usage or native cost entries.
 
 The additive `hormuz.native-codex-responses;v=1` header and
 `hormuz.native-codex-status;v=1` response contracts appear in `contract manifest`.

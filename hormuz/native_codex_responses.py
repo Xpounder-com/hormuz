@@ -103,6 +103,13 @@ def handle_native_responses(handler):
         server.native_catalog_slots.release()
 
 
+def _record_native_secret(server, identity, decision, *, action, count, rules):
+    if count:
+        server.store.record_secret_event(identity=identity, client="codex", protocol="openai",
+            requested_model=decision.requested_model, policy_version=decision.policy_version,
+            action=action, detection_count=count, rules=rules)
+
+
 def _dispatch_native_responses(handler, credentials):
     server = handler.server
     identity, authorization, account = credentials.identity, credentials.authorization, credentials.account
@@ -151,10 +158,15 @@ def _dispatch_native_responses(handler, credentials):
         redaction = inspect_request(value, protocol="openai", redactor=redactor,
             mode=decision.snapshot.secret_mode, declared_version=context,
             inspection_max_bytes=MAX_COMPACT_INSPECTION_BYTES).redaction
+        _record_native_secret(server, identity, decision,
+            action="denied" if decision.snapshot.secret_mode == "deny" else "redacted",
+            count=redaction.count, rules=redaction.rules)
         body = json.dumps(redaction.value, separators=(",", ":"), allow_nan=False).encode()
         if len(body) > min(server.config.max_request_bytes, 25 * 1024 * 1024):
             raise RedactionLimitError("Selected native egress exceeds its byte limit")
     except RedactionKeyError:
+        _record_native_secret(server, identity, decision, action="denied", count=1,
+            rules=("native_protected_member",))
         handler._send_error("hormuz_secret_detected", "Native request member names contain protected secret material.", 403)
         return
     except RedactionLimitError:
@@ -201,7 +213,7 @@ def _dispatch_native_responses(handler, credentials):
                 "Connection": "close", "X-Hormuz-Contract": f"{NATIVE_RESPONSES_SCHEMA_ID};v=1",
                 "X-Hormuz-Billing": "chatgpt_plan", "X-Hormuz-Cost-Status": "unknown",
                 "X-Hormuz-Redactions": str(redaction.count),
-                "X-Hormuz-Policy-Decision": decision.action,
+                "X-Hormuz-Policy-Decision": decision.action + ("+redacted" if redaction.count else ""),
                 "X-Hormuz-Requested-Model": model,
                 "X-Hormuz-Routed-Model": route.upstream_model,
                 **server.destinations.response_headers(route)}.items():
