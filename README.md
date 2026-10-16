@@ -53,6 +53,13 @@ The [first candidate setup](docs/CANDIDATE_SETUP.md) pins an experimental
 Codex 0.160.0/macOS arm64 combination and a sixteen-case preparation campaign.
 It has no new native coding outcomes or admission receipt.
 
+[Personal model scorecards](docs/MODEL_SCORECARDS.md) benchmark your own examples
+through the local router. Create a suite with reference checks and targets, compare
+quality, latency, streaming first-token timing, throughput, usage and configured
+cost estimates, then explicitly enable deterministic routing among already
+qualified local models. Scorecards stay local and preserve failed or unknown
+measurements. They do not grant coding qualification.
+
 ## Install in your agent
 
 The plugin manifests and shared CLI implementation are included in this source.

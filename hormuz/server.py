@@ -553,11 +553,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 # thread or trigger a second response after partial output.
                 pass
             return
-        if path == "/v1/router/state":
+        if path in {"/v1/router/state", "/v1/router/benchmark-state"}:
             identity = self._authenticate()
             if identity is not None:
                 try:
-                    self._send_contract_json(HTTPStatus.OK, "hormuz.route-admission", self.server.route_admission.status(identity, self.server.policy_engine))
+                    if path == "/v1/router/benchmark-state":
+                        schema = "hormuz.benchmark-runtime"
+                        value = self.server.route_admission.benchmark_status(identity, self.server.policy_engine)
+                    else:
+                        schema = "hormuz.route-admission"
+                        value = self.server.route_admission.status(identity, self.server.policy_engine)
+                    self._send_contract_json(HTTPStatus.OK, schema, value)
                 except _STORAGE_FAILURES as error:
                     self._send_storage_failure(None, error)
             return
@@ -971,6 +977,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if is_responses_create and not destination.upstream.allow_response_storage:
             redaction = replace(redaction, value={**redaction.value, "store": False})
         body = self._provider_body(redaction.value, decision.route)
+        if self.headers.get("X-Hormuz-Benchmark") == "1":
+            self._benchmark_forwarded = (len(body), redaction.value.get("max_output_tokens"))
         egress = self.server._egress_configuration
         upstream_key = destination.credential
         if destination.upstream.authentication != "none" and not upstream_key:
@@ -1031,6 +1039,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             failover_decision = None
         if (
             not account_usage
+            or self.headers.get("X-Hormuz-Benchmark") == "1"
             or self._request_precludes_failover(protocol, redaction.value)
         ):
             failover_decision = None

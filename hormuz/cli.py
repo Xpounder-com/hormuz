@@ -14,6 +14,7 @@ from . import __version__
 from .commands import client as client_commands
 from .commands import history as history_commands
 from .commands import capabilities as capability_commands
+from .commands import benchmark as benchmark_commands
 from .config import ConfigError, GatewayConfig
 from .contracts import contract_manifest
 from .evidence import EvidenceStorageError
@@ -34,6 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     client_commands.add_client_commands(commands)
     history_commands.add_history_commands(commands)
     capability_commands.add_commands(commands)
+    benchmark_commands.add_commands(commands)
     return parser
 
 
@@ -50,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "history":
         return history_commands.run(args)
+    if args.command == "benchmark":
+        return benchmark_commands.run(args)
     if args.command in {"request", "policy", "model", "usage"}:
         return capability_commands.run(args)
     if args.command == "auth":
