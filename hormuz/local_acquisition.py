@@ -1,6 +1,5 @@
 """Private digest-bound asset generations feeding the existing shared setup owner."""
 from contextlib import contextmanager
-import fcntl
 import hashlib
 import json
 import os
@@ -14,7 +13,7 @@ import time
 from .asset_download import AssetDownloader, AssetDownloadError
 from .compaction_formats import strict_json_loads
 from .contracts import ContractValidationError, validate_contract
-from .managed_llama import ManagedLlamaError, ManagedLlamaProfile, extract_runtime
+from .managed_llama import ManagedLlamaError, ManagedLlamaProfile, checksum_timeout, extract_runtime
 
 
 DEFAULT_CATALOG = "local-acquisition-codex-0147-llama-b11617-qwen3-4b-v1.json"
@@ -100,10 +99,18 @@ def _catalog(path):
 
 
 @contextmanager
-def _lock(directory, digest):
-    descriptor = os.open(directory / (".acquire-" + digest + ".lock"),
-                         os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+def _lock(directory, digest, *, create):
+    import fcntl
+
     try:
+        try:
+            descriptor = os.open(directory / (".acquire-" + digest + ".lock"),
+                (os.O_CREAT if create else 0) | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        except FileNotFoundError:
+            if create:
+                raise
+            yield None
+            return
         with os.fdopen(descriptor, "r+b") as stream:
             _file_info(stream, 0)
             try:
@@ -176,11 +183,13 @@ def _download(downloader, artifact, path):
 def _matches(stream, artifact):
     stream.seek(0)
     digest = hashlib.sha256()
-    deadline = time.monotonic() + 60
+    deadline = time.monotonic() + checksum_timeout(artifact["size_bytes"])
     total = 0
     while chunk := stream.read(1024**2):
         total += len(chunk)
-        if time.monotonic() > deadline or total > artifact["size_bytes"]:
+        if time.monotonic() > deadline:
+            raise LocalAcquisitionError("download_unavailable")
+        if total > artifact["size_bytes"]:
             return False
         digest.update(chunk)
     return total == artifact["size_bytes"] and digest.hexdigest() == artifact["sha256"]
@@ -200,6 +209,8 @@ def _remaining_bytes(catalog, generation):
 
 
 def acquire_local(args):
+    if os.name != "posix":
+        raise LocalAcquisitionError("platform_unsupported")
     catalog = _catalog(args.catalog)
     if (catalog["profile"]["system"], catalog["profile"]["machine"]) != (platform.system(), platform.machine()):
         raise LocalAcquisitionError("platform_unsupported")
@@ -214,14 +225,28 @@ def acquire_local(args):
     generation = directory / digest
     if directory.exists() or directory.is_symlink():
         _directory(directory)
-    if generation.exists() or generation.is_symlink():
+    generation_present = generation.exists() or generation.is_symlink()
+    if args.download:
+        _directory(directory, create=True)
+    with _lock(directory, digest, create=args.download and not generation_present) as lock_descriptor:
+        if lock_descriptor is None and generation_present:
+            raise LocalAcquisitionError("installation_changed")
+        return _acquire_locked(args, catalog, directory, digest, lock_descriptor)
+
+
+def _acquire_locked(args, catalog, directory, digest, lock_descriptor):
+    generation = directory / digest
+    # A lockless preview is a missing-state snapshot; a writer may start after
+    # the lock lookup, so do not inspect any generation that then appears.
+    inspect = lock_descriptor is not None
+    if inspect and (generation.exists() or generation.is_symlink()):
         _directory(generation)
         _layout(generation)
         if _safe_file(generation / "catalog.json", 65536) != _bytes(catalog):
             raise LocalAcquisitionError("installation_changed")
     installed = generation / "receipt.json"
     setup = []
-    if installed.exists() or installed.is_symlink():
+    if inspect and (installed.exists() or installed.is_symlink()):
         previous = strict_json_loads(_safe_file(installed, 65536))
         if type(previous) is not dict:
             raise LocalAcquisitionError("installation_changed")
@@ -229,7 +254,8 @@ def acquire_local(args):
         if previous.get("catalog_sha256") != digest or previous.get("directory") != str(generation):
             raise LocalAcquisitionError("installation_changed")
         setup = _verify(catalog, generation)
-    total = _remaining_bytes(catalog, generation)
+    total = (_remaining_bytes(catalog, generation) if inspect else
+             sum(catalog[role]["size_bytes"] for role in ("runtime", "model")))
     available = shutil.disk_usage(directory if directory.exists() else directory.parent).free
     required = 0 if setup else total + EXPANSION_LIMIT + 64 * 1024**2
     result = {"schema_id": "hormuz.local-acquisition", "schema_version": 1,
@@ -250,29 +276,25 @@ def acquire_local(args):
         raise LocalAcquisitionError("offline_missing")
     if available < required:
         raise LocalAcquisitionError("space_unavailable")
-    _directory(directory, create=True)
-    with _lock(directory, digest) as lock_descriptor:
-        if not generation.exists():
-            generation.mkdir(mode=0o700)
-            _write_new(generation / "catalog.json", _bytes(catalog))
-        _directory(generation)
-        _layout(generation)
-        if _safe_file(generation / "catalog.json", 65536) != _bytes(catalog):
-            raise LocalAcquisitionError("installation_changed")
-        downloader = AssetDownloader(args.timeout_seconds, lock_descriptor=lock_descriptor)
-        try:
-            for role, name in (("runtime", "runtime.tar.gz"), ("model", "model.gguf")):
-                _download(downloader, catalog[role], generation / name)
-        finally:
-            downloader.close()
-        runtime = generation / "runtime"
-        if not runtime.exists() and not runtime.is_symlink():
-            extract_runtime(generation / "runtime.tar.gz", runtime)
-        qualification = generation / "qualification.json"
-        if not qualification.exists() and not qualification.is_symlink():
-            _write_new(qualification, _bytes(catalog["profile"]))
-        result.update(operation="acquire", state="ready", setup_arguments=_verify(catalog, generation))
-        validate_contract(result)
-        if not installed.exists() and not installed.is_symlink():
-            _write_new(installed, _bytes(result))
-        return result
+    if not generation.exists():
+        generation.mkdir(mode=0o700)
+        _write_new(generation / "catalog.json", _bytes(catalog))
+    downloader = AssetDownloader(args.timeout_seconds, lock_descriptor=lock_descriptor)
+    try:
+        for role, name in (("runtime", "runtime.tar.gz"), ("model", "model.gguf")):
+            _download(downloader, catalog[role], generation / name)
+    finally:
+        downloader.close()
+    runtime = generation / "runtime"
+    if not runtime.exists() and not runtime.is_symlink():
+        extract_runtime(generation / "runtime.tar.gz", runtime)
+    qualification = generation / "qualification.json"
+    if not qualification.exists() and not qualification.is_symlink():
+        _write_new(qualification, _bytes(catalog["profile"]))
+    result.update(operation="acquire", state="ready", setup_arguments=_verify(catalog, generation))
+    result["storage"] = {"download_bytes": 0, "required_free_bytes": 0,
+                         "available_bytes": shutil.disk_usage(directory).free}
+    validate_contract(result)
+    if not installed.exists() and not installed.is_symlink():
+        _write_new(installed, _bytes(result))
+    return result
