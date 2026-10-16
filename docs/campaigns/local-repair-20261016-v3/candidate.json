@@ -1,0 +1,127 @@
+{
+  "document_version": 1,
+  "candidate_id": "codex0160-macos262-m5-32g-llamab11617-qwen3-4b-v1",
+  "decision_issue": 541,
+  "status": "experimental_unqualified",
+  "host": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "os_version": "26.2",
+    "os_build": "25C56",
+    "hardware_identifier": "Mac17,2",
+    "chip": "Apple M5",
+    "memory_bytes": 34359738368,
+    "scope": "one observed host; not a minimum hardware or other-OS support claim"
+  },
+  "client": {
+    "surface": "terminal_cli",
+    "version": "0.160.0",
+    "native_sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b",
+    "native_bytes": 241555024,
+    "npm_entrypoint_sha256": "61b0194f3bb6534439c8d26a3ed57d0805f84b884588b761795323eeb92fcf70",
+    "target": "aarch64-apple-darwin",
+    "agents": 1,
+    "reasoning_effort": "none",
+    "reasoning_summary": "none",
+    "native_acceptance": "pending",
+    "desktop_bundled_engine": "unqualified"
+  },
+  "hormuz": {
+    "version": "2.0.0a2",
+    "source_commit": "c7f8e1d7b7992c308d679db1e886f10e68bc4fb0",
+    "wheel_sha256": "ba93e6464315a0d94c2f50e80bfe1e3790e603f6de95b66ae077c897bd12f7eb",
+    "wheel_bytes": 456261,
+    "connection": "shared CLI/plugin connected-client owner"
+  },
+  "runtime": {
+    "name": "llama.cpp",
+    "build": "b11617",
+    "profile": "managed-llama.v1",
+    "archive_sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9",
+    "archive_bytes": 12157609,
+    "executable_sha256": "1bf5602a2be50097c44282a6ecc63234d94ee8f96d39fd45fed6eff4e74b6b41",
+    "executable_bytes": 49984,
+    "host": "127.0.0.1",
+    "offline": true,
+    "context_tokens": 32768,
+    "parallel_slots": 1,
+    "threads": 4,
+    "threads_batch": 4,
+    "http_threads": 2,
+    "sampling": {
+      "temperature": 0.7,
+      "top_p": 0.8,
+      "top_k": 20,
+      "min_p": 0.0,
+      "presence_penalty": 1.5,
+      "explicit_seed": null
+    }
+  },
+  "model": {
+    "alias": "Qwen3-4B-Q4_K_M",
+    "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "bytes": 2497280256,
+    "assets": "existing verified files only",
+    "coding_readiness": "unknown",
+    "historical_qualification": "zero normally completed passing held-out repairs"
+  },
+  "request_envelope": {
+    "protocol": "openai",
+    "endpoint": "/v1/responses",
+    "capabilities": [
+      "responses",
+      "text",
+      "streaming",
+      "tools",
+      "codex_http",
+      "codex_http_0160"
+    ],
+    "task_type": "code_change",
+    "max_request_bytes": 65536,
+    "max_output_tokens": 512,
+    "upstream_timeout_seconds": 90,
+    "startup_timeout_seconds": 60,
+    "tools": "bounded inline function tools",
+    "request_profile_binding": "exact observed instructions/tools/generation controls must be frozen before inference"
+  },
+  "policy": {
+    "routing_mode": "local_only",
+    "cloud_model_requests": "forbidden",
+    "cloud_helper_requests": "forbidden",
+    "automatic_coding": "requires complete passing local-repair.v1 receipt",
+    "code_review": "unsupported",
+    "affinity": "retain pinned destination and reject incompatible continuation",
+    "shadow_advice": "observational only; routing_effect none; no promotion",
+    "ambiguous_replay": "forbidden",
+    "quality_retries": 0,
+    "paid_api_fallback": false,
+    "local_operation_requires_cloud_account": false
+  },
+  "cloud_target": {
+    "path": "native_codex_gateway",
+    "credentials": "client-owned native ChatGPT credential plus separate Hormuz gateway key",
+    "backend": "https://chatgpt.com/backend-api/codex",
+    "status": "catalog foundation only at source baseline; inference/host/account permission remain unqualified",
+    "release_gate": "documented managed-provider activation and actual eligible account authorization; no personal-account assumption"
+  },
+  "plugin_target": {
+    "kind": "skills_only",
+    "setup": "same shared connection owner as CLI",
+    "activation": "user-invoked; installation alone does not activate routing",
+    "actual_host_qualification": "pending; candidate CLI evidence does not qualify desktop"
+  },
+  "scope": {
+    "native_episodes_performed": 0,
+    "downloads_performed": 0,
+    "new_ui_or_agent_loop": false,
+    "mcp_required": false,
+    "epic_scope_reduction": false,
+    "remaining_gates": [
+      "local coding outcomes",
+      "actual plugin host",
+      "native cloud inference and eligible account",
+      "verified asset acquisition and distribution",
+      "epic closure contract"
+    ]
+  }
+}

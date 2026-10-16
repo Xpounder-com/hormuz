@@ -1,0 +1,349 @@
+{
+  "document_version": 1,
+  "campaign_id": "local-repair-20261016-v3",
+  "stage": "offline_preparation_only",
+  "candidate": "codex0160-macos262-m5-32g-llamab11617-qwen3-4b-v1",
+  "manifest_sha256": "28fe59271a4d3d398febf38027625ea8a2904bceec262cf2c87a6e3a183b445b",
+  "corpus_sha256": "fe4660d4840dfcb256157caf79ac7be1d4a022c433dfccdbf911b186d8ffe2b3",
+  "checker_python": "3.12.12",
+  "baseline_assertion_failures": 16,
+  "independent_reference_passes": 16,
+  "native_episodes_performed": 0,
+  "coding_receipt_emitted": false,
+  "automatic_admission_effect": "none",
+  "setup_preview": {
+    "passed": true,
+    "runtime_wheel_sha256": "ba93e6464315a0d94c2f50e80bfe1e3790e603f6de95b66ae077c897bd12f7eb",
+    "client_native_sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b",
+    "client_version": "0.160.0",
+    "gateway_configuration_created": false,
+    "client_configuration_unchanged": true,
+    "native_episodes_performed": 0,
+    "model_inference_performed": false,
+    "preview_fields": [
+      "configuration",
+      "connection",
+      "schema_id",
+      "schema_version"
+    ]
+  },
+  "checker_observations": [
+    {
+      "case_id": "dev-clamp",
+      "partition": "development",
+      "family": "arithmetic",
+      "checks_sha256": "da25b64603054b72230db061e79855ed9d3f32b6f31076fa5755ac4eec12b942",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "0bced2631d0df7eefb67c74b4ebd8cddedef7cc575f610a9598c4a306b09eca7",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "dev-strip-prefix",
+      "partition": "development",
+      "family": "text",
+      "checks_sha256": "fcc045ad3370cc3e2e8306bb1f1ec3105eda3b1566d72877c25269822dd8ff8d",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "a8876f0a99d9c6b177e89a1f71f402c17978c9e8b6cdf633fb7d186f6c1503dc",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "dev-rotate-left",
+      "partition": "development",
+      "family": "collections",
+      "checks_sha256": "3f83dd8fc94581f1d72a6952b1e0f0c4988e90c0ec9001383c325de44954d3b1",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "66e91871f3f7d22ca8185a4f7536a08675b26b443b03b556a552cb3332cf4c6d",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "dev-positive-counter",
+      "partition": "development",
+      "family": "validation_state",
+      "checks_sha256": "65e4123e7ba3a0b5e8f953213a1078d170b9fe997e27372efe413719edabb6d3",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "f0786d84357b48827ab24283b6c5a7fc68d0ba72222a490bd68e9f259f0ee318",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-multiple-ceiling",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "checks_sha256": "a3643dd9fc2eca367ae579b85284903e62707d69a264690543cde9e5155c8760",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "18f5f207c213bfde15ea6d4bf4c222f564925512d24b9caf812987ced4dd7ed7",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-interval-overlap",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "checks_sha256": "8a9545aca63711b6fc2b70fa3979cafd93cb2fa55ae4544435686c17dda13e4c",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "72db351aa1c41c8829af1704c797094da74413b8513bb5006cf57dffe9a98b1b",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-weighted-total",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "checks_sha256": "5f54061d8494623cfdea1d3808b51f5eb691cc92288537036b6299c10c662c2a",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "0bf191dd62de5d64714fcc9ae1b19dbf066995c1d7a4ebda10c02160375a8d71",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-collapse-spaces",
+      "partition": "held_out",
+      "family": "text",
+      "checks_sha256": "a70703d17b39e15636f9797bbdeb043b4947e68f9b8be0b5f6c1d39ce8f16e9b",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "93e50bb4f28578a14e488e48c7326a6f94be110f26044a50234c7bd88efda120",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-ensure-suffix",
+      "partition": "held_out",
+      "family": "text",
+      "checks_sha256": "39d32b39a756a75fad20278fa0c62bc7096afc10be505b6f4dc6c6d022159f54",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "360e29bfa79e2eedb8e0bfed190cd361f00e87077d9ad6afbff25f71a35a54a9",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-split-once",
+      "partition": "held_out",
+      "family": "text",
+      "checks_sha256": "447c6f805fb5ed9f894344f05087b86f7e7f3889d5b7369eb61c881f7911ca77",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "398eae3e74776c272f24df741083b4ed6b4a891c8af055592c5ca93712db5c5c",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-adjacent-pairs",
+      "partition": "held_out",
+      "family": "collections",
+      "checks_sha256": "769a007fb3db526e91d59b8e6fa02c3f9bc204cb1640216ebf187867720a529a",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "fb5156a7d203dd30353fc111a69e9e1d73dc3ce0241337f1bd978cb60cf860d5",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-merge-counts",
+      "partition": "held_out",
+      "family": "collections",
+      "checks_sha256": "57f63fd96c98400f91f1371214cd2fdc3fe89df147518b39e714b703e4eea1f4",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "2a6e145e17085546ca8586affbee9c94365cd880b284ce3cda46f5b783c4b6ad",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-last-index",
+      "partition": "held_out",
+      "family": "collections",
+      "checks_sha256": "c7330bbe9e5f68022d98878e8ca92a23b70755f9d8f6693ac5bbaf264f4e117e",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "3f004dc350feab2347daf42fd92f33c21c59d5a1a53993d6f6f7ea035c1c2ab4",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-strict-percentage",
+      "partition": "held_out",
+      "family": "validation_state",
+      "checks_sha256": "b9310a3cfdb5a2d071f4605848e8334a554f3a4431ec3c675047bf1b1923e8b6",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "350d9733832397834a77116b26de3f43e0226d5319d8a3c4662a77d9da75e892",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-stack-lifo",
+      "partition": "held_out",
+      "family": "validation_state",
+      "checks_sha256": "51cd2d37e07a53bbfc566dce551f5c823643a87dce5f43f6303ac7a62177a3b8",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "49335b3d268a35c676768a1eaf65b0d095a722e739173652f97176bbdc4d0717",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    },
+    {
+      "case_id": "held-wallet-withdraw",
+      "partition": "held_out",
+      "family": "validation_state",
+      "checks_sha256": "785d1c2926c5783de0bf678b0a8635e73562736a89543a6f99ffd2287b47d1cb",
+      "baseline": {
+        "exit_code": 1,
+        "assertion_failure": true,
+        "termination": "completed"
+      },
+      "reference_sha256": "13e240ac1a1cf04c560f3611628c5061253a988423fc7db95f3efca964af78ff",
+      "reference": {
+        "exit_code": 0,
+        "assertion_failure": false,
+        "termination": "completed"
+      },
+      "checker_unchanged": true,
+      "prepared": true
+    }
+  ],
+  "integration_defects_demonstrated": 0,
+  "environment_diagnosis": {
+    "observation": "sandbox denied temporary loopback bind with PermissionError errno1; candidate profile validated",
+    "resolution": "identical isolated dry-run passed with temporary loopback allocation permitted",
+    "production_change": false
+  },
+  "remaining_native_start_conditions": [
+    "capture and review exact native request profile without model inference",
+    "freeze complete subject and plan_sha256 before first model call",
+    "review a bounded outcome-collection path that preserves local-only and affinity",
+    "retain default unqualified-coding denial; never fabricate a receipt or use configured mode to bypass it"
+  ],
+  "preparation_script_sha256": "36b157c6a59e6d7c054d62f3a0f6231f0d02a7333f294d4f65c3863c393ef555"
+}
