@@ -122,14 +122,17 @@ required measurement fails that target. The objective is `quality`, `latency`,
 or `cost`; cost selection requires an observed cost estimate.
 Replies containing provider errors and streams with explicit failure events
 remain failed evidence, even when they also announce completion.
+The response's stream mode must match the requested profile before it can earn
+scores or satisfy targets.
 
 Requests run sequentially over one reusable HTTP client: at most eight selected
 models, 32 cases, three repeats, and 128 planned requests. Each output is bounded
 to 4096 tokens and each response to 256 KiB. There are no retries, redirects,
 speculative calls or background benchmark workers. Default deadlines are 30
 seconds per request and 300 seconds per run; maximums are 120 and 1800 seconds.
-Capacity rejection stops further requests, as do three consecutive request
-failures or local socket exhaustion. Remaining cases are recorded as unstarted.
+HTTP 429/529 stops further requests regardless of the error body's format, as do
+three consecutive request failures or local socket exhaustion. Remaining cases
+are recorded as unstarted. Error bodies are closed without parsing.
 Before model work, one authenticated `/v1/router/benchmark-state` snapshot checks
 the actor, full route fingerprint and explicit-price fields against the running
 router. The fingerprint includes the endpoint, revision and capabilities. Every

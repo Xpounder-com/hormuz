@@ -445,9 +445,16 @@ class RouterClient:
                 "X-Hormuz-Benchmark": "1"})
             response = connection.getresponse()
             headers_ms = (time.monotonic() - started) * 1000
+            if response.status != 200:
+                connection.close()
+                return (response.status, dict((k.lower(), v) for k, v in response.getheaders()), {},
+                        {"latency_ms": (time.monotonic() - started) * 1000,
+                         "headers_ms": headers_ms, "ttft_ms": None, "first_byte_ms": None})
             first_byte_ms, ttft_ms = None, None
             data, pending = bytearray(), bytearray()
-            streaming = response.getheader("Content-Type", "").split(";", 1)[0] == "text/event-stream"
+            streaming = response.getheader("Content-Type", "").split(";", 1)[0].strip().lower() == "text/event-stream"
+            if payload is not None and streaming != payload.get("stream", False):
+                raise BenchmarkError("benchmark_response_mode_mismatch")
             terminal, event_lines = None, []
             while True:
                 block = response.read1(min(65536, MAX_BYTES + 1 - len(data)))

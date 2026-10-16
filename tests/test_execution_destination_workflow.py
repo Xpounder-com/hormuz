@@ -76,7 +76,7 @@ finally:
 
 
 @contextmanager
-def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None, text_deltas=(), trailing_events=()):
+def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None, text_deltas=(), trailing_events=(), response_body=None):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -112,6 +112,8 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                           *({"type": "response.output_text.delta", "delta": delta} for delta in text_deltas),
                           {"type": "response.completed", "response": result}, *trailing_events]
                 data = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
+            if response_body is not None:
+                data = response_body
             if backpressure_first and len(received) == 1:
                 data = b"data: " + b" " * (16 * 1024 * 1024) + b"\n\n" + data
             self.send_response(status(body) if callable(status) else status)

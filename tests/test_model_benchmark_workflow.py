@@ -153,6 +153,20 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                           [row["error"] for row in model["observations"]], len(received)),
                          (2, 0, 0, 1, ["http_503", "http_503"], 2))
 
+    def test_capacity_rejection_stops_probes_even_without_a_valid_json_body(self):
+        for status in (429, 529):
+            for body in (b"", b"capacity unavailable"):
+                with self.subTest(status=status, body=body):
+                    self.report_path = self.root / f"capacity-{status}-{len(body)}.json"
+                    with workflow.provider("7", status=status, response_body=body) as (endpoint, received):
+                        value = self.fixture.admission_configuration(endpoint, endpoint)
+                        with self.fixture.connected_client(value):
+                            report = self.run_benchmark("local-code")
+                    observations = report["models"][0]["observations"]
+                    self.assertEqual(([row["error"] for row in observations], len(received),
+                                      observations[1]["latency_ms"]),
+                                     ([f"http_{status}", "capacity_rejection_not_run"], 1, None))
+
     def test_custom_metrics_check_structured_answers_and_tool_arguments_against_references(self):
         answer = '{"count":7}'
         tool = {"type": "function_call", "call_id": "call-one", "name": "lookup_count",
@@ -216,6 +230,24 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         for observation in report["models"][0]["observations"]:
             self.assertLessEqual(observation["first_byte_ms"], observation["ttft_ms"])
             self.assertLessEqual(observation["ttft_ms"], observation["latency_ms"])
+
+    def test_a_different_response_stream_mode_cannot_certify_the_requested_profile(self):
+        for requested_stream, received_stream in ((True, False), (False, True)):
+            with self.subTest(requested_stream=requested_stream):
+                self.report_path = self.root / f"stream-mode-{requested_stream}.json"
+                suite = self.suite()
+                suite["cases"] = suite["cases"][:1]
+                suite["cases"][0]["request"]["stream"] = requested_stream
+                suite["targets"]["min_cases"] = 1
+                with workflow.provider("7", event_stream=received_stream, text_deltas=("7",)) as (endpoint, received):
+                    value = self.fixture.admission_configuration(endpoint, endpoint)
+                    value["model_routes"]["local-code"]["capabilities"].append("streaming")
+                    with self.fixture.connected_client(value):
+                        report = self.run_benchmark("local-code", suite=suite)
+                model = report["models"][0]
+                self.assertEqual((model["metrics"]["completed"], model["workloads"][0]["target_met"],
+                                  model["observations"][0]["error"], received[0]["body"]["stream"]),
+                                 (0, False, "benchmark_response_mode_mismatch", requested_stream))
 
     def test_native_coding_tasks_are_rejected_before_direct_model_benchmarking(self):
         with workflow.provider("7") as (endpoint, received):
