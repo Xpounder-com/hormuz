@@ -8,6 +8,7 @@ same decoders to preserve secret inspection across compact representations.
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -58,12 +59,20 @@ def canonical_json(value: object) -> str:
     )
 
 
+def finite_json_float(text: str) -> float:
+    number = float(text)
+    if not math.isfinite(number):
+        raise ValueError("nonfinite JSON number")
+    return number
+
+
 def strict_json_loads(text: str) -> object:
     try:
         value = json.loads(
             text,
             object_pairs_hook=_unique_object,
             parse_constant=_reject_constant,
+            parse_float=finite_json_float,
         )
     except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, ValueError) as error:
         raise CompactionFormatError("invalid_json") from error

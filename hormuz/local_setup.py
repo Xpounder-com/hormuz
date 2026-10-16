@@ -161,6 +161,8 @@ def _configuration(path, profile, managed, credential_env, listen_port, *, crede
         "ai_work": {"enabled": True, "database": str(state / "work.sqlite3"),
                     "tool_capable_aliases": [profile["model"]] if "tools" in profile["capabilities"] else []},
     }
+    if profile["schema_version"] == 2:
+        value["route_admission"]["local_routes"][profile["model"]]["coding_evidence"] = profile["coding_evidence"]
     if shadow_router:
         value["shadow_router"] = {"schema_version": 1, "mode": "shadow", "model": profile["model"],
                                   "local_model": profile["model"]}

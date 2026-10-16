@@ -39,6 +39,8 @@ def add_client_commands(
         lifecycle = client_subparsers.add_parser(command, help="Manage persistent Codex CLI connection")
         lifecycle.add_argument("client", choices=["codex"])
         lifecycle.add_argument("--client-home", help="Isolated Codex home (default CODEX_HOME or ~/.codex)")
+        if command == "status":
+            lifecycle.add_argument("--routing", action="store_true", help="Show live policy-filtered qualification and admission readiness")
         if command == "diagnose":
             lifecycle.add_argument("--executable", help="Optional target executable for a bounded version check")
             lifecycle.add_argument("--project", help="Project working directory to inspect (default current directory)")
@@ -237,7 +239,7 @@ def run_lifetime(args: argparse.Namespace) -> int:
             from ..plugin_diagnostics import diagnose
             result = diagnose(lifetime, Path(args.config), args.executable, args.project, args.launch_arg)
         elif args.client_command == "status":
-            result = lifetime.status()
+            result = lifetime.status(routing=args.routing)
         else:
             result = lifetime.disconnect(generation=args.generation)
         print(json.dumps(result, sort_keys=True))

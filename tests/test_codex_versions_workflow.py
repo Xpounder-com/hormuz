@@ -58,7 +58,7 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
              destination.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, cloud_requests):
             value = fixture.admission_configuration(local, cloud, mode='local_only')
             value['model_routes']['local-code']['capabilities'] = ['responses', 'text', 'streaming', 'tools', 'codex_http_0160']
-            value['route_admission']['local_routes']['local-code']['task_types'] = ['code_review']
+            value['route_admission']['local_routes']['local-code']['task_types'] = ['summarization']
             request = json.loads((Path(__file__).parent / 'fixtures/codex-http-request-0.160.json').read_text())
             with fixture.connected_client(value) as submit:
                 routed = submit(request=request)
@@ -96,7 +96,7 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
              destination.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, cloud_requests):
             value = fixture.admission_configuration(local, cloud, mode='local_only')
             value['model_routes']['local-code']['capabilities'] = ['responses', 'text', 'streaming', 'tools', 'codex_http_0160']
-            value['route_admission']['local_routes']['local-code']['task_types'] = ['code_review']
+            value['route_admission']['local_routes']['local-code']['task_types'] = ['summarization']
             with fixture.connected_client(value) as submit:
                 routed = submit(request=request)
                 self.assertEqual(routed['status'], 200, routed)
@@ -187,7 +187,7 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
              destination.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, cloud_requests):
             value = fixture.admission_configuration(local, cloud)
             value['model_routes']['local-code']['capabilities'].extend(['streaming', 'tools', 'codex_http_0160'])
-            value['route_admission']['local_routes']['local-code']['task_types'] = ['code_review']
+            value['route_admission']['local_routes']['local-code']['task_types'] = ['summarization']
             variants = [
                 {**request, 'reasoning': {'summary': 'auto'}},
                 {**request, 'tools': [{'type': 'namespace', 'name': 'multi_agent_v1', 'tools': []}]},

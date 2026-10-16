@@ -21,6 +21,7 @@ import unittest
 from unittest.mock import patch
 
 from hormuz.config import GatewayConfig
+from hormuz.contracts import validate_contract
 from hormuz.server import GatewayServer, serve_in_thread
 
 
@@ -342,6 +343,24 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
             "task_types": ["summarization"]}}}
         return value
 
+    def test_healthy_operator_declared_coding_route_is_not_automatically_qualified(self):
+        with provider("LOCAL_DESTINATION") as (local, local_requests), \
+             provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
+            value = self.admission_configuration(local, cloud)
+            value["route_admission"]["local_routes"]["local-code"]["task_types"] = ["code_change", "code_review", "summarization"]
+            with self.connected_client(value) as submit:
+                self.assertEqual(submit(request={"input": "Summarize this fixture."})["status"], 200)
+                result = submit(request={"input": "Fix the arithmetic function in this Python code."})
+                self.assertEqual((result["status"], result["body"].get("error", {}).get("code")),
+                                 (503, "hormuz_route_local_route_unavailable"))
+                state = submit(method="GET", path="/router/state")["body"]
+                self.assertEqual(state["schema_version"], 2)
+                route = state["routes"][0]
+                self.assertEqual((route["coding_readiness"], route["automatic_task_types"]),
+                                 ("unknown", ["summarization"]))
+                self.assertEqual((route["evidence_basis"], route["readiness"]), ("operator_declared", "ready"))
+            self.assertEqual((len(local_requests), cloud_requests), (1, []))
+
     def test_local_only_admits_local_execution_without_ai_work_accounting(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \
              provider("CLOUD_DESTINATION") as (cloud, cloud_requests):
@@ -562,9 +581,11 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                 before = submit(method="GET", path="/router/state")
                 self.assertEqual(before["status"], 200, before)
                 self.assertEqual((before["body"]["schema_id"], before["body"]["schema_version"], before["body"]["mode"]),
-                                 ("hormuz.route-admission", 1, "local_only"))
+                                 ("hormuz.route-admission", 2, "local_only"))
                 route = before["body"]["routes"][0]
-                frozen = json.loads((Path(__file__).parent / "fixtures/execution_destination/router-state-v1.json").read_text())
+                frozen = json.loads((Path(__file__).parent / "fixtures/execution_destination/router-state-v2.json").read_text())
+                validate_contract(json.loads((Path(__file__).parent / "fixtures/execution_destination/router-state-v1.json").read_text()))
+                validate_contract(before["body"])
                 normalized = json.loads(json.dumps(before["body"]))
                 self.assertRegex(normalized["routes"][0]["generation"], r"^[0-9a-f]{64}$")
                 normalized["routes"][0]["generation"] = "LIVE_DESTINATION_GENERATION"

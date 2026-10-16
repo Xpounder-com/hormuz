@@ -370,20 +370,35 @@ def _setting(text, key, value):
 
 
 def _control(record, command):
+    from ._config_input import MAX_CONFIGURATION_BYTES
+
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.settimeout(1)
     try:
         connection.connect(record["control"])
         connection.sendall(json.dumps({"generation": record["generation"], "command": command}).encode() + b"\n")
+        # Routing metadata is derived from the bounded configuration. Reserve
+        # room for JSON escaping and per-route summaries; ordinary control
+        # replies retain their existing small bound.
+        limit = 8 * MAX_CONFIGURATION_BYTES if command == "routing" else 32768
         with connection.makefile("rb") as stream:
-            data = stream.readline(4097)
-        if len(data) > 4096:
+            data = stream.readline(limit + 1)
+        if len(data) > limit:
             raise ValueError()
         value = json.loads(data)
-        if not isinstance(value, dict) or value.get("generation") != record["generation"] or value.get("router") not in {"ready", "stopping", "unavailable"}:
+        if not isinstance(value, dict) or value.get("generation") != record["generation"]:
+            raise ValueError()
+        if command == "routing":
+            admission = value.get("admission")
+            if (not isinstance(admission, dict) or admission.get("schema_id") != "hormuz.route-admission"
+                    or admission.get("schema_version") != 2):
+                raise ValueError()
+            validate_contract(admission)
+            return admission
+        if value.get("router") not in {"ready", "stopping", "unavailable"}:
             raise ValueError()
         return value["router"]
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, RecursionError):
         return "unavailable"
     finally:
         connection.close()
@@ -480,9 +495,19 @@ class ConnectedClientLifetime:
                 "retained_settings": record.get("retained_settings", []),
                 **({"local_runtime": {"ownership": "owned", "state": router}} if managed else {})}, managed)
 
-    def status(self):
+    def status(self, *, routing=False):
         with self._transaction():
-            return self._status(self._record())
+            record = self._record()
+            if not routing:
+                return self._status(record)
+            if record is None or record["phase"] != "connected":
+                raise ConnectedClientError("router_unavailable")
+            if self._configuration_state(record) != "installed":
+                raise ConnectedClientError("configuration_changed")
+            admission = _control(record, "routing")
+            if not isinstance(admission, dict):
+                raise ConnectedClientError("router_unavailable")
+            return admission
 
     def diagnosis_context(self, config_path: Path):
         """Bind diagnostic configuration facts to the owned generation."""

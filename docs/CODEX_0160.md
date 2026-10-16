@@ -81,10 +81,14 @@ digests. Their provenance and historical quality limitations remain in the
 [0.147.0 qualification](qualifications/codex-0147-llama-b11617-qwen3-4b.md).
 Matching files are reused without model downloads or cloud credentials.
 
-The opt-in [native verifier](../tools/verify_codex_0160.py) creates a private
-disposable client home, previews and applies setup, executes one supplied-script
-task with the existing 0.160.0 binary, inspects public attempts/status, then
-disconnects and verifies restoration plus listener shutdown:
+The opt-in [native verifier](../tools/verify_codex_0160.py) predates the
+[coding-outcome admission gate](LOCAL_CODING_QUALIFICATION.md). It creates a
+private disposable client home and installs the default version-1 profile,
+which has no coding evidence, then requests unsupported automatic code review.
+With the outcome gate enabled, the command below is **blocked qualification**:
+the router denies before model inference, the verifier records `passed: false`
+and exits 2, then disconnects and checks restoration plus listener shutdown.
+It currently cannot repeat the historical positive tool-loop result:
 
 ```sh
 python tools/verify_codex_0160.py --codex /absolute/current/codex \
@@ -99,7 +103,8 @@ The native process has a 120-second deadline and zero transport retries. One
 local model is loaded by the shared lifetime owner. The driver prints only the
 result/evidence path; generated caller credentials stay outside output.
 
-Observed on macOS arm64: Codex 0.160.0 completed a real `exec_command` running
+Historically observed on macOS arm64 before the coding-outcome gate: Codex
+0.160.0 completed a real `exec_command` running
 the supplied Python script, received `ROUTING_OK`, and completed its turn. Two
 model requests settled successfully in one public work record; the second
 used session affinity. There were zero retries/failovers, valid catalog
@@ -112,6 +117,10 @@ The read-only native shell emitted macOS temporary-cache warnings, while the
 script exited 0. No sandbox, firewall or kernel settings were weakened. This
 single supplied-script case does not establish autonomous repair, general
 coding accuracy, another platform or subscription eligibility.
+Repeating a positive native transport/tool-loop check requires a separately
+reviewed noncoding diagnostic envelope and an updated verifier. The historical
+run does not qualify this model under `local-repair.v1` or justify admitting
+automatic code review.
 
 Pinned primary sources:
 

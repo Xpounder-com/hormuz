@@ -192,6 +192,11 @@ for native evidence, model-catalog compatibility and rollback.
 
 Run the status command for the same client home. Report `phase`, `router`,
 `configuration`, `retained_settings` names and content-free error/action codes.
+For coding readiness, check `client status --help` for `--routing`, then run
+`hormuz client status codex --client-home /path/to/codex-home --routing`.
+Report its `coding_readiness` and `automatic_task_types` separately from engine
+health. The bundled experiment has unknown coding readiness and blocks automatic
+coding. For reviewed outcome receipts, read [coding qualification](../../../docs/LOCAL_CODING_QUALIFICATION.md).
 Keep router readiness separate from model readiness and task completion. A
 local-only admission rejection is a blocked request, not permission to change
 privacy mode. Follow the CLI's recovery action; never delete its journal,

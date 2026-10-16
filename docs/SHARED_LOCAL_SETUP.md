@@ -81,8 +81,16 @@ in an operator-selected document, equivalent to configuring a local
 qualification manually. It is not a new certificate or a way to infer task
 quality from filenames. Use existing evidence and independently trusted
 digests; agents must preserve the declared capabilities and limits. The
-[synthetic fixture](../tests/fixtures/local-setup-profile-v1.json) documents
+[version-2 synthetic fixture](../tests/fixtures/local-setup-profile-v2.json) documents
 the exact input shape; it does not identify a real runtime or model.
+
+Version-1 profiles retain unknown coding readiness. To install reviewed coding
+outcomes, explicitly select a version-2 profile with `--qualification`; the
+[bundled version-2 example](../hormuz/local-setup-codex-0147-llama-b11617-qwen3-4b-v2.json)
+has empty `coding_evidence` and therefore also remains unqualified. A healthy
+engine and matching artifacts do not grant coding admission. See the
+[coding qualification contract](LOCAL_CODING_QUALIFICATION.md) for the outcome
+gate, status, trust limits and migration rules.
 
 ## Creation, reuse and recovery
 

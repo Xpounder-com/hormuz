@@ -16,7 +16,10 @@ def _tag(value, key):
 
 
 def validate_profile(value):
-    _exact_keys(value, PROFILE_FIELDS)
+    _exact_keys(value, PROFILE_FIELDS | ({"coding_evidence"} if value["schema_version"] == 2 else set()))
+    if value["schema_version"] == 2 and value["coding_evidence"] is not None:
+        from .local_coding import validate_evidence
+        validate_evidence(value["coding_evidence"])
     for key in ("qualification_id", "client_version", "system", "machine", "model"):
         _tag(value, key)
     for key in ("runtime_sha256", "model_sha256"):
