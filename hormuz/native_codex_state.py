@@ -63,9 +63,18 @@ def continuation_tags(items):
             raise ValueError("native_item_invalid")
         if message:
             validate_text_content(item["content"], assistant=item["role"] == "assistant")
+            content = item["content"]
+            assistant_output = item["role"] == "assistant" and ("id" in item or "status" in item
+                or type(content) is list and any(part["type"] in {"output_text", "refusal"} for part in content))
+            if assistant_output and (kind != "message" or "id" not in item or type(content) is not list
+                    or any(part["type"] not in {"output_text", "refusal"} for part in content)):
+                raise ValueError("native_assistant_output_invalid")
         if "id" in item and (message and item["role"] in {"user", "developer", "system"}
                 or kind in {"function_call_output", "custom_tool_call_output"}):
             raise ValueError("native_client_item_id_unsupported")
+        phase = item.get("phase") if message else None
+        if phase is not None and (type(phase) is not str or phase not in {"commentary", "final_answer"}):
+            raise ValueError("native_message_phase_invalid")
         status = item.get("status")
         if (status is not None and (type(status) is not str or status not in {"in_progress", "completed", "incomplete"})
                 or message and item["role"] == "assistant" and "id" in item and status is None):
@@ -115,7 +124,7 @@ def continuation_tags(items):
             if (type(item["id"]) is not str or not 1 <= len(item["id"]) <= 256
                     or any(not 33 <= ord(c) <= 126 for c in item["id"])):
                 raise ValueError("native_item_invalid")
-            tags.append(("item", ["message" if message else kind, item["id"], status]))
+            tags.append(("item", ["message" if message else kind, item["id"], status, phase]))
         if len(tags) > 256:
             raise ValueError("native_continuation_oversized")
     return tags
