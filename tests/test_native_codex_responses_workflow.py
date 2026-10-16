@@ -412,6 +412,80 @@ class NativeCodexResponsesWorkflowTests(unittest.TestCase):
             self.assertEqual((len(local_requests), len(cloud_requests), len(native_requests)), (0, 0, 2))
             self.assertEqual(native_requests[1]["body"]["input"], replay)
 
+    def test_redacted_conversation_identifiers_cannot_collapse_distinct_native_owners(self):
+        call = {"id": "secret-thread-tool", "type": "function_call", "call_id": "secret-thread-call",
+                "name": "fixture_tool", "arguments": "{}"}
+        replay = [call, {"type": "function_call_output", "call_id": "secret-thread-call", "output": "result"}]
+        data = ("data: " + json.dumps(completed(output=[call])) + "\n\n").encode()
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for field in ("thread_id", "session_id", "prompt_cache_key"):
+                with self.subTest(field=field):
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        value = self.configuration(local, cloud)
+                        self.fixture.environment.update(THREAD_ALPHA="fixture-thread-alpha", THREAD_BETA="fixture-thread-beta")
+                        value["egress_controls"] = {"secrets": {"custom_secret_envs": ["THREAD_ALPHA", "THREAD_BETA"]}}
+                        def session(identifier):
+                            return {field: identifier} if field == "prompt_cache_key" else {"client_metadata": {field: identifier}}
+                        with self.fixture.connected_client(value) as submit:
+                            self.assertEqual(self.native(submit, request=session("fixture-thread-alpha"))["body"], data.decode())
+                            for changed in ("fixture-thread-beta", "unprotected-different-thread"):
+                                denied = self.native(submit, request={**session(changed), "input": replay})
+                                self.assertEqual(denied["status"], 403, denied)
+                                self.assertEqual(len(native_requests), 1)
+                            accepted = self.native(submit, request={**session("fixture-thread-alpha"), "input": replay})
+                            self.assertEqual(accepted["status"], 200, accepted)
+                            body = native_requests[1]["body"]
+                            sent = body[field] if field == "prompt_cache_key" else body["client_metadata"][field]
+                            self.assertEqual(sent, "[REDACTED:HORMUZ_SECRET]")
+                        self.assertEqual(len(native_requests), 2)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_redaction_cannot_turn_unknown_provider_state_into_an_issued_native_item(self):
+        marker = "[REDACTED:HORMUZ_SECRET]"
+        with workflow.provider("LOCAL_UNUSED") as (local, local_requests), \
+             workflow.provider("PAID_API_UNUSED") as (cloud, cloud_requests):
+            for kind in ("function_call", "custom_tool_call", "reasoning", "compaction"):
+                with self.subTest(kind=kind):
+                    field = "arguments" if kind == "function_call" else "input" if kind == "custom_tool_call" else "encrypted_content"
+                    issued = {"id": "redaction-item", "type": kind, field: marker}
+                    result = []
+                    if kind in {"function_call", "custom_tool_call"}:
+                        issued.update(call_id="redaction-call", name="fixture_tool")
+                        result = [{"type": kind + "_output", "call_id": "redaction-call", "output": "result"}]
+                    elif kind == "reasoning":
+                        issued["summary"] = []
+                    data = ("data: " + json.dumps(completed(output=[issued])) + "\n\n").encode()
+                    def reply(handler, value, number):
+                        if number != 1:
+                            return stream_reply(handler, value, number)
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "text/event-stream")
+                        handler.send_header("Content-Length", str(len(data)))
+                        handler.end_headers()
+                        handler.wfile.write(data)
+                    with native_backend({}, response_handler=reply) as native_requests:
+                        value = self.configuration(local, cloud)
+                        self.fixture.environment["PROVIDER_STATE_SECRET"] = "fixture-state-secret"
+                        value["egress_controls"] = {"secrets": {"custom_secret_envs": ["PROVIDER_STATE_SECRET"]}}
+                        with self.fixture.connected_client(value) as submit:
+                            self.assertEqual(self.native(submit)["body"], data.decode())
+                            denied = self.native(submit, request={"input": [{**issued, field: "fixture-state-secret"}, *result]})
+                            self.assertEqual(denied["status"], 403, denied)
+                            self.assertEqual(len(native_requests), 1)
+                            accepted = self.native(submit, request={"input": [issued, *result]})
+                            self.assertEqual(accepted["status"], 200, accepted)
+                        self.assertEqual(len(native_requests), 2)
+            self.assertEqual((local_requests, cloud_requests), ([], []))
+
     def test_stream_identity_must_match_before_success_or_tool_affinity_is_granted(self):
         call = {"id": "bound-tool", "type": "function_call", "call_id": "bound-call",
                 "name": "fixture_tool", "arguments": "{}"}

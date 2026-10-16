@@ -130,6 +130,14 @@ def _dispatch_native_responses(handler, credentials):
     value = {**value, "model": route.upstream_model}
     if decision.max_output_tokens is not None:
         value["max_output_tokens"] = min(value.get("max_output_tokens", decision.max_output_tokens), decision.max_output_tokens)
+    destination = server.destinations.resolve(route)
+    session_headers = {name: handler.headers.get(name) for name in ("thread-id", "session-id")}
+    # Native conversation ownership is independent of secret representation.
+    binding = server.native_codex_state.binding(credentials, destination, value, session_headers)
+    try:
+        original_permitted = server.native_codex_state.permits(binding, value.get("input"))
+    except ValueError:
+        original_permitted = False
     try:
         context = single_header(handler.headers, CONTEXT_FORMAT_HEADER, required=False, limit=128)
         redactor = SecretRedactor(server.config.secret_controls,
@@ -151,18 +159,15 @@ def _dispatch_native_responses(handler, credentials):
         handler._send_error("hormuz_secret_detected", "The native request contains protected secret material.", 403)
         return
     value = redaction.value
-    destination = server.destinations.resolve(route)
-    session_headers = {name: handler.headers.get(name) for name in ("thread-id", "session-id")}
-    binding = server.native_codex_state.binding(credentials, destination, value, session_headers)
     try:
-        permitted = server.native_codex_state.permits(binding, value.get("input"))
+        permitted = original_permitted and server.native_codex_state.permits(binding, value.get("input"))
     except ValueError:
         permitted = False
     if not permitted:
         handler._send_error("hormuz_policy_denied", "Native continuation requires retained successful affinity for the same identity, account credential, session and model.", 403)
         return
     try:
-        lease = server.native_codex_state.begin(identity, binding, value, session_headers)
+        lease = server.native_codex_state.begin(identity, binding, value.get("input"))
     except NativeConversationBusy:
         handler._send_error("gateway_upstream_error", "The native conversation already has an active request.", 429)
         return

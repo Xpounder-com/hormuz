@@ -88,6 +88,11 @@ failed turns, restart, expiry or another owner block before egress. Native
 credential refresh invalidates old opaque/tool affinity; it does not silently
 rebind it. Plain text can start fresh.
 
+Conversation ownership uses the original validated identifiers before secret
+redaction. Continuation state must match retained authority both before and
+after redaction, so distinct protected identifiers or unknown provider items
+cannot gain affinity by collapsing to the same replacement marker.
+
 The process keeps at most 1,024 keyed continuation digests for 15 minutes,
 evicting the oldest when full. It retains no native token, response text or
 transcript in that cache. Expired/evicted state requires a fresh conversation.

@@ -4,11 +4,18 @@ import threading
 import hmac
 import json
 import time
+from dataclasses import dataclass
 from ._contract_schemas.native_codex import COUNTERS
 
 
 class NativeConversationBusy(Exception):
     """A native conversation already owns one provider attempt."""
+
+
+@dataclass(frozen=True)
+class NativeConversationBinding:
+    digest: bytes
+    identified: bool
 
 
 def _tool_execution(item):
@@ -114,13 +121,15 @@ class NativeCodexState:
     def binding(self, credentials, destination, value, session_headers):
         identity = credentials.identity
         metadata = value.get("client_metadata", {})
+        identifiers = [metadata.get("thread_id"), metadata.get("session_id"), value.get("prompt_cache_key")]
         facts = [identity.organization_id, identity.team_id, identity.actor_id,
                  destination.generation, destination.model, credentials.authorization, credentials.account,
-                 metadata.get("thread_id"), metadata.get("session_id"), value.get("prompt_cache_key"), session_headers]
-        return hmac.digest(self._key, json.dumps(facts, sort_keys=True, separators=(",", ":")).encode(), "sha256")
+                 *identifiers, session_headers]
+        digest = hmac.digest(self._key, json.dumps(facts, sort_keys=True, separators=(",", ":")).encode(), "sha256")
+        return NativeConversationBinding(digest, any(item is not None for item in (*identifiers, *session_headers.values())))
 
     def _keys(self, binding, items):
-        return [hmac.digest(self._key, binding + json.dumps([kind, value], sort_keys=True,
+        return [hmac.digest(self._key, binding.digest + json.dumps([kind, value], sort_keys=True,
                 separators=(",", ":")).encode(), "sha256") for kind, value in continuation_tags(items)]
 
     def permits(self, binding, items):
@@ -143,13 +152,10 @@ class NativeCodexState:
         owner = (identity.organization_id, identity.team_id, identity.actor_id)
         return self._counts.setdefault(owner, dict.fromkeys(COUNTERS, 0))
 
-    def begin(self, identity, binding, value, session_headers):
-        metadata = value.get("client_metadata", {})
-        identifiers = [metadata.get("thread_id"), metadata.get("session_id"),
-                       value.get("prompt_cache_key"), *session_headers.values()]
+    def begin(self, identity, binding, items):
         # Affinity stays stable for replay. An identifier-free fresh attempt has
         # no shared conversation to serialize, so its active lease is separate.
-        lease = (binding if any(item is not None for item in identifiers) or continuation_tags(value.get("input"))
+        lease = (binding.digest if binding.identified or continuation_tags(items)
                  else secrets.token_bytes(32))
         with self._lock:
             if lease in self._active:
