@@ -22,6 +22,15 @@ one failing workflow test, the smallest implementation, and a passing test.
 Observe client output/status and controlled external traffic; do not query
 private ledgers or mock internal routing collaborators.
 
+Runtime and plugin releases follow the [versioning policy](docs/VERSIONING.md).
+Run `python tools/version.py check` to validate their canonical sources and
+mirrors. Preview a release change with
+`python tools/version.py bump runtime prerelease --dry-run` or
+`python tools/version.py bump plugin patch --dry-run`, choosing the operation
+for the intended compatibility change. Omit `--dry-run` only to apply that
+reviewed metadata change. CI and test-only PRs do not automatically bump a
+release; schema versions, client pins and historical evidence stay independent.
+
 Keep queues, requests, processes and retries finite. Default to at most eight
 outbound HTTP requests in flight, three retries with backoff, explicit timeouts
 and cleanup in finally-equivalent paths. Routine validation does not call real

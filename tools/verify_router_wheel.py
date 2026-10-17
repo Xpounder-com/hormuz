@@ -33,6 +33,9 @@ def main():
                         str(site), str(wheel)], check=True, timeout=60)
         environment = {**os.environ, 'PYTHONPATH': str(site), 'PYTHONDONTWRITEBYTECODE': '1'}
         shutil.copytree(ROOT / 'tests', temporary / 'tests', ignore=shutil.ignore_patterns('__pycache__'))
+        # The maintainer CLI is tested as a source tool, never shipped in the wheel.
+        (temporary / 'tools').mkdir()
+        shutil.copy2(ROOT / 'tools/version.py', temporary / 'tools/version.py')
         subprocess.run([sys.executable, '-c',
                         'from pathlib import Path; import hormuz; '
                         'assert Path(hormuz.__file__).resolve().is_relative_to(Path("installed").resolve())'],
