@@ -1,0 +1,30 @@
+{
+  "document_version": 1,
+  "parent_campaign": "local-repair-20261016-v5",
+  "intentional_change": "explicit developer guidance for existing exec_command shell-patch syntax",
+  "changed_request_profile_fields": [
+    "input_instructions"
+  ],
+  "developer_instructions_sha256": "3056f0340f150807f42de263e23cf064d0a59b332999ee6f69b86a23f0675ee4",
+  "unchanged": [
+    "client executable",
+    "host",
+    "llama.cpp archive/executable",
+    "model bytes",
+    "136 Hormuz runtime files",
+    "base instructions",
+    "tool schemas",
+    "generation controls",
+    "512-token limit",
+    "90-second deadline",
+    "first development task and checker",
+    "local-only policy",
+    "conversation affinity",
+    "shadow-only authority"
+  ],
+  "incidental_changes": [
+    "private filesystem paths and native message/conversation identifiers",
+    "fresh held-out inventory"
+  ],
+  "causal_limit": "One stochastic development observation cannot establish a general causal effect or qualification."
+}

@@ -1,0 +1,105 @@
+{
+  "document_version": 1,
+  "campaign_id": "local-repair-20261016-v6",
+  "native_model_inferences": 0,
+  "reference_implementations_are_model_evidence": false,
+  "cases": [
+    {
+      "case_id": "dev-clamp",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "dev-strip-prefix",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "dev-rotate-left",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "dev-positive-counter",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-signum",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-distance-to-interval",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-sum-odd",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-remove-suffix-once",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-count-nonoverlap",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-indent-lines",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-stable-unique",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-zip-strict",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-take-last",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-volume-level",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-toggle-strict-bool",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    },
+    {
+      "case_id": "held-bounded-queue",
+      "baseline_exit_code": 1,
+      "reference_exit_code": 0,
+      "checks_unchanged": true
+    }
+  ],
+  "passed": true
+}

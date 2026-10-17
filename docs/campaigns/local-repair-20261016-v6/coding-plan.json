@@ -1,0 +1,139 @@
+{
+  "criteria_version": "local-repair.v1",
+  "subject": {
+    "client_version": "0.160.0",
+    "system": "Darwin",
+    "machine": "arm64",
+    "runtime_profile": "managed-llama.v1",
+    "runtime_sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9",
+    "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "upstream_model": "Qwen3-4B-Q4_K_M",
+    "protocol": "openai",
+    "capabilities": [
+      "responses",
+      "text",
+      "streaming",
+      "tools",
+      "codex_http",
+      "codex_http_0160"
+    ],
+    "max_request_bytes": 65536,
+    "max_output_tokens": 512,
+    "upstream_timeout_seconds": 90,
+    "request_profile_sha256": "75413e31776863aa19433a1df576ca1ca976fde18c4a42481c70ac8b307154d9"
+  },
+  "cases": [
+    {
+      "case_id": "dev-clamp",
+      "partition": "development",
+      "family": "arithmetic",
+      "task_sha256": "33fd16c7939f008528fdcd40d4911c9d323eec130318414f0683d8bd7a2bc5aa",
+      "checks_sha256": "da25b64603054b72230db061e79855ed9d3f32b6f31076fa5755ac4eec12b942"
+    },
+    {
+      "case_id": "dev-strip-prefix",
+      "partition": "development",
+      "family": "text",
+      "task_sha256": "ac666d5237460f22274f88ec968dec3498caa5e45251b0fc62379a429f5ca7d1",
+      "checks_sha256": "fcc045ad3370cc3e2e8306bb1f1ec3105eda3b1566d72877c25269822dd8ff8d"
+    },
+    {
+      "case_id": "dev-rotate-left",
+      "partition": "development",
+      "family": "collections",
+      "task_sha256": "b90c5095ab8c1f6e0c1da0e665b881cd3014f318acaca864caa38482eaea3002",
+      "checks_sha256": "3f83dd8fc94581f1d72a6952b1e0f0c4988e90c0ec9001383c325de44954d3b1"
+    },
+    {
+      "case_id": "dev-positive-counter",
+      "partition": "development",
+      "family": "validation_state",
+      "task_sha256": "40cf635d46f648cb990a97596d31fb79be3641b52a957c701a1b4a06b5148d5f",
+      "checks_sha256": "65e4123e7ba3a0b5e8f953213a1078d170b9fe997e27372efe413719edabb6d3"
+    },
+    {
+      "case_id": "held-signum",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "task_sha256": "ec5aa1c9d4084c09fc81711e3df81b90a6887dacb598337ccfd566085e00bb47",
+      "checks_sha256": "f8f304f67056169727ebb6eca8dbe343dd13e855f425a2289544eb3699cad6ec"
+    },
+    {
+      "case_id": "held-distance-to-interval",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "task_sha256": "0735effd554c6316abe00b1b359a4ec51bcd6ca9561db7b6c4d8196d52d137ce",
+      "checks_sha256": "61d1aa0bef7e8700f7c9f2ec6f01faa8f813b72353fcfeae309e505e79093249"
+    },
+    {
+      "case_id": "held-sum-odd",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "task_sha256": "15f080a1cce0aa52bf11a2fec55c7f7ef5a0379f99caca3f75cfe0f0d2b1af8a",
+      "checks_sha256": "b7907afb74e9bdd79bbd95d27e0aad967287df463d4348bd131b9520b0540cde"
+    },
+    {
+      "case_id": "held-remove-suffix-once",
+      "partition": "held_out",
+      "family": "text",
+      "task_sha256": "39e5171556ee6b90eee272ec240e59c89feb61322c90431d6c0481fa4426abae",
+      "checks_sha256": "42111216b65e24010749f97d9adaa957c7f193dd6fc1a674abda1e54110be6a6"
+    },
+    {
+      "case_id": "held-count-nonoverlap",
+      "partition": "held_out",
+      "family": "text",
+      "task_sha256": "a0ad554fb310dad3d79ee7f74718a55fee847b0b196260423cd811ff6007c1e5",
+      "checks_sha256": "c5a1c204868187501d6b9f0f31e22580fd91c952166e988dfb366add881290a0"
+    },
+    {
+      "case_id": "held-indent-lines",
+      "partition": "held_out",
+      "family": "text",
+      "task_sha256": "4293082e67b6acb9b1aea7253f2b76f4ba2928b38ed1c23a27a75998bbe853cd",
+      "checks_sha256": "df6bac21ccaea4fd4b5e1b6cdaa59cd4f191058883820042d878f3e36e869880"
+    },
+    {
+      "case_id": "held-stable-unique",
+      "partition": "held_out",
+      "family": "collections",
+      "task_sha256": "b0909eab7021c4c6c7916009d23ea394e1ce12a0ef42a472f89ccc042773e5a8",
+      "checks_sha256": "1005eaf9a4d260376d0e39f00916cdfd9f3adec1091c88c4132a87b5331d137c"
+    },
+    {
+      "case_id": "held-zip-strict",
+      "partition": "held_out",
+      "family": "collections",
+      "task_sha256": "9c8e58c8febebf801b2368fd3dbdbd88cb2b9d2e95f42dd1732b99ff608e27a9",
+      "checks_sha256": "21370d46bfd4409cedbcca544e7cd3da0b9838b2c5eb8827c437455d0044090b"
+    },
+    {
+      "case_id": "held-take-last",
+      "partition": "held_out",
+      "family": "collections",
+      "task_sha256": "febf08bcaceb51cd39c4af3ecc55790c54ce56b7043086e48167799e76038f9d",
+      "checks_sha256": "b4e05cfe128f6eedf577b4fc82c47fd459ec1b421537b490230a376671260fcc"
+    },
+    {
+      "case_id": "held-volume-level",
+      "partition": "held_out",
+      "family": "validation_state",
+      "task_sha256": "41ec81e062043d42207b2cf924aed69456a4294d4ba2573a46e456c2f2117fde",
+      "checks_sha256": "0712e6623eb557b29a46a76eb567f7a6ed8f2341f29b82e248d1c823874ec667"
+    },
+    {
+      "case_id": "held-toggle-strict-bool",
+      "partition": "held_out",
+      "family": "validation_state",
+      "task_sha256": "2069caa4b5a8f0705fdc09899fb55ead74a76929152809184c19b90acec31401",
+      "checks_sha256": "b8d1e0e65f6c55d7aa74fd147c4cc591abca7c933ac80d8e3e1de650640124b9"
+    },
+    {
+      "case_id": "held-bounded-queue",
+      "partition": "held_out",
+      "family": "validation_state",
+      "task_sha256": "a4b30c42ae97b5e6fa7824127af1644186d16aa9b4e1f760e73ab5e5323f39fe",
+      "checks_sha256": "e223641eab06bf14fa84b9469f1120e8ab1352b0128952176f7055d33ddaa186"
+    }
+  ]
+}

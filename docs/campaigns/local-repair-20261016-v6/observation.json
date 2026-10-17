@@ -1,0 +1,57 @@
+{
+  "document_version": 1,
+  "campaign_id": "local-repair-20261016-v6",
+  "frozen_manifest_sha256": "0a8b985534bcd2e399f2b9733d1b0ddd16418ff619242b6928fef44341630ecc",
+  "case_id": "dev-clamp",
+  "native_episodes": 1,
+  "native_model_submissions": 5,
+  "native": {
+    "exit_code": 0,
+    "termination": "completed",
+    "elapsed_ms": 22888,
+    "cleanup_error": null
+  },
+  "completed_turns": 1,
+  "passed": false,
+  "implementation_changed": false,
+  "patch_sha256": null,
+  "baseline_exit_code": 1,
+  "check_exit_code": 1,
+  "checks_unchanged": true,
+  "observed_shell_commands": [
+    {
+      "command": "/bin/zsh -lc \"cat solution.py | rg 'def clamp'\"",
+      "exit_code": 0,
+      "aggregated_output": "def clamp(value, lower, upper):\n"
+    }
+  ],
+  "observation_limit": "Native public events show only the declaration-read shell command; they do not expose every function-call argument or tool error.",
+  "planned_cases": 16,
+  "evaluated_cases": 1,
+  "passing_cases": 0,
+  "missing_cases": 15,
+  "held_out_evaluated": 0,
+  "ordinary_coding_denial_status": 503,
+  "coding_readiness_before": "unknown",
+  "coding_readiness_after": "unknown",
+  "automatic_task_types_after": [],
+  "coding_receipt_emitted": false,
+  "automatic_admission_effect": "none",
+  "local_only": true,
+  "observed_destinations": [
+    {
+      "locality": "local",
+      "generation": "0fe9a202a3aa87be169957ed72d71824af2d1917198544685f36e0a0c62cfdd9",
+      "model": "Qwen3-4B-Q4_K_M"
+    }
+  ],
+  "works": 1,
+  "retry_attempts": 0,
+  "failover_attempts": 0,
+  "failed_transport_attempts": 0,
+  "unknown_transport_attempts": 0,
+  "probe_revoked": true,
+  "settings_restored": true,
+  "owned_listeners_closed": true,
+  "frozen_artifacts_unchanged": 160
+}

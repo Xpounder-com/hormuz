@@ -1,0 +1,13 @@
+{
+  "native_model_inferences": 0,
+  "commands": [
+    {
+      "command": "/bin/zsh -lc apply_patch",
+      "exit_code": 2,
+      "output": "Usage: apply_patch 'PATCH'\n       echo 'PATCH' | apply_patch"
+    }
+  ],
+  "implementation_changed": false,
+  "independent_check_exit_code": 1,
+  "oracle_unchanged": true
+}
