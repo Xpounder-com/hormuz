@@ -1,6 +1,5 @@
 """Generation-bound discovery of one explicit chat owner; no app settings."""
 from contextlib import contextmanager
-import fcntl
 import hashlib
 import json
 import os
@@ -15,6 +14,7 @@ from .compaction_formats import strict_json_loads
 
 @contextmanager
 def _owner_record(normal_home):
+    import fcntl
     normal_home = normal_home.expanduser().resolve()
     directory = _control_directory()
     _directory(directory)
