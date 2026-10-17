@@ -26,11 +26,15 @@ def read_metadata(root):
     texts = {name: (root / name).read_text(encoding="utf-8")
              for name in (*RUNTIME_FILES, *PLUGIN_FILES)}
     runtime = tomllib.loads(texts["pyproject.toml"])["project"]["version"]
-    assignments = [node.value for node in ast.parse(texts["hormuz/__init__.py"]).body
+    tree = ast.parse(texts["hormuz/__init__.py"], filename="hormuz/__init__.py")
+    writes = [node for node in ast.walk(tree)
+              if isinstance(node, ast.Name) and node.id == "__version__"
+              and isinstance(node.ctx, (ast.Store, ast.Del))]
+    assignments = [node.value for node in tree.body
                    if isinstance(node, ast.Assign)
                    and any(isinstance(target, ast.Name) and target.id == "__version__"
                            for target in node.targets)]
-    if len(assignments) != 1 or not isinstance(assignments[0], ast.Constant):
+    if len(writes) != 1 or len(assignments) != 1 or not isinstance(assignments[0], ast.Constant):
         raise ValueError("hormuz/__init__.py must declare one literal __version__")
     if assignments[0].value != runtime:
         raise ValueError("hormuz/__init__.py version differs from pyproject.toml")

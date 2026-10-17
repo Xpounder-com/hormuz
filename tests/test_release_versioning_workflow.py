@@ -153,6 +153,10 @@ class ReleaseVersioningWorkflowTests(unittest.TestCase):
         examples = (
             ("hormuz/__init__.py", '__version__ = "2.0.0a3"\n'),
             ("hormuz/__init__.py", '__version__ = "2.0.0a2"\n__version__ = "2.0.0a2"\n'),
+            ("hormuz/__init__.py", '__version__ = "2.0.0a2"\n__version__: str = "9.0.0"\n'),
+            ("hormuz/__init__.py", '__version__ = "2.0.0a2"\n__version__ += ".post1"\n'),
+            ("hormuz/__init__.py", '__version__ = "2.0.0a2"\nif True:\n    __version__ = "9.0.0"\n'),
+            ("hormuz/__init__.py", '__version__ = "2.0.0a2"\ndel __version__\n'),
             ("hormuz/__init__.py", '__version__ = str("2.0.0a2")\n'),
             ("pyproject.toml", '[project\nversion = "broken"'),
             ("gemini-extension.json", '{"name":"hormuz","version":"0.2.2"}'),
