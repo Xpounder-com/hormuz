@@ -5,7 +5,6 @@ import argparse
 import json
 import logging
 import os
-from pathlib import Path
 import signal
 import sqlite3
 import sys
@@ -26,10 +25,9 @@ from .store import StorageSchemaError
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="koto", description="Koto: local routing for existing coding clients.")
     parser.add_argument("--version", action="version", version=__version__)
-    koto_config = Path("koto.json")
     default_config = (os.environ.get("KOTO_CONFIG") or os.environ.get("HORMUZ_CONFIG")
-                      or ("hormuz.json" if not (koto_config.exists() or koto_config.is_symlink())
-                          and Path("hormuz.json").exists()
+                      or ("hormuz.json" if not os.path.lexists("koto.json")
+                          and os.path.exists("hormuz.json")
                           else "koto.json"))
     parser.add_argument("--config", default=default_config,
                         help="Router JSON configuration path (default: koto.json or KOTO_CONFIG)")
