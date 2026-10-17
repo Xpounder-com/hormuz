@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -85,7 +86,7 @@ class KotoBrandingWorkflowTests(unittest.TestCase):
                 history = LocalHistory(source, environ={"HOME": str(home), "HORMUZ_HISTORY_HOME": str(legacy)})
                 history.enable("local-user")
                 key = (history.directory / "device.key").read_bytes()
-                with patch("hormuz.local_history.sys.platform", platform):
+                with patch("hormuz.local_history.sys", SimpleNamespace(platform=platform)):
                     current = LocalHistory(source, environ={"HOME": str(home)})
                     another = LocalHistory(home / "another-router.json", environ={"HOME": str(home)})
                     another.enable("another-user")
@@ -103,10 +104,10 @@ class KotoBrandingWorkflowTests(unittest.TestCase):
             environment = {"HOME": str(home), "KOTO_HISTORY_HOME": str(home / "new"),
                            "HORMUZ_HISTORY_HOME": str(home / "old")}
             self.assertEqual(LocalHistory(source, environ=environment).directory.parent, home / "new")
-            with patch("hormuz.local_history.sys.platform", "darwin"):
+            with patch("hormuz.local_history.sys", SimpleNamespace(platform="darwin")):
                 current = LocalHistory(source, environ={"HOME": str(home)})
                 self.assertEqual(current.directory.parent, home / "Library/Application Support/Koto/history-v1")
-            with patch("hormuz.local_history.sys.platform", "linux"):
+            with patch("hormuz.local_history.sys", SimpleNamespace(platform="linux")):
                 current = LocalHistory(source, environ={"HOME": str(home)})
                 self.assertEqual(current.directory.parent, home / ".local/share/koto/history-v1")
 
