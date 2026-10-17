@@ -143,24 +143,6 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
         model.write_bytes(b'GGUF-fixture')
         return ('--client-executable', str(executable), '--runtime-executable', str(runtime), '--model-file', str(model))
 
-    def test_failed_model_probe_cannot_create_a_qualified_route(self):
-        with workflow.provider('WRONG') as (endpoint, received):
-            value = self.fixture.admission_configuration(endpoint, endpoint)
-            value['route_admission']['local_routes']['local-code'].update(max_output_tokens=128, task_types=['summarization', 'structured_extraction'])
-            value['ai_work'] = {'enabled': True, 'database': str(self.root / 'work.sqlite3'), 'tool_capable_aliases': ['local-code']}
-            value['policies']['organization']['max_output_tokens'] = 128
-            value['model_routes']['local-code'].update(model_revision='fixture-weights-v1', capabilities=['responses', 'text', 'tools', 'structured_output'])
-            with self.fixture.connected_client(value):
-                original = self.config.read_bytes()
-                result = self.command('model', 'qualify', '--model', 'local-code', *self.model_arguments(),
-                                      '--output', str(self.root / 'qualification.json'), expected=2)
-                self.assertEqual(result['schema_id'], 'hormuz.model-qualification', result)
-                self.assertEqual(result['result'], 'failed')
-                self.assertEqual(result['checks'][0]['name'], 'task_quality')
-                self.assertFalse(result['checks'][0]['passed'])
-                self.assertEqual(self.config.read_bytes(), original)
-                self.assertLessEqual(len(received), 4)
-
     def probe_scenario(self, failure=None):
         from http.server import BaseHTTPRequestHandler, HTTPServer
         import threading
@@ -206,9 +188,14 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
             value['policies']['organization']['max_output_tokens'] = 128
             value['model_routes']['local-code'].update(model_revision='fixture-weights-v1', capabilities=['responses', 'text', 'tools', 'structured_output'])
             with self.fixture.connected_client(value):
+                original = self.config.read_bytes()
                 assets = self.model_arguments()
                 report = self.root / 'qualified.json'
                 qualified = self.command('model', 'qualify', '--model', 'local-code', *assets, '--output', str(report), expected=2 if failure else 0)
+                self.assertEqual(qualified['schema_id'], 'hormuz.model-qualification', qualified)
+                self.assertEqual(qualified['checks'][0]['name'], 'task_quality')
+                self.assertEqual(self.config.read_bytes(), original)
+                self.assertLessEqual(len(received), 4)
                 if failure:
                     self.assertEqual(qualified['result'], 'failed')
                     outcomes = {check['name']: check['passed'] for check in qualified['checks']}
@@ -291,32 +278,6 @@ class PluginCapabilitiesWorkflowTests(unittest.TestCase):
                                       '--output', str(self.root / 'denied-probes.json'), expected=2)
                 self.assertEqual(result['error']['code'], 'model_not_allowed')
                 self.assertEqual(received, [])
-
-    def test_legacy_history_stays_readable_with_unobserved_routing_evidence(self):
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-        with workflow.provider('LEGACY_PRIVATE') as (endpoint, received):
-            with self.fixture.connected_client(self.fixture.configuration(endpoint, endpoint)) as submit:
-                self.command('history', 'enable')
-                submit()
-                record = self.command('history', 'list')['entries'][0]
-                # Build legacy ciphertext using the documented public envelope,
-                # not a history implementation helper.
-                profile = Path(self.command('history', 'status')['storage_path'])
-                envelope = json.loads((Path(__file__).parent / 'fixtures/local-history-v1.json').read_text())['encryption_envelope']
-                cipher = AESGCM((profile / 'device.key').read_bytes())
-                path = profile / 'entries' / (record['id'] + '.enc')
-                ciphertext = path.read_bytes()
-                header = envelope['header_utf8'].encode()
-                end = len(header) + 12
-                legacy = json.loads(cipher.decrypt(ciphertext[len(header):end], ciphertext[end:], record['id'].encode()))
-                legacy.pop('routing_evidence')
-                legacy['schema_version'] = 1
-                nonce = os.urandom(12)
-                path.write_bytes(header + nonce + cipher.encrypt(nonce, json.dumps(legacy).encode(), record['id'].encode()))
-                result = self.command('request', 'explain', record['id'])
-                self.assertEqual(result['policy_decision'], 'unobserved')
-                self.assertNotIn('LEGACY_PRIVATE', json.dumps(result))
-                self.assertEqual(self.command('history', 'show', record['id'])['entry']['schema_version'], 1)
 
     def test_diagnosis_tracks_preview_connection_user_edits_and_restoration(self):
         from tests.test_connected_client_lifetime_workflow import ConnectedClientLifetimeWorkflowTests

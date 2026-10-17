@@ -74,7 +74,8 @@ def streaming_provider(parts, *, terminal=True, gate=None, protocol="openai", re
                 pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=False)
+    thread = threading.Thread(target=server.serve_forever,
+                              kwargs={"poll_interval": 0.05}, daemon=False)
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_port}", received

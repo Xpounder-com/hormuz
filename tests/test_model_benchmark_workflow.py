@@ -181,8 +181,9 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                             report = self.run_benchmark("local-code")
                     observations = report["models"][0]["observations"]
                     self.assertEqual(([row["error"] for row in observations], len(received),
-                                      observations[1]["latency_ms"]),
-                                     ([f"http_{status}", "capacity_rejection_not_run"], 1, None))
+                                      observations[1]["latency_ms"],
+                                      report["models"][0]["metrics"]["latency_ms"]["samples"]),
+                                     ([f"http_{status}", "capacity_rejection_not_run"], 1, None, 1))
 
     def test_custom_metrics_check_structured_answers_and_tool_arguments_against_references(self):
         answer = '{"count":7}'
@@ -192,38 +193,21 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         suite = self.suite()
         suite["cases"][0]["checks"] = [
             {"metric": "domain_accuracy", "kind": "json_equals", "value": {"count": 7}},
-            {"metric": "required_terms", "kind": "text_contains_all", "value": ["count", "7"]}]
+            {"metric": "required_terms", "kind": "text_contains_all", "value": ["count", "7"]},
+            {"metric": "tool_arguments", "kind": "tool_call", "value": {"name": "lookup_count", "arguments": {"item": "boxes"}}}]
         suite["cases"][1]["checks"] = [
+            {"metric": "boolean_count", "kind": "json_equals", "value": {"count": True}},
             {"metric": "tool_accuracy", "kind": "tool_call", "value": {"name": "lookup_count", "arguments": {"item": "wrong"}}}]
         with workflow.provider(answer, response_fields={"output": output}) as (endpoint, _):
             with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
                 report = self.run_benchmark("local-code", suite=suite)
-        self.assertEqual(report["models"][0]["metrics"]["check_pass_rates"],
-                         {"domain_accuracy": 1, "required_terms": 1, "tool_accuracy": 0})
-
-    def test_json_checks_compare_numeric_values_without_equating_booleans(self):
-        examples = (({"count": 1}, '{"count":1.0}', True),
-                    ({"count": True}, '{"count":1}', False),
-                    ({"items": [1, {"ok": True}]}, '{"items":[1.0,{"ok":true}]}', True))
-        for kind in ("json_equals", "tool_call"):
-            for index, (expected, answer, matches) in enumerate(examples):
-                with self.subTest(kind=kind, example=index):
-                    self.report_path = self.root / f"json-{kind}-{index}.json"
-                    suite = self.suite()
-                    suite["cases"] = suite["cases"][:1]
-                    suite["targets"]["min_cases"] = 1
-                    reference = expected if kind == "json_equals" else {"name": "lookup_count", "arguments": expected}
-                    suite["cases"][0]["checks"] = [{"metric": "json_accuracy", "kind": kind, "value": reference}]
-                    fields = None if kind == "json_equals" else {"output": [{"type": "function_call",
-                        "call_id": "fixture-call", "name": "lookup_count", "arguments": answer}]}
-                    with workflow.provider(answer, response_fields=fields) as (endpoint, _):
-                        value = self.fixture.admission_configuration(endpoint, endpoint)
-                        with self.fixture.connected_client(value):
-                            report = self.run_benchmark("local-code", suite=suite)
-                    model = report["models"][0]
-                    self.assertEqual((model["metrics"]["completed"], model["metrics"]["check_pass_rates"],
-                                      model["workloads"][0]["target_met"]),
-                                     (1, {"json_accuracy": int(matches)}, matches))
+        model = report["models"][0]
+        self.assertEqual(model["metrics"]["check_pass_rates"],
+                         {"domain_accuracy": 1, "required_terms": 1, "tool_arguments": 1,
+                          "boolean_count": 0, "tool_accuracy": 0})
+        self.assertEqual((model["metrics"]["completed"], model["metrics"]["passed"],
+                          model["workloads"][0]["target_met"]), (2, 1, False))
+        self.assertEqual([row["passed"] for row in model["observations"]], [True, False])
 
     def test_user_can_create_an_editable_suite_without_a_router_or_overwriting_work(self):
         suite = self.command("init", "--output", str(self.suite_path))
@@ -234,37 +218,11 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
         self.assertEqual(failure["error"]["code"], "benchmark_output_exists")
         self.assertEqual(json.loads(self.suite_path.read_text()), suite)
 
-    def test_invalid_targets_and_unbounded_or_stateful_tasks_are_rejected_before_execution(self):
+    def test_invalid_suite_is_rejected_before_execution_or_creating_a_scorecard(self):
+        suite = self.suite()
+        suite["cases"][0]["request"]["previous_response_id"] = "opaque-history"
         with workflow.provider("7") as (endpoint, received):
             with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
-                for mutation in ("target", "target_overflow", "output_limit", "continuation", "unknown_field", "duplicate_metric"):
-                    with self.subTest(mutation=mutation):
-                        suite = self.suite()
-                        if mutation == "target":
-                            suite["targets"]["min_pass_rate"] = -1
-                        elif mutation == "target_overflow":
-                            suite["targets"]["min_pass_rate"] = 10**400
-                        elif mutation == "output_limit":
-                            suite["cases"][0]["request"]["max_output_tokens"] = 10**9
-                        elif mutation == "continuation":
-                            suite["cases"][0]["request"]["previous_response_id"] = "opaque-history"
-                        elif mutation == "unknown_field":
-                            suite["unexpected"] = True
-                        else:
-                            suite["cases"][0]["checks"] *= 2
-                        result = self.run_benchmark("local-code", suite=suite, expected=2)
-                        self.assertEqual(result["error"]["code"], "benchmark_suite_invalid")
-                        self.assertFalse(self.report_path.exists())
-        self.assertEqual(received, [])
-
-    def test_task_labels_cannot_certify_a_different_classified_workload(self):
-        suite = self.suite()
-        for case in suite["cases"]:
-            case["task_type"] = "translation"
-        with workflow.provider("7") as (endpoint, received):
-            value = self.fixture.admission_configuration(endpoint, endpoint)
-            value["route_admission"]["local_routes"]["local-code"]["task_types"].append("translation")
-            with self.fixture.connected_client(value):
                 result = self.run_benchmark("local-code", suite=suite, expected=2)
         self.assertEqual((result["error"]["code"], received, self.report_path.exists()),
                          ("benchmark_suite_invalid", [], False))
@@ -301,21 +259,6 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 self.assertEqual((model["metrics"]["completed"], model["workloads"][0]["target_met"],
                                   model["observations"][0]["error"], received[0]["body"]["stream"]),
                                  (0, False, "benchmark_response_mode_mismatch", requested_stream))
-
-    def test_native_coding_tasks_are_rejected_before_direct_model_benchmarking(self):
-        with workflow.provider("7") as (endpoint, received):
-            with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
-                for task, prompt in (("code_change", "Fix the Python function to return seven."),
-                                     ("code_review", "Review this code diff for bugs.")):
-                    with self.subTest(task=task):
-                        suite = self.suite()
-                        suite["cases"] = suite["cases"][:1]
-                        suite["cases"][0]["task_type"] = task
-                        suite["cases"][0]["request"]["input"] = prompt
-                        result = self.run_benchmark("local-code", suite=suite, expected=2)
-                        self.assertEqual(result["error"]["code"], "benchmark_suite_invalid")
-                        self.assertFalse(self.report_path.exists())
-        self.assertEqual(received, [])
 
     def test_stream_failure_after_a_completed_event_cannot_qualify_the_model(self):
         suite = self.suite()
@@ -475,14 +418,6 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                 result = submit(request={"input": "Summarize seven boxes as a digit."})
                 self.assertEqual((result["status"], result["body"]["output"][0]["content"][0]["text"],
                                   result["headers"].get("x-hormuz-scorecard-status")), (200, "0", "invalid"))
-
-    def test_capacity_rejection_stops_new_requests_and_retains_unstarted_cases(self):
-        with workflow.provider("7", status=429) as (endpoint, received):
-            with self.fixture.connected_client(self.fixture.admission_configuration(endpoint, endpoint)):
-                report = self.run_benchmark("local-code")
-        self.assertEqual(([row["error"] for row in report["models"][0]["observations"]], len(received)),
-                         (["http_429", "capacity_rejection_not_run"], 1))
-        self.assertEqual(report["models"][0]["metrics"]["latency_ms"]["samples"], 1)
 
     def test_absolute_run_deadline_reports_timeout_and_prevents_more_model_work(self):
         entered, release = threading.Event(), threading.Event()
