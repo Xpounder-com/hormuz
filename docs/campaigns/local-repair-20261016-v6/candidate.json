@@ -1,0 +1,65 @@
+{
+  "document_version": 2,
+  "candidate_id": "codex0160-m5-32g-qwen3-4b-shell-patch-v6",
+  "status": "experimental_unqualified",
+  "subject": {
+    "client_version": "0.160.0",
+    "system": "Darwin",
+    "machine": "arm64",
+    "runtime_profile": "managed-llama.v1",
+    "runtime_sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9",
+    "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "upstream_model": "Qwen3-4B-Q4_K_M",
+    "protocol": "openai",
+    "capabilities": [
+      "responses",
+      "text",
+      "streaming",
+      "tools",
+      "codex_http",
+      "codex_http_0160"
+    ],
+    "max_request_bytes": 65536,
+    "max_output_tokens": 512,
+    "upstream_timeout_seconds": 90,
+    "request_profile_sha256": "75413e31776863aa19433a1df576ca1ca976fde18c4a42481c70ac8b307154d9"
+  },
+  "assets": {
+    "client": {
+      "path": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+      "bytes": 241555024,
+      "sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b"
+    },
+    "runtime_archive": {
+      "path": "/private/tmp/hormuz-537-verified-assets-20261016/5cf8e5ae2209d7e6d4a037640e9ae7395494e0f2467c60c7a8e6cee0116c5891/runtime.tar.gz",
+      "bytes": 12157609,
+      "sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9"
+    },
+    "runtime_executable": {
+      "path": "/private/tmp/hormuz-537-verified-assets-20261016/5cf8e5ae2209d7e6d4a037640e9ae7395494e0f2467c60c7a8e6cee0116c5891/runtime/llama-b11617/llama-server",
+      "bytes": 49984,
+      "sha256": "1bf5602a2be50097c44282a6ecc63234d94ee8f96d39fd45fed6eff4e74b6b41"
+    },
+    "model": {
+      "path": "/private/tmp/hormuz-537-verified-assets-20261016/5cf8e5ae2209d7e6d4a037640e9ae7395494e0f2467c60c7a8e6cee0116c5891/model.gguf",
+      "bytes": 2497280256,
+      "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+    },
+    "host": {
+      "system": "Darwin",
+      "machine": "arm64",
+      "os_version": "26.2",
+      "os_build": "25C56",
+      "hardware": "Mac17,2",
+      "memory": 34359738368
+    }
+  },
+  "hormuz_runtime": {
+    "source_commit": "4e63d49389922df4079fe22c49d57f191756b910",
+    "runtime_files": 136,
+    "all_match_v5": true,
+    "source_archive_sha256": "6848e600b20372313f4340c83421b2fa67a9fd30a5e3b490fa6637cda23a5795"
+  },
+  "automatic_admission_effect": "none",
+  "coding_receipt_emitted": false
+}

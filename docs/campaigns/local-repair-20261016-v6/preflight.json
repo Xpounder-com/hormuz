@@ -1,0 +1,271 @@
+{
+  "stage": "zero-inference-native-capture",
+  "model_inferences": 0,
+  "setup": {
+    "configuration": {
+      "authentication": "managed_local",
+      "listen_port": 54390,
+      "mode": "local_only",
+      "model": "Qwen3-4B-Q4_K_M",
+      "operation": "create",
+      "qualification_id": "codex0160-m5-32g-local-repair-v6-probe",
+      "runtime_port": 54391
+    },
+    "connection": {
+      "client_version": "0.160.0",
+      "configuration": "installed",
+      "generation": "f4eb76d111ce98f23d55efb57150d701",
+      "local_runtime": {
+        "ownership": "owned",
+        "state": "ready"
+      },
+      "owned_settings": [
+        "model",
+        "model_provider",
+        "web_search"
+      ],
+      "phase": "connected",
+      "retained_settings": [],
+      "router": "ready",
+      "schema_id": "hormuz.connected-client-status",
+      "schema_version": 2,
+      "scope": "codex_user_defaults"
+    },
+    "schema_id": "hormuz.local-setup",
+    "schema_version": 2
+  },
+  "native": {
+    "exit_code": 1,
+    "termination": "completed",
+    "elapsed_ms": 497,
+    "cleanup_error": null
+  },
+  "captured_submissions": 1,
+  "work_state": {
+    "schema_id": "hormuz.ai-work-state",
+    "schema_version": 3,
+    "organization_id": "organization",
+    "actor_id": "local-user",
+    "as_of": "2026-10-17T01:06:02.243327+00:00",
+    "works": [],
+    "plans": [],
+    "totals": {
+      "attempts": 0,
+      "committed_microusd": 0,
+      "estimated_cost_microusd": 0,
+      "provider_confirmed_cost_microusd": 0,
+      "provider_confirmed_attempts": 0,
+      "unconfirmed_attempts": 0,
+      "pending_microusd": 0,
+      "uncertain_microusd": 0,
+      "cache_hits": 0,
+      "denied": 0,
+      "failed_attempts": 0,
+      "unknown_attempts": 0,
+      "retry_attempts": 0,
+      "failover_attempts": 0,
+      "reservation_exceeded": 0,
+      "repeated_requests": 0,
+      "provider_latency_ms": null,
+      "timed_attempts": 0,
+      "gateway_wall_ms": null,
+      "gateway_overhead_ms": null,
+      "timed_gateway_attempts": 0,
+      "consumed_microusd": 0,
+      "cost_basis": "gateway_reported_or_configured_estimate",
+      "invoice_finality": false,
+      "latency_basis": "sum_external_or_legacy_observed_attempt_latency",
+      "gateway_timing_basis": "entry_through_work_settlement_wall_time",
+      "summed_provider_ms": null,
+      "timing_coverage": {
+        "observed": 0,
+        "attempts": 0,
+        "basis": "gateway_observed_wall_and_provider_intervals"
+      },
+      "gateway_overhead_cost_microusd": null,
+      "cost_coverage": "covered_provider_attempts_excludes_unallocated_platform_and_compute_charges",
+      "works": 0,
+      "completed": 0
+    },
+    "scope": "actor",
+    "display": {
+      "job_limit": 100,
+      "shown_jobs": 0,
+      "total_jobs": 0,
+      "jobs_truncated": false,
+      "attempt_limit_per_job": 5,
+      "observation_limit_per_job": 5,
+      "plan_limit": 100,
+      "shown_plans": 0,
+      "total_plans": 0,
+      "plans_truncated": false
+    },
+    "coverage": "gateway_captured_work_requests_only",
+    "provider_account_costs": {
+      "status": "unavailable",
+      "reason": "external_account_collection_retired",
+      "accounts": []
+    },
+    "routing": {
+      "minimum_samples": 5,
+      "exploration_enabled": false,
+      "exploration_aliases": [],
+      "exploration_rate_percent": 5,
+      "exploration_max_cost_microusd": 0,
+      "evidence_basis": "local_observational_work_episodes",
+      "exploration_allocation_count": 0,
+      "exploration_reserved_microusd": 0,
+      "exploration_remaining_microusd": 0,
+      "exploration_allowance_basis": "monthly_quoted_reservations_including_unused_or_unknown_allocations"
+    },
+    "cache": {
+      "enabled": false,
+      "retention": "bounded_process_memory",
+      "exact_only": true
+    },
+    "connection": {
+      "endpoint": "http://127.0.0.1:54390",
+      "routes": [
+        {
+          "model": "Qwen3-4B-Q4_K_M",
+          "destination": "local-llama",
+          "protocol": "openai",
+          "locality": "local",
+          "authentication": "none",
+          "generation": "a3079bc41641d49f612ef7dec3e167b3ebe2ac6ace5c148ac0a6a0dd218b76f9",
+          "upstream_model": "Qwen3-4B-Q4_K_M",
+          "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+          "capabilities": [
+            "responses",
+            "text",
+            "streaming",
+            "tools",
+            "codex_http",
+            "codex_http_0160"
+          ],
+          "credential_configured": false,
+          "eligible": true
+        }
+      ],
+      "shadow_router_enabled": false,
+      "credential_location": "router",
+      "coverage": "only_authenticated_intercepted_model_requests"
+    },
+    "onboarding": {
+      "choices": [
+        {
+          "model": "Qwen3-4B-Q4_K_M",
+          "destination": "local-llama",
+          "protocol": "openai",
+          "locality": "local",
+          "authentication": "none",
+          "generation": "a3079bc41641d49f612ef7dec3e167b3ebe2ac6ace5c148ac0a6a0dd218b76f9",
+          "upstream_model": "Qwen3-4B-Q4_K_M",
+          "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+          "capabilities": [
+            "responses",
+            "text",
+            "streaming",
+            "tools",
+            "codex_http",
+            "codex_http_0160"
+          ],
+          "credential_configured": false,
+          "eligible": true,
+          "client": "codex"
+        }
+      ]
+    }
+  },
+  "profile_sha256": "75413e31776863aa19433a1df576ca1ca976fde18c4a42481c70ac8b307154d9",
+  "first_input_sha256": "7e5a779db3105c8916b44c6a9acd707f8d51d8b358c07b6a8b6d6d8eb0ede644",
+  "disconnect": {
+    "client_version": "0.160.0",
+    "configuration": "not_owned",
+    "generation": "f4eb76d111ce98f23d55efb57150d701",
+    "local_runtime": {
+      "ownership": "owned",
+      "state": "stopped"
+    },
+    "owned_settings": [
+      "model",
+      "model_provider",
+      "web_search"
+    ],
+    "phase": "disconnected",
+    "retained_settings": [],
+    "router": "stopped",
+    "schema_id": "hormuz.connected-client-status",
+    "schema_version": 2,
+    "scope": "codex_user_defaults"
+  },
+  "settings_restored": true,
+  "owned_listeners_closed": true,
+  "receipts": [
+    {
+      "operation": [
+        "client",
+        "setup"
+      ],
+      "receipt": {
+        "configuration": {
+          "authentication": "managed_local",
+          "listen_port": 54390,
+          "mode": "local_only",
+          "model": "Qwen3-4B-Q4_K_M",
+          "operation": "create",
+          "qualification_id": "codex0160-m5-32g-local-repair-v6-probe",
+          "runtime_port": 54391
+        },
+        "connection": {
+          "client_version": "0.160.0",
+          "configuration": "installed",
+          "generation": "f4eb76d111ce98f23d55efb57150d701",
+          "local_runtime": {
+            "ownership": "owned",
+            "state": "ready"
+          },
+          "owned_settings": [
+            "model",
+            "model_provider",
+            "web_search"
+          ],
+          "phase": "connected",
+          "retained_settings": [],
+          "router": "ready",
+          "schema_id": "hormuz.connected-client-status",
+          "schema_version": 2,
+          "scope": "codex_user_defaults"
+        },
+        "schema_id": "hormuz.local-setup",
+        "schema_version": 2
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "disconnect"
+      ],
+      "receipt": {
+        "client_version": "0.160.0",
+        "configuration": "not_owned",
+        "generation": "f4eb76d111ce98f23d55efb57150d701",
+        "local_runtime": {
+          "ownership": "owned",
+          "state": "stopped"
+        },
+        "owned_settings": [
+          "model",
+          "model_provider",
+          "web_search"
+        ],
+        "phase": "disconnected",
+        "retained_settings": [],
+        "router": "stopped",
+        "schema_id": "hormuz.connected-client-status",
+        "schema_version": 2,
+        "scope": "codex_user_defaults"
+      }
+    }
+  ]
+}

@@ -7,6 +7,11 @@ The task, checker, client, host, model, engine, generation controls and budgets
 remain fixed. Native paths and identifiers necessarily change. Twelve new
 held-out tasks replace the previous held-out inventory before inference.
 
+**Retained outcome: the one development repair failed.** See
+[the outcome](OUTCOME.md), [observation](observation.json) and
+[native events](development-native.jsonl). No implementation edit occurred;
+the candidate remains unqualified. The sections below record preregistration.
+
 The [diagnosis](../../diagnostics/native-patch-20261016/README.md) distinguishes
 the observed empty patch commands from an integration defect. Native controls
 through Hormuz retain streamed command arguments exactly: an empty call leaves
