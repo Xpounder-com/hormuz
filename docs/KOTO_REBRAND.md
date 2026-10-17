@@ -56,6 +56,7 @@ original identity where that identity is part of the recorded evidence.
 ## Hosting
 
 No product domain is configured or claimed. Hosting under `neuralint.io` will
-be supplied later by the owner. The frozen 1.x website and retired application
-releases are historical artifacts; they are not the current 2.x router source.
-This change does not deploy that retired product or alter its DNS.
+be supplied later by the owner. The former website publication and its
+active deployment code have been retired. Legacy product redirects and public
+assets have been removed from the shared compatibility host. Historical commits
+and retired application releases remain records of the earlier product.
