@@ -70,6 +70,13 @@ def add_client_commands(
             lifecycle.add_argument("--credential-env", help="Use an existing token environment variable instead of managed local authentication")
             lifecycle.add_argument("--shadow-router", action="store_true", help="Record bounded local model routing advice without changing routes")
 
+    qualify = client_subparsers.add_parser("qualify", help="Authorize, inspect or revoke one bounded experimental local coding probe")
+    qualify.add_argument("client", choices=["codex"])
+    qualify.add_argument("--client-home", required=True, help="Explicit private home owning this experimental connection")
+    probe = qualify.add_mutually_exclusive_group()
+    probe.add_argument("--plan", help="Frozen content-free probe plan; never a passing coding receipt")
+    probe.add_argument("--revoke", action="store_true", help="Revoke future probe dispatch; disconnect also stops owned resources")
+
     readiness = client_subparsers.add_parser("cloud-readiness", help="Inspect cloud authorization paths without activating them")
     readiness.add_argument("client", choices=["codex"])
     readiness.add_argument("--client-home", help="Codex home (default CODEX_HOME or ~/.codex)")
@@ -241,6 +248,11 @@ def run_lifetime(args: argparse.Namespace) -> int:
         if args.client_command == "bridge":
             from ..codex_app_bridge_control import install_bridge
             result = install_bridge(lifetime.home, args)
+        elif args.client_command == "qualify":
+            result = lifetime.qualify(Path(args.plan) if args.plan else None, revoke=args.revoke)
+            if result["schema_id"] == "hormuz.coding-probe-error":
+                print(json.dumps(result), file=sys.stderr)
+                return 2
         elif args.client_command == "cloud-readiness":
             result = lifetime.cloud_readiness(Path(args.config), executable=args.executable,
                                              actor_id=args.actor, surface=args.surface)

@@ -40,8 +40,8 @@ def main():
                        cwd=temporary, env=environment, check=True, timeout=10)
         subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
                         '-p', 'test_*workflow.py', '-f', '-v'],
-                       # Main's 408-test installed job took 1118 seconds.
-                       # The expanded 453-test suite retains every case within
+                       # The 408-test main job on 2026-10-16 took 1118 seconds.
+                       # The expanded 461-test suite retains every case within
                        # a finite twenty-five-minute budget, leaving
                        # two minutes for build, artifacts and job cleanup.
                        cwd=temporary, env=environment, check=True, timeout=1500)

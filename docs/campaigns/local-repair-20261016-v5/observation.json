@@ -1,0 +1,63 @@
+{
+  "document_version": 1,
+  "campaign_id": "local-repair-20261016-v5",
+  "case_id": "dev-clamp",
+  "native_model_episodes": 1,
+  "held_out_episodes": 0,
+  "passing_episodes": 0,
+  "planned_cases": 16,
+  "missing_cases": 15,
+  "native_exit_code": 0,
+  "native_termination": "completed",
+  "native_elapsed_ms": 25626,
+  "completed_turns": 1,
+  "baseline_exit_code": 1,
+  "check_exit_code": 1,
+  "checks_unchanged": true,
+  "checks_sha256": "da25b64603054b72230db061e79855ed9d3f32b6f31076fa5755ac4eec12b942",
+  "implementation_changed": false,
+  "patch_sha256": null,
+  "inference_submissions": 6,
+  "public_attempts": 6,
+  "works": 1,
+  "transport_retries": 0,
+  "failover_attempts": 0,
+  "unknown_attempts": 0,
+  "failed_transport_attempts": 0,
+  "configured_destinations": "local only",
+  "native_commands": [
+    {
+      "id": "item_2",
+      "type": "command_execution",
+      "command": "/bin/zsh -lc \"cat solution.py | rg 'def clamp'\"",
+      "aggregated_output": "def clamp(value, lower, upper):\n",
+      "exit_code": 0,
+      "status": "completed"
+    },
+    {
+      "id": "item_4",
+      "type": "command_execution",
+      "command": "/bin/zsh -lc apply_patch",
+      "aggregated_output": "Usage: apply_patch 'PATCH'\n       echo 'PATCH' | apply_patch\n",
+      "exit_code": 2,
+      "status": "failed"
+    },
+    {
+      "id": "item_6",
+      "type": "command_execution",
+      "command": "/bin/zsh -lc apply_patch",
+      "aggregated_output": "Usage: apply_patch 'PATCH'\n       echo 'PATCH' | apply_patch\n",
+      "exit_code": 2,
+      "status": "failed"
+    }
+  ],
+  "coding_readiness_after": "unknown",
+  "automatic_task_types_after": [],
+  "automatic_admission_effect": "none",
+  "coding_receipt_emitted": false,
+  "permission_revoked": true,
+  "settings_restored": true,
+  "owned_listeners_closed": true,
+  "result_sha256": "21bcc489012b5dd071adce1439b639914920b4ae9b13a4768224734a6718bb30",
+  "events_sha256": "3d0d9eaef1c19b320192c17b0c05af3341c3a75eca7d9316ad55cc20d3532e2b"
+}

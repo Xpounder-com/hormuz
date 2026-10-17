@@ -1,0 +1,30 @@
+{
+  "client": {
+    "path": "/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+    "bytes": 241555024,
+    "sha256": "112fae7a5a1223e673c8a1791d32338f37df8b527ff1159bb8adac6c4dbf1b4b"
+  },
+  "runtime_archive": {
+    "path": "/private/tmp/hormuz-ui-backend-20261014/runtime-assets/llama-b11617-bin-macos-arm64.tar.gz",
+    "bytes": 12157609,
+    "sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9"
+  },
+  "runtime_executable": {
+    "path": "/private/tmp/hormuz-ui-backend-20261014/runtime-assets/engine/llama-b11617/llama-server",
+    "bytes": 49984,
+    "sha256": "1bf5602a2be50097c44282a6ecc63234d94ee8f96d39fd45fed6eff4e74b6b41"
+  },
+  "model": {
+    "path": "/private/tmp/hormuz-llama-assets-20261015/Qwen3-4B-Q4_K_M.gguf",
+    "bytes": 2497280256,
+    "sha256": "7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5"
+  },
+  "host": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "os_version": "26.2",
+    "os_build": "25C56",
+    "hardware": "Mac17,2",
+    "memory": 34359738368
+  }
+}

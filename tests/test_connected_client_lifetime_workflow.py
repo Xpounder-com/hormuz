@@ -109,6 +109,8 @@ try:
         headers = DuplicateAgent(headers)
     if "local-only" in sys.argv:
         headers["X-Hormuz-Routing-Mode"] = "local_only"
+    if "qualification-probe" in sys.argv:
+        headers["X-Hormuz-Qualification-Probe"] = sys.argv[sys.argv.index("qualification-probe") + 1]
     if "work-id" in sys.argv:
         headers["X-Hormuz-Work-Id"] = sys.argv[sys.argv.index("work-id") + 1]
     if "coding-tools" in sys.argv:

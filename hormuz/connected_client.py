@@ -369,14 +369,17 @@ def _setting(text, key, value):
     return key + " = " + json.dumps(value) + "\n" + text
 
 
-def _control(record, command):
+def _control(record, command, **payload):
     from ._config_input import MAX_CONFIGURATION_BYTES
 
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.settimeout(1)
     try:
         connection.connect(record["control"])
-        connection.sendall(json.dumps({"generation": record["generation"], "command": command}).encode() + b"\n")
+        request = json.dumps({"generation": record["generation"], "command": command, **payload}).encode()
+        if len(request) > 4096:
+            raise ValueError()
+        connection.sendall(request + b"\n")
         # Routing metadata is derived from the bounded configuration. Reserve
         # room for JSON escaping and per-route summaries; ordinary control
         # replies retain their existing small bound.
@@ -395,6 +398,12 @@ def _control(record, command):
                 raise ValueError()
             validate_contract(admission)
             return admission
+        if command == "qualify":
+            probe = value.get("probe")
+            if not isinstance(probe, dict) or probe.get("schema_id") not in {"hormuz.coding-probe-status", "hormuz.coding-probe-error"}:
+                raise ValueError()
+            validate_contract(probe)
+            return probe
         if value.get("router") not in {"ready", "stopping", "unavailable"}:
             raise ValueError()
         return value["router"]
@@ -522,6 +531,35 @@ class ConnectedClientLifetime:
                            and hashlib.sha256(text.encode()).hexdigest() == record["gateway_digest"])
                 binding = "matching" if matches else "different"
             return status, binding
+
+    def qualify(self, plan_path=None, *, revoke=False):
+        plan = None
+        if plan_path is not None:
+            try:
+                text = _read(plan_path.expanduser())
+                if text is None or len(text.encode()) > 3072:
+                    raise ValueError()
+                plan = strict_json_loads(text)
+                validate_contract(plan)
+                if plan["schema_id"] != "hormuz.coding-probe-plan":
+                    raise ValueError()
+            except (ValueError, TypeError, KeyError, RecursionError):
+                raise ConnectedClientError("router_configuration_unsupported") from None
+        with self._transaction():
+            record = self._record()
+            if record is None or record["phase"] != "connected":
+                raise ConnectedClientError("router_unavailable")
+            if self._configuration_state(record) != "installed":
+                raise ConnectedClientError("configuration_changed")
+            source = _read(Path(record["gateway_config"]))
+            if source is None or hashlib.sha256(source.encode()).hexdigest() != record["gateway_digest"]:
+                raise ConnectedClientError("setup_changed")
+            if plan is not None and plan["subject"]["client_version"] != record["client_version"]:
+                raise ConnectedClientError("version_unsupported")
+            result = _control(record, "qualify", plan=plan, revoke=revoke)
+            if not isinstance(result, dict):
+                raise ConnectedClientError("router_unavailable")
+            return result
 
     def local_token(self, generation):
         with self._transaction():

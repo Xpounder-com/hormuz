@@ -1082,7 +1082,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 entered = True
                 with ExitStack() as resources:
                     self._provider_response_resources = resources
-                    if options["failover_applied_reason"] is None:
+                    if options["failover_applied_reason"] is None and not getattr(self, "_coding_probe", False):
                         try:
                             self.server.shadow_router.observe(self, options["identity"], options["decision"],
                                 options["request_value"], options["attempt"], client=options["client"])

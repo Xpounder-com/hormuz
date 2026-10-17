@@ -1,0 +1,139 @@
+{
+  "criteria_version": "local-repair.v1",
+  "subject": {
+    "client_version": "0.160.0",
+    "system": "Darwin",
+    "machine": "arm64",
+    "runtime_profile": "managed-llama.v1",
+    "runtime_sha256": "051bb0b55b3e5e72081aa819131ba30c74d910acc915b28bab298757472e39d9",
+    "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+    "upstream_model": "Qwen3-4B-Q4_K_M",
+    "protocol": "openai",
+    "capabilities": [
+      "responses",
+      "text",
+      "streaming",
+      "tools",
+      "codex_http",
+      "codex_http_0160"
+    ],
+    "max_request_bytes": 65536,
+    "max_output_tokens": 512,
+    "upstream_timeout_seconds": 90,
+    "request_profile_sha256": "267612fca967efc824601cd9f17cf76ff5abad4058304d3407d9795a06320010"
+  },
+  "cases": [
+    {
+      "case_id": "dev-clamp",
+      "partition": "development",
+      "family": "arithmetic",
+      "task_sha256": "33fd16c7939f008528fdcd40d4911c9d323eec130318414f0683d8bd7a2bc5aa",
+      "checks_sha256": "da25b64603054b72230db061e79855ed9d3f32b6f31076fa5755ac4eec12b942"
+    },
+    {
+      "case_id": "dev-strip-prefix",
+      "partition": "development",
+      "family": "text",
+      "task_sha256": "ac666d5237460f22274f88ec968dec3498caa5e45251b0fc62379a429f5ca7d1",
+      "checks_sha256": "fcc045ad3370cc3e2e8306bb1f1ec3105eda3b1566d72877c25269822dd8ff8d"
+    },
+    {
+      "case_id": "dev-rotate-left",
+      "partition": "development",
+      "family": "collections",
+      "task_sha256": "b90c5095ab8c1f6e0c1da0e665b881cd3014f318acaca864caa38482eaea3002",
+      "checks_sha256": "3f83dd8fc94581f1d72a6952b1e0f0c4988e90c0ec9001383c325de44954d3b1"
+    },
+    {
+      "case_id": "dev-positive-counter",
+      "partition": "development",
+      "family": "validation_state",
+      "task_sha256": "40cf635d46f648cb990a97596d31fb79be3641b52a957c701a1b4a06b5148d5f",
+      "checks_sha256": "65e4123e7ba3a0b5e8f953213a1078d170b9fe997e27372efe413719edabb6d3"
+    },
+    {
+      "case_id": "held-multiple-ceiling",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "task_sha256": "1419edd20a19a8328787428c2801bfb6fc7e6d1b6b6fb9426cef48a5e74ca653",
+      "checks_sha256": "a3643dd9fc2eca367ae579b85284903e62707d69a264690543cde9e5155c8760"
+    },
+    {
+      "case_id": "held-interval-overlap",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "task_sha256": "fdc7cf486f3d0c8101883b75d6f691a860da238cd4c1669bdf9a3f87d2e5796d",
+      "checks_sha256": "8a9545aca63711b6fc2b70fa3979cafd93cb2fa55ae4544435686c17dda13e4c"
+    },
+    {
+      "case_id": "held-weighted-total",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "task_sha256": "4b037d697423c1a286fca39d4eea9adac6446d640398284e8a12ff597b75b01b",
+      "checks_sha256": "5f54061d8494623cfdea1d3808b51f5eb691cc92288537036b6299c10c662c2a"
+    },
+    {
+      "case_id": "held-collapse-spaces",
+      "partition": "held_out",
+      "family": "text",
+      "task_sha256": "3aedf01cd72d44c985f7d552e5570527de521451bb8eb4382afb4abbef586fad",
+      "checks_sha256": "a70703d17b39e15636f9797bbdeb043b4947e68f9b8be0b5f6c1d39ce8f16e9b"
+    },
+    {
+      "case_id": "held-ensure-suffix",
+      "partition": "held_out",
+      "family": "text",
+      "task_sha256": "c6e248f37cb8ed386c6d7d72bd42708095bae15286ce65dae9d4a250dca4a0d1",
+      "checks_sha256": "39d32b39a756a75fad20278fa0c62bc7096afc10be505b6f4dc6c6d022159f54"
+    },
+    {
+      "case_id": "held-split-once",
+      "partition": "held_out",
+      "family": "text",
+      "task_sha256": "434f2e83bd2f6c98f43e1bb6f7c5c74ef28b93caee97f41ac8333726d3fd0370",
+      "checks_sha256": "447c6f805fb5ed9f894344f05087b86f7e7f3889d5b7369eb61c881f7911ca77"
+    },
+    {
+      "case_id": "held-adjacent-pairs",
+      "partition": "held_out",
+      "family": "collections",
+      "task_sha256": "55d3bf53a23ac0db69329efa1c033237beaebac82bd8d4e17081499b10dffe8e",
+      "checks_sha256": "769a007fb3db526e91d59b8e6fa02c3f9bc204cb1640216ebf187867720a529a"
+    },
+    {
+      "case_id": "held-merge-counts",
+      "partition": "held_out",
+      "family": "collections",
+      "task_sha256": "c3fd0fd3c4e8522141b057843b3db381d53ea127fa2bc59cddd43d1bd81a9732",
+      "checks_sha256": "57f63fd96c98400f91f1371214cd2fdc3fe89df147518b39e714b703e4eea1f4"
+    },
+    {
+      "case_id": "held-last-index",
+      "partition": "held_out",
+      "family": "collections",
+      "task_sha256": "a72e3ad7d67b27aafdb4ab1a5b7e0534871981bf677adaa9d174edb6491c7de4",
+      "checks_sha256": "c7330bbe9e5f68022d98878e8ca92a23b70755f9d8f6693ac5bbaf264f4e117e"
+    },
+    {
+      "case_id": "held-strict-percentage",
+      "partition": "held_out",
+      "family": "validation_state",
+      "task_sha256": "e0e588b4da93ba9c7dca85f3c61b47bbfba9a1df94998d725cfce65ded45e929",
+      "checks_sha256": "b9310a3cfdb5a2d071f4605848e8334a554f3a4431ec3c675047bf1b1923e8b6"
+    },
+    {
+      "case_id": "held-stack-lifo",
+      "partition": "held_out",
+      "family": "validation_state",
+      "task_sha256": "0cd03845ce8829c30a96a80fd9e8935a87eb2d30df72494cf12d024f1c21e1e3",
+      "checks_sha256": "51cd2d37e07a53bbfc566dce551f5c823643a87dce5f43f6303ac7a62177a3b8"
+    },
+    {
+      "case_id": "held-wallet-withdraw",
+      "partition": "held_out",
+      "family": "validation_state",
+      "task_sha256": "009e5d8401f68047614b89bf7c8f3455589ff144773e11b5b1c16864d7c3eabd",
+      "checks_sha256": "785d1c2926c5783de0bf678b0a8635e73562736a89543a6f99ffd2287b47d1cb"
+    }
+  ]
+}
