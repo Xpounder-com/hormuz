@@ -11,6 +11,9 @@
 - **Coding qualification:** Reviewed outcome evidence that an exact local
   execution envelope completed autonomous edits and independent checks under
   predeclared criteria. Transport health and task-fit advice cannot establish it.
+- **Qualification probe:** Explicit, ephemeral permission to collect one bounded
+  frozen local coding episode. It is separate from readiness and never admits
+  ordinary unqualified coding.
 - **Local-only:** Hard permission forbidding cloud execution for all intercepted
   model requests, including helpers. Unsupported work blocks.
 - **Automatic routing:** Selection among policy-eligible qualified destinations

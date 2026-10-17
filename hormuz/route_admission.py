@@ -11,6 +11,7 @@ from types import MappingProxyType
 
 from .work_learning import contains_provider_state, request_characteristics
 from .coding_qualification import assess_coding_evidence, request_profile_digest
+from .coding_probe import CodingProbe, ProbeError, HEADER as PROBE_HEADER
 
 
 @dataclass(frozen=True)
@@ -195,6 +196,7 @@ class RouteAdmission:
         self._local_capacity = threading.BoundedSemaphore(1)
         self._capacity_lock = threading.Lock()
         self._active_local = 0
+        self.probe = CodingProbe(self)
         from .scorecard_routing import ScorecardRouting
         self.scorecards = ScorecardRouting(config)
 
@@ -214,6 +216,8 @@ class RouteAdmission:
             raise RouteAdmissionError("local_capacity_busy", 429)
         handler._local_route_lease = True
         handler._local_route_deadline = time.monotonic() + self.config.upstream_timeout_seconds
+        if getattr(handler, "_coding_probe", False):
+            handler._local_route_deadline = min(handler._local_route_deadline, time.monotonic() + self.probe.remaining())
         with self._capacity_lock:
             self._active_local = 1
         try:
@@ -266,9 +270,10 @@ class RouteAdmission:
                 and handler.path == "/v1/responses"
                 and 0 < len(agent) <= 512 and all(32 <= ord(character) < 127 for character in agent)
                 and agent.partition(" ")[0] == f"codex_exec/{coding.client_version}"
-                and request_profile_digest(value) == coding.request_profile_sha256)
+                and request_profile_digest(value, schema_version=coding.profile_schema_version) == coding.request_profile_sha256)
 
     def select(self, handler, identity, decision, value, *, client, protocol, output_field):
+        handler._coding_probe = handler._coding_probe_claimed = False
         handler._route_admission_candidates = None
         handler._route_admission_selection_candidates = None
         handler._route_admission_headers = {}
@@ -318,6 +323,25 @@ class RouteAdmission:
             and inherited_task != "code_change")
         engine = PolicyEngine(self.config, handler.server.store,
             policy_runtime=handler.server.policy_engine.policy_runtime)
+        if handler.headers.get_all(PROBE_HEADER, []):
+            try:
+                self.probe.check(handler, identity, decision, value, client=client)
+            except ProbeError as error:
+                raise RouteAdmissionError(str(error)) from None
+            qualification = self.qualifications.get(decision.resolved_alias)
+            if (mode != "local_only" or stateful_coding_switch or required is None
+                    or not required.issubset(decision.route.capabilities)
+                    or not self._within_envelope(handler, decision.route, qualification, value, output_field)
+                    or hint != "code_change" and not continuation
+                    or not self._ready(decision.route)):
+                raise RouteAdmissionError("probe_request_mismatch")
+            handler._route_admission_coding_required = True
+            handler._route_admission_candidates = {decision.resolved_alias: decision}
+            handler._route_admission_selection_candidates = handler._route_admission_candidates
+            handler._route_admission_headers = {"X-Hormuz-Routing-Mode": "local_only",
+                "X-Hormuz-Routing-Reason": "qualification_probe",
+                PROBE_HEADER: self.probe.probe_id}
+            return decision
         candidates = {}
         for alias, qualification in self.qualifications.items():
             route = self.config.model_routes[alias]
@@ -391,7 +415,7 @@ class RouteAdmission:
         if not headers:
             return
         headers.pop("X-Hormuz-Routing-Qualification", None)
-        if route.alias in self.qualifications:
+        if route.alias in self.qualifications and not getattr(handler, "_coding_probe", False):
             headers["X-Hormuz-Routing-Qualification"] = self.qualifications[route.alias].qualification_id
         if getattr(handler, "_work_route", None) and handler._work_route["reason"] == "session_affinity":
             headers["X-Hormuz-Routing-Reason"] = "session_affinity"
@@ -410,8 +434,13 @@ class RouteAdmission:
             raise RouteAdmissionError("policy_changed")
         if destination.locality == "local":
             qualification = self.qualifications.get(decision.resolved_alias)
+            if getattr(handler, "_coding_probe", False):
+                try:
+                    self.probe.check(handler, identity, decision, value, client=client, claim=True)
+                except ProbeError as error:
+                    raise RouteAdmissionError(str(error)) from None
             if (not self._within_envelope(handler, decision.route, qualification, value, output_field)
-                    or handler._route_admission_coding_required and (
+                    or handler._route_admission_coding_required and not getattr(handler, "_coding_probe", False) and (
                         "code_change" not in qualification.automatic_task_types(self.coding[decision.resolved_alias])
                         or not self._coding_request_matches(handler, decision.resolved_alias, value, client))
                     or not self._ready(decision.route)):
@@ -419,6 +448,8 @@ class RouteAdmission:
         self.receipt(handler, decision.route)
 
     def contract_header(self, handler, route):
+        if getattr(handler, "_coding_probe", False):
+            return "hormuz.coding-probe-relay;v=1"
         if getattr(handler, "_route_admission_headers", {}):
             return "hormuz.relay-metadata;v=4" if self.settings.scorecard or handler.headers.get("X-Hormuz-Benchmark") == "1" else "hormuz.relay-metadata;v=3"
         return self.destinations.contract_header(route)

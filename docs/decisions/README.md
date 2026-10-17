@@ -26,6 +26,9 @@ opted-in HTTP/SSE inference; actual account/client qualification remains separat
 [ADR 0029](0029-personal-benchmark-scorecard-routing.md) records private personal
 benchmarks and explicit scorecard preferences within admitted local routes.
 
+[ADR 0030](0030-bounded-coding-qualification-probes.md) records explicit,
+ephemeral local coding probes without changing ordinary coding readiness.
+
 Earlier records remain historical evidence. Their enterprise/UI product scope
 is superseded by ADR 0018; retaining a record does not reactivate its product or
 acceptance gates. Do not rewrite accepted rationale; supersede it with a new

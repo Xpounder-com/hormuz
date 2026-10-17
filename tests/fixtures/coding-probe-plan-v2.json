@@ -1,0 +1,31 @@
+{
+  "schema_id": "hormuz.coding-probe-plan",
+  "schema_version": 2,
+  "campaign_id": "synthetic-probe-v1",
+  "plan_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "case_id": "development-fixture",
+  "task_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "checks_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "model": "local-code",
+  "first_input_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "max_requests": 3,
+  "max_elapsed_seconds": 30,
+  "subject": {
+    "client_version": "0.147.0",
+    "system": "Darwin",
+    "machine": "arm64",
+    "runtime_profile": "managed-llama.v1",
+    "runtime_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "model_revision": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "upstream_model": "fixture-local-model",
+    "protocol": "openai",
+    "capabilities": [
+      "responses",
+      "text"
+    ],
+    "max_request_bytes": 4096,
+    "max_output_tokens": 8,
+    "upstream_timeout_seconds": 6,
+    "request_profile_sha256": "b97c91f1c54a1bc98d13541ec50e9f6c45cda20f9d9d6e936022230a09c327ea"
+  }
+}
