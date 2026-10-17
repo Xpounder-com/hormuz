@@ -49,6 +49,21 @@ class ReleaseVersioningWorkflowTests(unittest.TestCase):
                          {"runtime": "2.0.0a2", "plugin": "0.2.1", "status": "consistent"})
         self.assertEqual(self.snapshot(), before)
 
+    def test_wildcard_reexports_cannot_hide_runtime_version_drift(self):
+        self.files["version_provider.py"] = '__all__ = ["__version__"]\n__version__ = "9.0.0"\n'
+        (self.root / "version_provider.py").write_text(self.files["version_provider.py"])
+        (self.root / "hormuz/__init__.py").write_text(
+            '__version__ = "2.0.0a2"\nfrom version_provider import *\n')
+        imported = subprocess.run(
+            [sys.executable, "-c", "import hormuz; print(hormuz.__version__)"],
+            cwd=self.root, text=True, capture_output=True, check=True, timeout=10)
+        self.assertEqual(imported.stdout.strip(), "9.0.0")
+        before = self.snapshot()
+        for arguments in (("check",), ("bump", "runtime", "prerelease"), ("bump", "plugin", "patch")):
+            with self.subTest(arguments=arguments):
+                self.command(*arguments, expected=2)
+                self.assertEqual(self.snapshot(), before)
+
     def test_runtime_bump_updates_its_mirror_and_preserves_unrelated_content(self):
         before = self.snapshot()
         self.assertEqual(self.command("bump", "runtime", "prerelease"),

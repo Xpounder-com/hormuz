@@ -35,9 +35,10 @@ def main():
                         str(site), str(wheel)], check=True, timeout=60)
         environment = {**os.environ, 'PYTHONPATH': str(site), 'PYTHONDONTWRITEBYTECODE': '1'}
         shutil.copytree(ROOT / 'tests', temporary / 'tests', ignore=shutil.ignore_patterns('__pycache__'))
-        # The maintainer CLI is tested as a source tool, never shipped in the wheel.
+        # Maintainer CLIs are tested as source tools, never shipped in the wheel.
         (temporary / 'tools').mkdir()
-        shutil.copy2(ROOT / 'tools/version.py', temporary / 'tools/version.py')
+        for name in ('version.py', 'verify_router_scope.py'):
+            shutil.copy2(ROOT / 'tools' / name, temporary / 'tools' / name)
         subprocess.run([sys.executable, '-c',
                         'from pathlib import Path; import koto, hormuz; '
                         'assert koto.GatewayConfig is hormuz.GatewayConfig; '

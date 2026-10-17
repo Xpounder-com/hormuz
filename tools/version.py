@@ -26,7 +26,7 @@ def _binds_version(node):
     if isinstance(node, ast.Name):
         return node.id == "__version__" and isinstance(node.ctx, (ast.Store, ast.Del))
     if isinstance(node, ast.alias):
-        return (node.asname or node.name.split(".")[0]) == "__version__"
+        return node.name == "*" or (node.asname or node.name.split(".")[0]) == "__version__"
     # Definitions, exception handlers and named match patterns also bind names.
     return (getattr(node, "name", None) == "__version__"
             or isinstance(node, ast.MatchMapping) and node.rest == "__version__")

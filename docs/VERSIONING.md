@@ -15,6 +15,8 @@ automatically require a release bump, and merging a PR does not publish a releas
 Use the version tool to update a release stream's source and mirrors together.
 The public `koto.__version__` export shares the runtime version from `hormuz`;
 it does not declare another release number.
+The runtime mirror declares one literal `__version__`; additional bindings and
+wildcard imports are rejected because they can replace that declaration.
 `check` validates both streams' formats and agreement. Every bump checks both
 streams before writing; fix inconsistent metadata before requesting a bump.
 
