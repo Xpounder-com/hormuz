@@ -2,6 +2,7 @@
 from pathlib import Path
 import ast
 import importlib
+import importlib.util
 import json
 import re
 import sys
@@ -10,6 +11,12 @@ from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+
+# An installed regular tools package can shadow the checkout's namespace.
+VERSION_SPEC = importlib.util.spec_from_file_location("koto_source_version", ROOT / "tools/version.py")
+version_tool = importlib.util.module_from_spec(VERSION_SPEC)
+VERSION_SPEC.loader.exec_module(version_tool)
+check_versions = version_tool.check_versions
 
 
 def verify_agent_package():
@@ -65,6 +72,10 @@ def verify_agent_package():
 
 
 def main():
+    try:
+        check_versions(ROOT)
+    except (OSError, ValueError, KeyError, TypeError, SyntaxError) as error:
+        raise SystemExit(f'Invalid release version metadata: {error}') from error
     for name in ('apps', 'clients', 'deploy', 'website', 'marketing', 'experiments'):
         if (ROOT / name).exists():
             raise SystemExit('Retired product source: ' + name)

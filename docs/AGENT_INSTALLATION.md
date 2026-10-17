@@ -103,8 +103,9 @@ before uninstalling. Keep newer user edits and report retained setting names.
 points Codex at the repository root. `.claude-plugin/` supplies Claude's manifest
 and the catalog also understood by Copilot CLI. `gemini-extension.json` makes
 the root installable by Gemini. All discover `skills/koto/`; no vendor copy
-of the workflow is maintained. Skill bundle version `0.3.0` is independent of
-the Python router's development version.
+of the workflow is maintained. The skill bundle version in canonical
+`plugin.json` is independent of the Python router's development version. Use the
+[versioning policy and tool](VERSIONING.md) to update its manifests together.
 
 Run `python tools/verify_router_scope.py` for offline identity, path, content
 and link checks. Vendor installation/activation is separate qualification; a
