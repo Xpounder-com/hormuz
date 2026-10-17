@@ -1,0 +1,5 @@
+Local shell-tool compatibility for this run:
+
+The available shell tool is exec_command. Set its cmd argument to one complete shell command string, not a command array. There is no separately registered apply_patch tool in this profile.
+
+Invoke the apply_patch executable through exec_command. Supply the complete patch as an argument or through stdin in that same cmd string. For a quoted heredoc, the opening line is apply_patch <<'PATCH' and the final line is PATCH. Include the actual *** Begin Patch, *** Update File, hunk and *** End Patch lines between them. Read the file before constructing matching patch context. The empty command apply_patch has no patch and cannot edit a file.

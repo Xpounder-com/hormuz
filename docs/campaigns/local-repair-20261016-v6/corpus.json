@@ -1,0 +1,201 @@
+{
+  "document_version": 4,
+  "campaign_id": "local-repair-20261016-v6",
+  "criteria_version": "local-repair.v1",
+  "purpose": "explicit shell-patch instruction development treatment",
+  "native_episodes_performed": 0,
+  "entries": [
+    {
+      "case_id": "dev-clamp",
+      "partition": "development",
+      "family": "arithmetic",
+      "goal": "Fix the Python implementation in solution.py. Repair clamp(value, lower, upper): return value bounded by the inclusive lower and upper limits. Raise ValueError when lower exceeds upper. Inputs are integers. Do not change the public function name. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def clamp(value, lower, upper):\n    return max(lower, value)\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['clamp']\nassert f(12, 2, 8) == 8\nassert f(-5, -3, 4) == -3\nassert f(0, -3, 4) == 0\nassert f(4, 4, 4) == 4\ntry:\n    f(2, 4, 1)\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError('inverted bounds accepted')\n",
+      "task_sha256": "33fd16c7939f008528fdcd40d4911c9d323eec130318414f0683d8bd7a2bc5aa",
+      "checks_sha256": "da25b64603054b72230db061e79855ed9d3f32b6f31076fa5755ac4eec12b942"
+    },
+    {
+      "case_id": "dev-strip-prefix",
+      "partition": "development",
+      "family": "text",
+      "goal": "Fix the Python implementation in solution.py. Repair strip_prefix(text, prefix): remove exactly one prefix only when it is at the beginning of text; otherwise return the original text. An empty prefix leaves text unchanged. Preserve Unicode and later occurrences. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def strip_prefix(text, prefix):\n    return text.replace(prefix, '')\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['strip_prefix']\nassert f('abcabc', 'abc') == 'abc'\nassert f('xabc', 'abc') == 'xabc'\nassert f('abc', '') == 'abc'\nassert f('', 'x') == ''\nassert f('αβα', 'α') == 'βα'\nassert f('same', 'same') == ''\n",
+      "task_sha256": "ac666d5237460f22274f88ec968dec3498caa5e45251b0fc62379a429f5ca7d1",
+      "checks_sha256": "fcc045ad3370cc3e2e8306bb1f1ec3105eda3b1566d72877c25269822dd8ff8d"
+    },
+    {
+      "case_id": "dev-rotate-left",
+      "partition": "development",
+      "family": "collections",
+      "goal": "Fix the Python implementation in solution.py. Repair rotate_left(items, steps): return a new list rotated left by integer steps modulo the list length. Negative steps rotate right. Empty input returns a new empty list. Preserve elements and do not mutate the input. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def rotate_left(items, steps):\n    return items[steps:] + items[:steps]\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['rotate_left']\na = [1, 2, 3, 4]\nassert f(a, 5) == [2, 3, 4, 1]\nassert f(a, -5) == [4, 1, 2, 3]\nassert f(a, 0) == a and f(a, 0) is not a\nassert a == [1, 2, 3, 4]\nempty = []\nassert f(empty, 10) == [] and f(empty, 10) is not empty\nassert f([[1], [2]], 3) == [[2], [1]]\n",
+      "task_sha256": "b90c5095ab8c1f6e0c1da0e665b881cd3014f318acaca864caa38482eaea3002",
+      "checks_sha256": "3f83dd8fc94581f1d72a6952b1e0f0c4988e90c0ec9001383c325de44954d3b1"
+    },
+    {
+      "case_id": "dev-positive-counter",
+      "partition": "development",
+      "family": "validation_state",
+      "goal": "Fix the Python implementation in solution.py. Repair Counter.increment(step=1). Accept only strict positive integers (bool is invalid). Raise ValueError before mutation for invalid step. Add a valid step to value and return the new value; a new counter starts at zero. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "class Counter:\n    def __init__(self):\n        self.value = 0\n    def increment(self, step=1):\n        self.value += step\n        return self.value\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nc = s['Counter']()\nassert c.increment() == 1\nassert c.increment(3) == 4\nfor bad in [0, -1, True, False, 1.5, '2', None]:\n    try:\n        c.increment(bad)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('invalid step accepted')\n    assert c.value == 4\nassert c.increment(2) == 6\n",
+      "task_sha256": "40cf635d46f648cb990a97596d31fb79be3641b52a957c701a1b4a06b5148d5f",
+      "checks_sha256": "65e4123e7ba3a0b5e8f953213a1078d170b9fe997e27372efe413719edabb6d3"
+    },
+    {
+      "case_id": "held-signum",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "goal": "Fix the Python implementation in solution.py. Repair signum(number): for any integer return -1 when negative, 0 when zero, and 1 when positive. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def signum(number):\n    return -1 if number < 0 else 1\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['signum']\nassert f(0) == 0\nassert f(-1) == -1\nassert f(1) == 1\nassert f(-1000000) == -1\nassert f(1000000) == 1\n",
+      "task_sha256": "ec5aa1c9d4084c09fc81711e3df81b90a6887dacb598337ccfd566085e00bb47",
+      "checks_sha256": "f8f304f67056169727ebb6eca8dbe343dd13e855f425a2289544eb3699cad6ec"
+    },
+    {
+      "case_id": "held-distance-to-interval",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "goal": "Fix the Python implementation in solution.py. Repair distance_to_interval(value, lower, upper): return zero inside an inclusive integer interval and distance to the nearest endpoint outside. Raise ValueError for inverted bounds. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def distance_to_interval(value, lower, upper):\n    return min(abs(value - lower), abs(value - upper))\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['distance_to_interval']\nassert f(5, 2, 8) == 0\nassert f(-3, 2, 8) == 5\nassert f(11, 2, 8) == 3\nassert f(2, 2, 8) == 0\nassert f(-1, -1, -1) == 0\ntry:\n    f(1, 3, 2)\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError('inverted interval accepted')\n",
+      "task_sha256": "0735effd554c6316abe00b1b359a4ec51bcd6ca9561db7b6c4d8196d52d137ce",
+      "checks_sha256": "61d1aa0bef7e8700f7c9f2ec6f01faa8f813b72353fcfeae309e505e79093249"
+    },
+    {
+      "case_id": "held-sum-odd",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "goal": "Fix the Python implementation in solution.py. Repair sum_odd(values): sum only odd integer elements, including negatives; empty input returns zero. Do not mutate the input list. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def sum_odd(values):\n    return sum(values)\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['sum_odd']\na = [2, 3, 4, -1]\nassert f(a) == 2\nassert a == [2, 3, 4, -1]\nassert f([]) == 0\nassert f([0, -2, 8]) == 0\nassert f([-5, -3, 7]) == -1\nassert f([1, 1, 1]) == 3\n",
+      "task_sha256": "15f080a1cce0aa52bf11a2fec55c7f7ef5a0379f99caca3f75cfe0f0d2b1af8a",
+      "checks_sha256": "b7907afb74e9bdd79bbd95d27e0aad967287df463d4348bd131b9520b0540cde"
+    },
+    {
+      "case_id": "held-remove-suffix-once",
+      "partition": "held_out",
+      "family": "text",
+      "goal": "Fix the Python implementation in solution.py. Repair remove_suffix_once(text, suffix): remove exactly one exact suffix only at the end. Empty suffix leaves the original string unchanged. Preserve Unicode and earlier occurrences. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def remove_suffix_once(text, suffix):\n    return text.replace(suffix, '')\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['remove_suffix_once']\nassert f('abcabc', 'abc') == 'abc'\nassert f('abcx', 'abc') == 'abcx'\nassert f('abc', '') == 'abc'\nassert f('', 'x') == ''\nassert f('αβα', 'α') == 'αβ'\nassert f('same', 'same') == ''\n",
+      "task_sha256": "39e5171556ee6b90eee272ec240e59c89feb61322c90431d6c0481fa4426abae",
+      "checks_sha256": "42111216b65e24010749f97d9adaa957c7f193dd6fc1a674abda1e54110be6a6"
+    },
+    {
+      "case_id": "held-count-nonoverlap",
+      "partition": "held_out",
+      "family": "text",
+      "goal": "Fix the Python implementation in solution.py. Repair count_nonoverlap(text, needle): count nonoverlapping occurrences of a nonempty exact substring. Raise ValueError for empty needle. Preserve Unicode; return zero if no occurrence. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def count_nonoverlap(text, needle):\n    return len(text.split(needle))\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['count_nonoverlap']\nassert f('aaaaa', 'aa') == 2\nassert f('abc', 'x') == 0\nassert f('', 'x') == 0\nassert f('αβαβ', 'αβ') == 2\nassert f('aaaa', 'a') == 4\ntry:\n    f('abc', '')\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError('empty needle accepted')\n",
+      "task_sha256": "a0ad554fb310dad3d79ee7f74718a55fee847b0b196260423cd811ff6007c1e5",
+      "checks_sha256": "c5a1c204868187501d6b9f0f31e22580fd91c952166e988dfb366add881290a0"
+    },
+    {
+      "case_id": "held-indent-lines",
+      "partition": "held_out",
+      "family": "text",
+      "goal": "Fix the Python implementation in solution.py. Repair indent_lines(text, prefix): prepend prefix to every segment separated by ASCII newline, including empty segments and a trailing empty segment. Preserve newline bytes and Unicode. Empty text is one empty segment. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def indent_lines(text, prefix):\n    return prefix + text\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['indent_lines']\nassert f('a\\nb', '>') == '>a\\n>b'\nassert f('a\\n', '>') == '>a\\n>'\nassert f('', '>') == '>'\nassert f('\\n', '>') == '>\\n>'\nassert f('α\\nβ', '·') == '·α\\n·β'\nassert f('x\\ny', '') == 'x\\ny'\n",
+      "task_sha256": "4293082e67b6acb9b1aea7253f2b76f4ba2928b38ed1c23a27a75998bbe853cd",
+      "checks_sha256": "df6bac21ccaea4fd4b5e1b6cdaa59cd4f191058883820042d878f3e36e869880"
+    },
+    {
+      "case_id": "held-stable-unique",
+      "partition": "held_out",
+      "family": "collections",
+      "goal": "Fix the Python implementation in solution.py. Repair stable_unique(items): return a new list keeping the first equality-matching occurrence of each item in original order. Support unhashable values and preserve input. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def stable_unique(items):\n    return list(set(items))\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['stable_unique']\na = [2, 1, 2, 3, 1]\nassert f(a) == [2, 1, 3]\nassert a == [2, 1, 2, 3, 1]\nassert f([[1], [2], [1]]) == [[1], [2]]\nassert f([]) == []\nassert f([False, 0, True, 1]) == [False, True]\nassert f(a) is not a\n",
+      "task_sha256": "b0909eab7021c4c6c7916009d23ea394e1ce12a0ef42a472f89ccc042773e5a8",
+      "checks_sha256": "1005eaf9a4d260376d0e39f00916cdfd9f3adec1091c88c4132a87b5331d137c"
+    },
+    {
+      "case_id": "held-zip-strict",
+      "partition": "held_out",
+      "family": "collections",
+      "goal": "Fix the Python implementation in solution.py. Repair zip_strict(left, right): return a new list of corresponding pairs. Unequal list lengths raise ValueError. Empty equal lists are valid. Preserve both lists and support unhashable entries. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def zip_strict(left, right):\n    return list(zip(left, right))\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['zip_strict']\nfor a, b in [([1], []), ([], [1]), ([1, 2], [3])]:\n    try:\n        f(a, b)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('unequal lengths accepted')\na, b = [1, 2], ['a', 'b']\nassert f(a, b) == [(1, 'a'), (2, 'b')]\nassert a == [1, 2] and b == ['a', 'b']\nassert f([], []) == []\nassert f([[1]], [[2]]) == [([1], [2])]\n",
+      "task_sha256": "9c8e58c8febebf801b2368fd3dbdbd88cb2b9d2e95f42dd1732b99ff608e27a9",
+      "checks_sha256": "21370d46bfd4409cedbcca544e7cd3da0b9838b2c5eb8827c437455d0044090b"
+    },
+    {
+      "case_id": "held-take-last",
+      "partition": "held_out",
+      "family": "collections",
+      "goal": "Fix the Python implementation in solution.py. Repair take_last(items, count): return a new list containing at most count last elements in original order. Count must be a strict nonnegative integer; bool is invalid. Zero returns an empty list. Preserve input. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def take_last(items, count):\n    return items[-count:]\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['take_last']\na = [1, 2, 3]\nassert f(a, 0) == []\nassert f(a, 2) == [2, 3]\nassert f(a, 8) == a and f(a, 8) is not a\nassert a == [1, 2, 3]\nassert f([], 3) == []\nfor bad in [-1, True, False, 1.5, '2', None]:\n    try:\n        f(a, bad)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('invalid count accepted')\n",
+      "task_sha256": "febf08bcaceb51cd39c4af3ecc55790c54ce56b7043086e48167799e76038f9d",
+      "checks_sha256": "b4e05cfe128f6eedf577b4fc82c47fd459ec1b421537b490230a376671260fcc"
+    },
+    {
+      "case_id": "held-volume-level",
+      "partition": "held_out",
+      "family": "validation_state",
+      "goal": "Fix the Python implementation in solution.py. Repair Volume.set_level(level): accept only strict integers from zero through ten inclusive, excluding bool. Invalid values raise ValueError before mutation. Return the accepted level; a new instance starts at five. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "class Volume:\n    def __init__(self):\n        self.level = 5\n    def set_level(self, level):\n        self.level = level\n        return self.level\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nv = s['Volume']()\nassert v.level == 5\nfor bad in [-1, 11, True, False, 2.5, '3', None]:\n    try:\n        v.set_level(bad)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('invalid level accepted')\n    assert v.level == 5\nassert v.set_level(0) == 0 and v.level == 0\nassert v.set_level(10) == 10 and v.level == 10\n",
+      "task_sha256": "41ec81e062043d42207b2cf924aed69456a4294d4ba2573a46e456c2f2117fde",
+      "checks_sha256": "0712e6623eb557b29a46a76eb567f7a6ed8f2341f29b82e248d1c823874ec667"
+    },
+    {
+      "case_id": "held-toggle-strict-bool",
+      "partition": "held_out",
+      "family": "validation_state",
+      "goal": "Fix the Python implementation in solution.py. Repair Toggle.set_enabled(value): accept only bool, set enabled and return the new bool. Reject every other type with ValueError before mutation. New instances start disabled. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "class Toggle:\n    def __init__(self):\n        self.enabled = False\n    def set_enabled(self, value):\n        self.enabled = bool(value)\n        return self.enabled\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nv = s['Toggle']()\nassert v.enabled is False\nfor bad in [0, 1, '', 'yes', [], None]:\n    try:\n        v.set_enabled(bad)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('non-bool accepted')\n    assert v.enabled is False\nassert v.set_enabled(True) is True and v.enabled is True\nassert v.set_enabled(False) is False and v.enabled is False\n",
+      "task_sha256": "2069caa4b5a8f0705fdc09899fb55ead74a76929152809184c19b90acec31401",
+      "checks_sha256": "b8d1e0e65f6c55d7aa74fd147c4cc591abca7c933ac80d8e3e1de650640124b9"
+    },
+    {
+      "case_id": "held-bounded-queue",
+      "partition": "held_out",
+      "family": "validation_state",
+      "goal": "Fix the Python implementation in solution.py. Repair BoundedQueue.push(item): append and return the new length only if capacity is available. A full queue raises OverflowError before mutation. Capacity is a nonnegative constructor integer. Preserve falsy items and existing order. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "class BoundedQueue:\n    def __init__(self, capacity):\n        self.capacity = capacity\n        self.items = []\n    def push(self, item):\n        self.items.append(item)\n        if len(self.items) > self.capacity:\n            raise OverflowError('full')\n        return len(self.items)\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nq = s['BoundedQueue'](1)\nassert q.push(False) == 1 and q.items == [False]\ntry:\n    q.push('extra')\nexcept OverflowError:\n    pass\nelse:\n    raise AssertionError('full queue accepted')\nassert q.items == [False]\nzero = s['BoundedQueue'](0)\ntry:\n    zero.push(None)\nexcept OverflowError:\n    pass\nelse:\n    raise AssertionError('zero capacity accepted')\nassert zero.items == []\nq = s['BoundedQueue'](2)\nassert q.push(None) == 1\nassert q.push(0) == 2\nassert q.items == [None, 0]\n",
+      "task_sha256": "a4b30c42ae97b5e6fa7824127af1644186d16aa9b4e1f760e73ab5e5323f39fe",
+      "checks_sha256": "e223641eab06bf14fa84b9469f1120e8ab1352b0128952176f7055d33ddaa186"
+    }
+  ]
+}
