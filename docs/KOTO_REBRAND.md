@@ -1,7 +1,7 @@
 # Koto rebrand
 
 The product, plugin, skills, CLI help and documentation now use **Koto** and
-the supplied [wooden K logo](../assets/koto-logo.png). Plugin version 0.3.0 is
+the supplied [wooden K logo](../assets/koto-logo.png). Plugin version 0.3.1 is
 named `koto`; install it as `koto@koto` from the existing GitHub marketplace.
 The Python distribution is `koto-router`, installed from this source checkout.
 
