@@ -1,6 +1,8 @@
 # Native empty-patch diagnosis
 
 Issue: [#537](https://github.com/mehrdadxzaker/hormuz/issues/537).
+The [resolution and publication verification](RESOLUTION.md) records the
+completed investigation and the remaining model-qualification boundary.
 The original [v5 episode](../../campaigns/local-repair-20261016-v5/README.md)
 completed six local submissions but made no edit. Two shell invocations were
 exactly `apply_patch`, with no argument or stdin, and returned usage exit 2.
