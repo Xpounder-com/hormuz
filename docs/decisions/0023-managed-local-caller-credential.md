@@ -10,7 +10,7 @@
 Default shared setup creates or reuses one private local caller credential.
 Generated router configuration references its private versioned file; the
 selected Codex provider uses documented command-backed authentication through
-the installed Hormuz Python interpreter. The helper is bound to a connected
+the installed Koto Python interpreter. The helper is bound to a connected
 generation and credential digest. It returns no credential after disconnect,
 configuration change or generation replacement.
 

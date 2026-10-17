@@ -12,6 +12,7 @@ build/
 dist/
 *.egg-info/
 hormuz.json
+koto.json
 .env
 .env.local
 *.runtime.env
@@ -19,7 +20,7 @@ deploy/compose/runtime/
 clients/macos/.build/
 clients/macos/.swiftpm/
 clients/rust/target/
-apps/macos/HormuzCompanion/.build/
-apps/macos/HormuzCompanion/.swiftpm/
+apps/macos/KotoCompanion/.build/
+apps/macos/KotoCompanion/.swiftpm/
 marketing/private/
 website/node_modules

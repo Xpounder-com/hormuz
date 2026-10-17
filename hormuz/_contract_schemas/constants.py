@@ -30,6 +30,7 @@ LOCAL_SETUP_SCHEMA_ID = "hormuz.local-setup"
 LOCAL_SETUP_PROFILE_SCHEMA_ID = "hormuz.local-setup-profile"
 
 CONNECTED_CLIENT_ERROR_ACTIONS = {
+    "connected_client_app_activation_disabled": "keep_native_app_and_use_isolated_test",
     "connected_client_version_unsupported": "use_pinned_client_or_disconnect",
     "connected_client_recovery_required": "disconnect_then_connect",
     "connected_client_setup_changed": "disconnect_then_connect",
@@ -198,6 +199,7 @@ PUBLIC_ERROR_CODES_V2 = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unava
 
 ROUTE_ADMISSION_ERROR_CODES = frozenset({
     "hormuz_route_invalid_benchmark_mode",
+    "hormuz_route_invalid_task_selection",
     "hormuz_route_invalid_routing_mode", "hormuz_route_affinity_required",
     "hormuz_route_local_route_unavailable", "hormuz_route_local_capacity_busy",
     "hormuz_route_destination_not_admitted", "hormuz_route_policy_changed",
@@ -208,14 +210,23 @@ PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restrict
                               *ROUTE_ADMISSION_ERROR_CODES, *CONNECTED_CLIENT_ERROR_ACTIONS})
 
 _CURRENT_SCHEMA_VERSIONS = {
+    "hormuz.chat-task": 1,
+    "hormuz.chat-models": 1,
+    "hormuz.chat-error": 1,
+    "hormuz.chat-owner": 1,
+    "hormuz.codex-app-bridge-install": 1,
+    "hormuz.local-coding-evidence": 2,
+    "hormuz.coding-probe-plan": 2,
+    "hormuz.coding-probe-status": 1,
+    "hormuz.coding-probe-error": 1,
+    "hormuz.coding-probe-relay": 1,
     "hormuz.personal-model-scorecard": 1, "hormuz.benchmark-suite": 1,
     "hormuz.benchmark-routing-configuration": 1, "hormuz.benchmark-error": 1,
     "hormuz.benchmark-runtime": 1,
     NATIVE_STATUS_SCHEMA_ID: 1,
-    "hormuz.local-coding-evidence": 1,
     "hormuz.cloud-readiness": 1,
     LOCAL_SETUP_SCHEMA_ID: 1,
-    LOCAL_SETUP_PROFILE_SCHEMA_ID: 2,
+    LOCAL_SETUP_PROFILE_SCHEMA_ID: 3,
     CONNECTED_CLIENT_STATUS_SCHEMA_ID: CONNECTED_CLIENT_STATUS_SCHEMA_VERSION,
     CONNECTED_CLIENT_PREVIEW_SCHEMA_ID: CONNECTED_CLIENT_PREVIEW_SCHEMA_VERSION,
     CONNECTED_CLIENT_ERROR_SCHEMA_ID: CONNECTED_CLIENT_ERROR_SCHEMA_VERSION,

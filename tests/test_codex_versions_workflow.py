@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tomllib
 import unittest
@@ -15,6 +16,60 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
         self.fixture = lifetime.ConnectedClientLifetimeWorkflowTests()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
+
+    def test_v3_setup_accepts_a_bounded_app_sized_request_without_changing_saved_features(self):
+        (self.fixture.root / 'client-version.txt').write_text('0.160.0')
+        with lifetime.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, requests):
+            value, _, _ = self.fixture.managed_configuration(cloud)
+            options = self.fixture.local_setup_options(value)
+            path = Path(options[1])
+            original = json.loads(path.read_text())
+            profile = json.loads((Path(__file__).parent / 'fixtures/local-setup-profile-v3.json').read_text())
+            profile.update({key: original[key] for key in ('system', 'machine', 'runtime_sha256', 'model_sha256')})
+            profile.update(client_version='0.160.0',
+                           qualification_id='synthetic-app-sized-v3', max_request_bytes=2 * 1024 * 1024)
+            path.write_text(json.dumps(profile))
+            settings = self.fixture.home / 'config.toml'
+            settings.write_text('model = "original-model"\nmodel_reasoning_effort = "max"\n'
+                                '[features]\nplugins = true\napps = true\n'
+                                '[mcp_servers.fixture]\ncommand = "fixture-mcp"\nenabled = true\n')
+            before = tomllib.loads(settings.read_text())
+            self.addCleanup(lambda: self.fixture.command('disconnect', check=False))
+            preview = json.loads(self.fixture.command('setup', *options, '--dry-run').stdout)
+            self.assertEqual(preview['connection']['phase'], 'preview')
+            self.assertEqual(tomllib.loads(settings.read_text()), before)
+            self.fixture.command('setup', *options)
+            document = tomllib.loads(settings.read_text())
+            self.assertEqual(document['features'], before['features'])
+            self.assertEqual(document['mcp_servers'], before['mcp_servers'])
+            self.assertEqual(document['model_reasoning_effort'], 'max')
+            self.fixture.command('disconnect')
+            self.assertEqual(tomllib.loads(settings.read_text()), before)
+            self.assertEqual(requests, [])
+
+    def test_v3_managed_setup_allows_a_reasoning_budget_without_relaxing_legacy_profiles(self):
+        (self.fixture.root / 'client-version.txt').write_text('0.160.0')
+        with lifetime.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, requests):
+            value, _, _ = self.fixture.managed_configuration(cloud)
+            options = self.fixture.local_setup_options(value)
+            path = Path(options[1])
+            profile = json.loads(path.read_text())
+            profile.update(schema_version=3, client_version='0.160.0', qualification_id='synthetic-reasoning-v3',
+                           coding_evidence=None,
+                           max_request_bytes=2 * 1024 * 1024, max_output_tokens=8192,
+                           upstream_timeout_seconds=180, capabilities=['responses', 'text', 'codex_llama_v1'])
+            path.write_text(json.dumps(profile))
+            self.addCleanup(lambda: self.fixture.command('disconnect', check=False))
+            receipt = json.loads(self.fixture.command('setup', *options).stdout)
+            self.assertEqual(receipt['connection']['local_runtime']['state'], 'ready')
+            self.assertEqual(self.fixture.client()['status'], 200)
+            self.fixture.command('disconnect')
+            profile['schema_version'] = 1
+            path.write_text(json.dumps(profile))
+            denied = self.fixture.command('setup', *options, '--dry-run', check=False)
+            self.assertEqual(denied.returncode, 2)
+            self.assertEqual(self.fixture.client('inspect')['model'], 'original-model')
+            self.assertEqual(requests, [])
 
     def test_codex_0160_connects_routes_and_restores_with_its_actual_version(self):
         (self.fixture.root / 'client-version.txt').write_text('0.160.0')
@@ -34,6 +89,48 @@ class CodexVersionsWorkflowTests(unittest.TestCase):
             self.assertEqual(disconnected['phase'], 'disconnected')
             self.assertEqual(disconnected['router'], 'stopped')
             self.assertEqual(self.fixture.client('inspect')['model'], 'original-model')
+
+    def test_bundled_app_engine_connects_with_its_exact_prerelease_version(self):
+        (self.fixture.root / 'client-version.txt').write_text('0.162.0-alpha.17.2')
+        with self.fixture.configured():
+            before = (self.fixture.home / 'config.toml').read_bytes()
+            preview = json.loads(self.fixture.command('connect', '--dry-run').stdout)
+            self.assertEqual(preview['client_version'], '0.162.0-alpha.17.2')
+            self.assertEqual((self.fixture.home / 'config.toml').read_bytes(), before)
+            owner = json.loads(self.fixture.command('connect').stdout)
+            self.assertEqual(owner['client_version'], '0.162.0-alpha.17.2')
+            document = tomllib.loads((self.fixture.home / 'config.toml').read_text())
+            provider = document['model_providers'][document['model_provider']]
+            self.assertIs(provider['supports_websockets'], False)
+            self.assertEqual(self.fixture.client()['status'], 200)
+            diagnosis = json.loads(self.fixture.command('diagnose', '--executable', str(self.fixture.executable),
+                                   '--project', str(self.fixture.root)).stdout)
+            self.assertEqual(diagnosis['client_compatibility'], 'supported')
+            self.fixture.command('disconnect')
+            self.assertEqual(self.fixture.client('inspect')['model'], 'original-model')
+
+    def test_owned_provider_auth_survives_app_model_selection_but_not_provider_edits(self):
+        with lifetime.provider('CLOUD_MUST_STAY_UNUSED') as (cloud, requests):
+            value, _, _ = self.fixture.managed_configuration(cloud)
+            options = self.fixture.local_setup_options(value)[:-2]
+            self.fixture.environment.pop('DESTINATION_WORKFLOW_TOKEN', None)
+            self.fixture.environment.pop('HORMUZ_GATEWAY_TOKEN', None)
+            self.addCleanup(lambda: self.fixture.command('disconnect', check=False))
+            self.fixture.command('setup', *options)
+            self.fixture.client('edit-model')
+            self.assertEqual(json.loads(self.fixture.command('status').stdout)['configuration'], 'changed')
+            self.assertEqual(self.fixture.client('request-local-model')['status'], 200)
+            self.fixture.client('edit-provider')
+            settings = tomllib.loads((self.fixture.home / 'config.toml').read_text())
+            auth = settings['model_providers'][settings['model_provider']]['auth']
+            denied = subprocess.run([auth['command'], *auth['args']], env=self.fixture.environment,
+                                    capture_output=True, text=True, timeout=8)
+            self.assertEqual(denied.returncode, 2)
+            self.assertEqual(denied.stdout, '')
+            self.assertEqual(json.loads(denied.stderr)['error']['code'], 'connected_client_authentication_unsupported')
+            self.fixture.command('disconnect')
+            self.assertEqual(self.fixture.client('inspect')['model'], 'user-model')
+            self.assertEqual(requests, [])
 
     def test_switching_between_supported_versions_requires_a_new_owned_generation(self):
         with self.fixture.configured():

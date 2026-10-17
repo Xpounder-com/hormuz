@@ -4,7 +4,7 @@ Work against [the customer-local router scope](docs/ROUTER_SCOPE.md). Use an
 isolated checkout and preserve unrelated dirty work. New product work must
 advance the approved public workflow: connect, submit through the real router,
 inspect result/status, disconnect. CLI and plugin callers share the connection
-implementation. Do not add a Hormuz coding UI or duplicate the host's agent loop.
+implementation. Do not add a Koto coding UI or duplicate the host's agent loop.
 
 Use Python 3.11–3.14. Install the source in a virtual environment. During
 implementation, run the fast tests and the affected workflow module or methods:
@@ -21,7 +21,7 @@ wheel outside the source checkout:
 
 ```sh
 python -m build
-python tools/verify_router_wheel.py dist/hormuz-*.whl
+python tools/verify_router_wheel.py dist/koto_router-*.whl
 ```
 
 Install the pinned build frontend with `python -m pip install build==1.3.0` if
@@ -67,6 +67,15 @@ Test-only HTTP/TLS servers use an explicit bounded shutdown poll interval and
 owned threads with `shutdown`, `server_close`, and `join` cleanup. Do not shorten
 production deadlines, remove cancellation assertions, add wakeup requests, or
 introduce busy retry loops to make tests pass faster.
+
+Runtime and plugin releases follow the [versioning policy](docs/VERSIONING.md).
+Run `python tools/version.py check` to validate their canonical sources and
+mirrors. Preview a release change with
+`python tools/version.py bump runtime prerelease --dry-run` or
+`python tools/version.py bump plugin patch --dry-run`, choosing the operation
+for the intended compatibility change. Omit `--dry-run` only to apply that
+reviewed metadata change. CI and test-only PRs do not automatically bump a
+release; schema versions, client pins and historical evidence stay independent.
 
 Keep queues, requests, processes and retries finite. Default to at most eight
 outbound HTTP requests in flight, three retries with backoff, explicit timeouts

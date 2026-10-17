@@ -99,7 +99,7 @@ Disconnect still restores only owned settings and stops only owned resources.
 The frozen [coding cases](../tests/fixtures/shadow-coding-cases-v1.json) specify
 initial files, goals and independent Python checks. Each starts with failing
 checks. The real pinned Codex CLI attempts each repair autonomously through the
-installed Hormuz package and existing pinned llama.cpp/Qwen3-4B files. One bounded
+installed Koto package and existing pinned llama.cpp/Qwen3-4B files. One bounded
 episode per case is retained, including failed or timed-out repairs; no solution
 script is supplied to the model and there are no model-quality retries.
 

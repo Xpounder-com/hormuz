@@ -101,15 +101,25 @@ class LocalHistory:
     def __init__(self, source_path: Path, *, environ=None):
         environment = os.environ if environ is None else environ
         home = Path(environment.get("HOME") or Path.home()).expanduser()
-        if environment.get("HORMUZ_HISTORY_HOME"):
-            base = Path(environment["HORMUZ_HISTORY_HOME"]).expanduser().absolute()
+        fingerprint = hashlib.sha256(str(Path(source_path).expanduser().resolve()).encode()).hexdigest()
+        history_home = environment.get("KOTO_HISTORY_HOME") or environment.get("HORMUZ_HISTORY_HOME")
+        if history_home:
+            base = Path(history_home).expanduser().absolute()
         elif sys.platform == "darwin":
-            base = home / "Library" / "Application Support" / "Hormuz" / "history-v1"
+            base = home / "Library" / "Application Support" / "Koto" / "history-v1"
+            legacy = home / "Library" / "Application Support" / "Hormuz" / "history-v1"
         else:
-            base = Path(environment.get("XDG_DATA_HOME") or home / ".local" / "share") / "hormuz" / "history-v1"
+            data = Path(environment.get("XDG_DATA_HOME") or home / ".local" / "share")
+            base = data / "koto" / "history-v1"
+            legacy = data / "hormuz" / "history-v1"
+        if not history_home:
+            current_profile, legacy_profile = base / fingerprint, legacy / fingerprint
+            if (not base.is_symlink() and (not base.exists() or base.is_dir())
+                    and not current_profile.exists() and not current_profile.is_symlink()
+                    and (legacy_profile.exists() or legacy_profile.is_symlink())):
+                base = legacy
         # Arbitrary user-controlled symlinks reach safety checks unchanged.
         base = local_path(base)
-        fingerprint = hashlib.sha256(str(Path(source_path).expanduser().resolve()).encode()).hexdigest()
         self.directory = base / fingerprint
         self.entries_directory = self.directory / "entries"
 

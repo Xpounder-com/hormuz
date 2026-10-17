@@ -18,10 +18,12 @@ def main():
     wheel = args.wheel.resolve()
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
-        required = {'hormuz/codex-0160-base-instructions.json', 'hormuz/codex-0160-LICENSE.txt',
-                    'hormuz/local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json'}
+        required = {'koto/__init__.py', 'koto/__main__.py',
+                    'hormuz/codex-0160-base-instructions.json', 'hormuz/codex-0160-LICENSE.txt',
+                    'hormuz/local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json',
+                    'hormuz/local-setup-codex-app-0162-llama-b11617-qwen3-4b-v3.json'}
         if not required <= set(names):
-            raise SystemExit('Wheel is missing Codex 0.160.0 compatibility assets')
+            raise SystemExit('Wheel is missing Koto entry points or Codex CLI/app compatibility assets')
         if any('/migrations/postgresql/' in name or name.startswith(('clients/', 'apps/', 'deploy/'))
                or name.endswith('.css') or name in {'hormuz/postgres.py', 'hormuz/work_billing.py',
                'hormuz/hosted.py', 'hormuz/commands/agent.py'} for name in names):
@@ -33,19 +35,32 @@ def main():
                         str(site), str(wheel)], check=True, timeout=60)
         environment = {**os.environ, 'PYTHONPATH': str(site), 'PYTHONDONTWRITEBYTECODE': '1'}
         shutil.copytree(ROOT / 'tests', temporary / 'tests', ignore=shutil.ignore_patterns('__pycache__'))
+        # Maintainer CLIs are tested as source tools, never shipped in the wheel.
+        (temporary / 'tools').mkdir()
+        for name in ('version.py', 'verify_router_scope.py'):
+            shutil.copy2(ROOT / 'tools' / name, temporary / 'tools' / name)
         subprocess.run([sys.executable, '-c',
-                        'from pathlib import Path; import hormuz; '
-                        'assert Path(hormuz.__file__).resolve().is_relative_to(Path("installed").resolve())'],
+                        'from pathlib import Path; import koto, hormuz; '
+                        'assert koto.GatewayConfig is hormuz.GatewayConfig; '
+                        'assert all(Path(module.__file__).resolve().is_relative_to(Path("installed").resolve()) '
+                        'for module in (koto, hormuz))'],
                        cwd=temporary, env=environment, check=True, timeout=10)
+        scripts = site / ('Scripts' if os.name == 'nt' else 'bin')
+        for name in ('koto', 'hormuz'):
+            executable = scripts / (name + '.exe' if os.name == 'nt' else name)
+            help_result = subprocess.run([str(executable), '--help'], cwd=temporary, env=environment,
+                                         capture_output=True, text=True, check=True, timeout=10)
+            if 'usage: koto ' not in help_result.stdout:
+                raise SystemExit('Installed CLI does not expose the Koto identity: ' + name)
         # unittest timings include setup and cleanup. Python 3.11 runs the same
         # complete suite without the duration flag introduced in Python 3.12.
         durations = ['--durations', '20'] if sys.version_info >= (3, 12) else []
-        for pattern, timeout in (('test_*fast.py', 60), ('test_*workflow.py', 1200)):
+        for pattern, timeout in (('test_*fast.py', 60), ('test_*workflow.py', 1500)):
             print(f'Running installed-wheel tests: {pattern}', flush=True)
             subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
                             '-p', pattern, '-f', '-v', *durations],
                            # Both layers must pass; retain a finite deadline for
-                           # each and the encompassing CI job's 22-minute cap.
+                           # each and main's encompassing 27-minute job cap.
                            cwd=temporary, env=environment, check=True, timeout=timeout)
     print('Installed-wheel fast tests and workflows passed outside the source checkout')
 

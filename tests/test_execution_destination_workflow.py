@@ -85,7 +85,7 @@ finally:
 
 
 @contextmanager
-def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None, text_deltas=(), trailing_events=(), response_body=None):
+def provider(answer, *, status=200, health_status=200, hold_first=None, event_stream=False, cancel_stream=None, slow_stream=False, backpressure_first=None, observe_close=None, response_fields=None, text_deltas=(), trailing_events=(), response_body=None, compact_json=False):
     received = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -114,13 +114,15 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                       "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}}
             if response_fields is not None:
                 result.update(response_fields)
-            data = json.dumps(result).encode()
+            separators = (',', ':') if compact_json else None
+            data = json.dumps(result, separators=separators).encode()
             if event_stream:
-                tool = {"type": "function_call", "call_id": "fixture-call", "name": "fixture_tool", "arguments": "{}"}
+                tool = (response_fields['output'][0] if response_fields and response_fields.get('output') else
+                        {"type": "function_call", "call_id": "fixture-call", "name": "fixture_tool", "arguments": "{}"})
                 events = [{"type": "response.output_item.done", "item": tool},
                           *({"type": "response.output_text.delta", "delta": delta} for delta in text_deltas),
                           {"type": "response.completed", "response": result}, *trailing_events]
-                data = b"".join(("data: " + json.dumps(event) + "\n\n").encode() for event in events)
+                data = b"".join(("data: " + json.dumps(event, separators=separators) + "\n\n").encode() for event in events)
             if response_body is not None:
                 data = response_body
             if backpressure_first and len(received) == 1:
@@ -519,6 +521,24 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
                                    request={"model": "cloud-code", "input": "Unknown task."})
                 self.assertEqual(loosened["status"], 403)
                 self.assertEqual((local_requests, cloud_requests), ([], []))
+
+    def test_chat_task_selection_requires_unambiguous_local_only_admission(self):
+        with provider('LOCAL_DESTINATION') as (local, local_requests), \
+             provider('CLOUD_DESTINATION') as (cloud, cloud_requests):
+            with self.connected_client(self.admission_configuration(local,cloud,mode='auto')) as submit:
+                state = submit(method='GET',path='/router/state')
+                self.assertEqual(state['headers'].get('x-hormuz-chat-tasks'),'v1')
+                for headers in (
+                    {'X-Hormuz-Task-Selection':'model'},
+                    {'X-Hormuz-Routing-Mode':'local_only','X-Hormuz-Task-Selection':'unsupported'},
+                    {'X-Hormuz-Routing-Mode':'local_only','X-Hormuz-Task-Selection':'model',
+                     'x-hormuz-task-selection':'router'},
+                ):
+                    with self.subTest(headers=headers):
+                        result = submit(headers=headers,request={'input':'Summarize this fixture.'})
+                        self.assertEqual((result['status'],result['body']['error']['code']),
+                                         (403,'hormuz_route_invalid_task_selection'))
+            self.assertEqual((local_requests,cloud_requests),([],[]))
 
     def test_auto_does_not_retarget_opaque_continuation_without_retained_affinity(self):
         with provider("LOCAL_DESTINATION") as (local, local_requests), \

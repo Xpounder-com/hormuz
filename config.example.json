@@ -3,7 +3,7 @@
     "host": "127.0.0.1",
     "port": 8765
   },
-  "database": "./hormuz.sqlite3",
+  "database": "./koto.sqlite3",
   "upstreams": {
     "local-llama": {
       "protocol": "openai",
@@ -14,7 +14,7 @@
   },
   "identities": [
     {
-      "token_env": "HORMUZ_GATEWAY_TOKEN",
+      "token_env": "KOTO_GATEWAY_TOKEN",
       "actor_id": "local-user",
       "actor_name": "Local user",
       "team_id": "local",
@@ -53,6 +53,6 @@
   },
   "ai_work": {
     "enabled": true,
-    "database": "./hormuz-work.sqlite3"
+    "database": "./koto-work.sqlite3"
   }
 }

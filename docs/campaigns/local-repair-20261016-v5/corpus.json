@@ -1,0 +1,201 @@
+{
+  "document_version": 3,
+  "campaign_id": "local-repair-20261016-v5",
+  "criteria_version": "local-repair.v1",
+  "purpose": "prepared autonomous coding qualification",
+  "native_episodes_performed": 0,
+  "entries": [
+    {
+      "case_id": "dev-clamp",
+      "partition": "development",
+      "family": "arithmetic",
+      "goal": "Fix the Python implementation in solution.py. Repair clamp(value, lower, upper): return value bounded by the inclusive lower and upper limits. Raise ValueError when lower exceeds upper. Inputs are integers. Do not change the public function name. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def clamp(value, lower, upper):\n    return max(lower, value)\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['clamp']\nassert f(12, 2, 8) == 8\nassert f(-5, -3, 4) == -3\nassert f(0, -3, 4) == 0\nassert f(4, 4, 4) == 4\ntry:\n    f(2, 4, 1)\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError('inverted bounds accepted')\n",
+      "task_sha256": "33fd16c7939f008528fdcd40d4911c9d323eec130318414f0683d8bd7a2bc5aa",
+      "checks_sha256": "da25b64603054b72230db061e79855ed9d3f32b6f31076fa5755ac4eec12b942"
+    },
+    {
+      "case_id": "dev-strip-prefix",
+      "partition": "development",
+      "family": "text",
+      "goal": "Fix the Python implementation in solution.py. Repair strip_prefix(text, prefix): remove exactly one prefix only when it is at the beginning of text; otherwise return the original text. An empty prefix leaves text unchanged. Preserve Unicode and later occurrences. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def strip_prefix(text, prefix):\n    return text.replace(prefix, '')\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['strip_prefix']\nassert f('abcabc', 'abc') == 'abc'\nassert f('xabc', 'abc') == 'xabc'\nassert f('abc', '') == 'abc'\nassert f('', 'x') == ''\nassert f('αβα', 'α') == 'βα'\nassert f('same', 'same') == ''\n",
+      "task_sha256": "ac666d5237460f22274f88ec968dec3498caa5e45251b0fc62379a429f5ca7d1",
+      "checks_sha256": "fcc045ad3370cc3e2e8306bb1f1ec3105eda3b1566d72877c25269822dd8ff8d"
+    },
+    {
+      "case_id": "dev-rotate-left",
+      "partition": "development",
+      "family": "collections",
+      "goal": "Fix the Python implementation in solution.py. Repair rotate_left(items, steps): return a new list rotated left by integer steps modulo the list length. Negative steps rotate right. Empty input returns a new empty list. Preserve elements and do not mutate the input. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def rotate_left(items, steps):\n    return items[steps:] + items[:steps]\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['rotate_left']\na = [1, 2, 3, 4]\nassert f(a, 5) == [2, 3, 4, 1]\nassert f(a, -5) == [4, 1, 2, 3]\nassert f(a, 0) == a and f(a, 0) is not a\nassert a == [1, 2, 3, 4]\nempty = []\nassert f(empty, 10) == [] and f(empty, 10) is not empty\nassert f([[1], [2]], 3) == [[2], [1]]\n",
+      "task_sha256": "b90c5095ab8c1f6e0c1da0e665b881cd3014f318acaca864caa38482eaea3002",
+      "checks_sha256": "3f83dd8fc94581f1d72a6952b1e0f0c4988e90c0ec9001383c325de44954d3b1"
+    },
+    {
+      "case_id": "dev-positive-counter",
+      "partition": "development",
+      "family": "validation_state",
+      "goal": "Fix the Python implementation in solution.py. Repair Counter.increment(step=1). Accept only strict positive integers (bool is invalid). Raise ValueError before mutation for invalid step. Add a valid step to value and return the new value; a new counter starts at zero. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "class Counter:\n    def __init__(self):\n        self.value = 0\n    def increment(self, step=1):\n        self.value += step\n        return self.value\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nc = s['Counter']()\nassert c.increment() == 1\nassert c.increment(3) == 4\nfor bad in [0, -1, True, False, 1.5, '2', None]:\n    try:\n        c.increment(bad)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('invalid step accepted')\n    assert c.value == 4\nassert c.increment(2) == 6\n",
+      "task_sha256": "40cf635d46f648cb990a97596d31fb79be3641b52a957c701a1b4a06b5148d5f",
+      "checks_sha256": "65e4123e7ba3a0b5e8f953213a1078d170b9fe997e27372efe413719edabb6d3"
+    },
+    {
+      "case_id": "held-multiple-ceiling",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "goal": "Fix the Python implementation in solution.py. Repair round_up_multiple(value, step). For integer value and strict positive integer step, return the smallest multiple of step greater than or equal to value, including negative values. Raise ValueError for invalid step, including bool. Do not change value. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def round_up_multiple(value, step):\n    return (value // step) * step\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['round_up_multiple']\nassert f(7, 5) == 10\nassert f(10, 5) == 10\nassert f(-7, 5) == -5\nassert f(-10, 5) == -10\nassert f(0, 3) == 0\nassert f(1, 1) == 1\nfor bad in [0, -2, True, False, 1.5, '2', None]:\n    try:\n        f(7, bad)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('invalid step accepted')\n",
+      "task_sha256": "1419edd20a19a8328787428c2801bfb6fc7e6d1b6b6fb9426cef48a5e74ca653",
+      "checks_sha256": "a3643dd9fc2eca367ae579b85284903e62707d69a264690543cde9e5155c8760"
+    },
+    {
+      "case_id": "held-interval-overlap",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "goal": "Fix the Python implementation in solution.py. Repair overlap_length(a_start, a_end, b_start, b_end): return the length shared by two half-open integer intervals, zero when they only touch or are disjoint. Empty intervals are valid. Raise ValueError for either interval with start greater than end. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def overlap_length(a_start, a_end, b_start, b_end):\n    return min(a_end, b_end) - max(a_start, b_start)\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['overlap_length']\nassert f(0, 2, 5, 8) == 0\nassert f(0, 5, 3, 9) == 2\nassert f(-5, 0, -3, 2) == 3\nassert f(2, 2, 0, 4) == 0\nassert f(0, 3, 3, 4) == 0\nassert f(1, 5, 1, 5) == 4\nfor args in [(3, 2, 0, 1), (0, 1, 3, 2)]:\n    try:\n        f(*args)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('inverted interval accepted')\n",
+      "task_sha256": "fdc7cf486f3d0c8101883b75d6f691a860da238cd4c1669bdf9a3f87d2e5796d",
+      "checks_sha256": "8a9545aca63711b6fc2b70fa3979cafd93cb2fa55ae4544435686c17dda13e4c"
+    },
+    {
+      "case_id": "held-weighted-total",
+      "partition": "held_out",
+      "family": "arithmetic",
+      "goal": "Fix the Python implementation in solution.py. Repair weighted_total(prices, quantities). Return the sum of each integer price times its corresponding integer quantity. Empty lists return zero; unequal lengths raise ValueError. Preserve both input lists; negative and zero entries are valid. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def weighted_total(prices, quantities):\n    return sum(prices) + sum(quantities)\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['weighted_total']\np, q = [2, 5], [3, 4]\nassert f(p, q) == 26\nassert p == [2, 5] and q == [3, 4]\nassert f([], []) == 0\nassert f([-2, 0, 3], [4, 9, -1]) == -11\nfor a, b in [([1], []), ([], [1]), ([1, 2], [3])]:\n    try:\n        f(a, b)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('unequal lengths accepted')\n",
+      "task_sha256": "4b037d697423c1a286fca39d4eea9adac6446d640398284e8a12ff597b75b01b",
+      "checks_sha256": "5f54061d8494623cfdea1d3808b51f5eb691cc92288537036b6299c10c662c2a"
+    },
+    {
+      "case_id": "held-collapse-spaces",
+      "partition": "held_out",
+      "family": "text",
+      "goal": "Fix the Python implementation in solution.py. Repair collapse_spaces(text): replace every nonempty run of ASCII space characters with one ASCII space, including at the ends. Preserve tabs, newlines, other Unicode whitespace, and every other character. Empty text remains empty. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def collapse_spaces(text):\n    return ' '.join(text.split())\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['collapse_spaces']\nassert f('  a  b  ') == ' a b '\nassert f('') == ''\nassert f('   ') == ' '\nassert f('a\\t  b\\n c') == 'a\\t b\\n c'\nassert f('α\\u00a0  β') == 'α\\u00a0 β'\nassert f('plain') == 'plain'\n",
+      "task_sha256": "3aedf01cd72d44c985f7d552e5570527de521451bb8eb4382afb4abbef586fad",
+      "checks_sha256": "a70703d17b39e15636f9797bbdeb043b4947e68f9b8be0b5f6c1d39ce8f16e9b"
+    },
+    {
+      "case_id": "held-ensure-suffix",
+      "partition": "held_out",
+      "family": "text",
+      "goal": "Fix the Python implementation in solution.py. Repair ensure_suffix(text, suffix): append suffix only if text does not already end with that exact suffix. An empty suffix leaves text unchanged. Preserve Unicode and occurrences that are not at the end. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def ensure_suffix(text, suffix):\n    return text + suffix\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['ensure_suffix']\nassert f('report.md', '.md') == 'report.md'\nassert f('report', '.md') == 'report.md'\nassert f('.md-report', '.md') == '.md-report.md'\nassert f('', '') == ''\nassert f('', 'x') == 'x'\nassert f('αβ', 'β') == 'αβ'\nassert f('abc', '') == 'abc'\n",
+      "task_sha256": "c6e248f37cb8ed386c6d7d72bd42708095bae15286ce65dae9d4a250dca4a0d1",
+      "checks_sha256": "39d32b39a756a75fad20278fa0c62bc7096afc10be505b6f4dc6c6d022159f54"
+    },
+    {
+      "case_id": "held-split-once",
+      "partition": "held_out",
+      "family": "text",
+      "goal": "Fix the Python implementation in solution.py. Repair split_once(text, separator): split at the first exact separator and return (before, after), omitting that separator. If absent return (text, \"\"). Empty separator raises ValueError. Preserve all later separators and Unicode. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def split_once(text, separator):\n    before, found, after = text.rpartition(separator)\n    return before, after\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['split_once']\nassert f('a:b:c', ':') == ('a', 'b:c')\nassert f('plain', ':') == ('plain', '')\nassert f(':tail', ':') == ('', 'tail')\nassert f('head:', ':') == ('head', '')\nassert f('α--β--γ', '--') == ('α', 'β--γ')\nassert f('', ':') == ('', '')\ntry:\n    f('abc', '')\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError('empty separator accepted')\n",
+      "task_sha256": "434f2e83bd2f6c98f43e1bb6f7c5c74ef28b93caee97f41ac8333726d3fd0370",
+      "checks_sha256": "447c6f805fb5ed9f894344f05087b86f7e7f3889d5b7369eb61c881f7911ca77"
+    },
+    {
+      "case_id": "held-adjacent-pairs",
+      "partition": "held_out",
+      "family": "collections",
+      "goal": "Fix the Python implementation in solution.py. Repair pairwise(items): return a new list of tuples for every adjacent pair in order, with overlapping pairs. Inputs shorter than two return an empty list. Support unhashable elements and preserve input. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def pairwise(items):\n    return list(zip(items[::2], items[1::2]))\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['pairwise']\na = [1, 2, 3, 4]\nassert f(a) == [(1, 2), (2, 3), (3, 4)]\nassert a == [1, 2, 3, 4]\nassert f([]) == [] and f([1]) == []\nassert f([[1], [2], [3]]) == [([1], [2]), ([2], [3])]\nassert f([0, 0, 0]) == [(0, 0), (0, 0)]\n",
+      "task_sha256": "55d3bf53a23ac0db69329efa1c033237beaebac82bd8d4e17081499b10dffe8e",
+      "checks_sha256": "769a007fb3db526e91d59b8e6fa02c3f9bc204cb1640216ebf187867720a529a"
+    },
+    {
+      "case_id": "held-merge-counts",
+      "partition": "held_out",
+      "family": "collections",
+      "goal": "Fix the Python implementation in solution.py. Repair merge_counts(left, right): return a new dictionary containing every key from both inputs, adding the two integer counts for keys present in both. Preserve zero and negative totals and both input dictionaries. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def merge_counts(left, right):\n    result = dict(left)\n    result.update(right)\n    return result\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['merge_counts']\na, b = {'a': 2, 'z': 0}, {'a': 3, 'b': -1}\nassert f(a, b) == {'a': 5, 'z': 0, 'b': -1}\nassert a == {'a': 2, 'z': 0} and b == {'a': 3, 'b': -1}\nassert f({}, {}) == {}\nassert f({'x': -2}, {'x': 2}) == {'x': 0}\nassert f(a, {}) is not a and f({}, b) is not b\n",
+      "task_sha256": "c3fd0fd3c4e8522141b057843b3db381d53ea127fa2bc59cddd43d1bd81a9732",
+      "checks_sha256": "57f63fd96c98400f91f1371214cd2fdc3fe89df147518b39e714b703e4eea1f4"
+    },
+    {
+      "case_id": "held-last-index",
+      "partition": "held_out",
+      "family": "collections",
+      "goal": "Fix the Python implementation in solution.py. Repair last_index(items, target): return the zero-based index of the last equality-matching element, or -1 if absent. Support unhashable items and target. Preserve input order and values. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def last_index(items, target):\n    return items.index(target)\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['last_index']\na = [2, 7, 2]\nassert f(a, 2) == 2\nassert f(a, 7) == 1\nassert f(a, 9) == -1\nassert a == [2, 7, 2]\nassert f([], 'x') == -1\nassert f([[1], [2], [1]], [1]) == 2\nassert f([False, 1, 0], False) == 2\n",
+      "task_sha256": "a72e3ad7d67b27aafdb4ab1a5b7e0534871981bf677adaa9d174edb6491c7de4",
+      "checks_sha256": "c7330bbe9e5f68022d98878e8ca92a23b70755f9d8f6693ac5bbaf264f4e117e"
+    },
+    {
+      "case_id": "held-strict-percentage",
+      "partition": "held_out",
+      "family": "validation_state",
+      "goal": "Fix the Python implementation in solution.py. Repair parse_percentage(value): accept only a nonempty string of ASCII digits representing an integer in 0..100 inclusive, including leading zeros. Return its integer value. Reject all other inputs with ValueError, including whitespace, signs, Unicode digits, ints and bools. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "def parse_percentage(value):\n    return int(value)\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nf = s['parse_percentage']\nassert f('0') == 0 and f('100') == 100 and f('007') == 7\nfor bad in ['101', '', ' 1', '1 ', '+1', '-1', '1.0', '２０', '١', 3, True, None]:\n    try:\n        f(bad)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('invalid percentage accepted')\n",
+      "task_sha256": "e0e588b4da93ba9c7dca85f3c61b47bbfba9a1df94998d725cfce65ded45e929",
+      "checks_sha256": "b9310a3cfdb5a2d071f4605848e8334a554f3a4431ec3c675047bf1b1923e8b6"
+    },
+    {
+      "case_id": "held-stack-lifo",
+      "partition": "held_out",
+      "family": "validation_state",
+      "goal": "Fix the Python implementation in solution.py. Repair Stack.pop(default=None): return and remove the most recently pushed item. If empty return default without changing state. Preserve falsy stored values. Keep push and constructor interfaces unchanged. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "class Stack:\n    def __init__(self):\n        self.items = []\n    def push(self, item):\n        self.items.append(item)\n    def pop(self, default=None):\n        return self.items.pop(0)\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nstack = s['Stack']()\nstack.push(1); stack.push(2)\nassert stack.pop() == 2\nassert stack.pop() == 1\nassert stack.pop('empty') == 'empty'\nstack.push(False); stack.push(0)\nassert stack.pop('empty') == 0\nassert stack.pop('empty') is False\nassert stack.pop() is None\n",
+      "task_sha256": "0cd03845ce8829c30a96a80fd9e8935a87eb2d30df72494cf12d024f1c21e1e3",
+      "checks_sha256": "51cd2d37e07a53bbfc566dce551f5c823643a87dce5f43f6303ac7a62177a3b8"
+    },
+    {
+      "case_id": "held-wallet-withdraw",
+      "partition": "held_out",
+      "family": "validation_state",
+      "goal": "Fix the Python implementation in solution.py. Repair Wallet.withdraw(amount): accept only a strict positive integer not greater than balance (bool is invalid). Invalid input raises ValueError before mutation. Valid withdrawal subtracts amount and returns the new balance. Constructor balance is a nonnegative integer. Make the edit and check the behavior. /no_think",
+      "files": {
+        "solution.py": "class Wallet:\n    def __init__(self, balance):\n        self.balance = balance\n    def withdraw(self, amount):\n        self.balance -= amount\n        return self.balance\n"
+      },
+      "checks": "import runpy\nimport sys\n\ns = runpy.run_path(sys.argv[1])\nw = s['Wallet'](5)\nfor bad in [7, 0, -1, True, False, 1.5, '2', None]:\n    try:\n        w.withdraw(bad)\n    except ValueError:\n        pass\n    else:\n        raise AssertionError('invalid withdrawal accepted')\n    assert w.balance == 5\nassert w.withdraw(2) == 3\nassert w.withdraw(3) == 0\ntry:\n    w.withdraw(1)\nexcept ValueError:\n    pass\nelse:\n    raise AssertionError('overdraw accepted')\nassert w.balance == 0\n",
+      "task_sha256": "009e5d8401f68047614b89bf7c8f3455589ff144773e11b5b1c16864d7c3eabd",
+      "checks_sha256": "785d1c2926c5783de0bf678b0a8635e73562736a89543a6f99ffd2287b47d1cb"
+    }
+  ]
+}

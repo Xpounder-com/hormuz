@@ -27,7 +27,7 @@ _DELETION_BLOCK_REASONS = frozenset(
 
 
 def validate_custody_deletion_event(value: Mapping[str, Any]) -> None:
-    """Validate a governed deletion refusal; Hormuz never emits a bypass event."""
+    """Validate a governed deletion refusal; Koto never emits a bypass event."""
 
     _exact_keys(
         value,

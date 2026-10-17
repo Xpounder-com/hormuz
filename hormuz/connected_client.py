@@ -25,7 +25,7 @@ import time
 import tomllib
 from urllib.parse import urlsplit
 
-from .client_versions import SUPPORTED_CODEX_VERSIONS
+from .client_versions import CODEX_VERSION_PATTERN, SUPPORTED_CODEX_VERSIONS
 from .config import GatewayConfig
 from .compaction_formats import strict_json_loads
 from .contracts import (
@@ -66,11 +66,12 @@ def _control_directory():
     return Path("/tmp").resolve() / ("hormuz-connected-" + str(os.getuid()))
 
 
-def _provider_block(provider, origin, credential_env=None, *, helper=None, generation=None, client_version="0.147.0"):
-    block = ('\n[model_providers.' + provider + ']\nname = "Hormuz"\n'
+def _provider_block(provider, origin, credential_env=None, *, helper=None, generation=None,
+                    client_version="0.147.0", display_name="Koto"):
+    block = ('\n[model_providers.' + provider + ']\nname = ' + json.dumps(display_name) + '\n'
             + 'base_url = ' + json.dumps(origin + '/v1') + '\n'
             + 'wire_api = "responses"\n')
-    if client_version == "0.160.0":
+    if client_version != "0.147.0":
         block += ('supports_websockets = false\nrequest_max_retries = 0\nstream_max_retries = 0\n'
                   + 'model_catalog_url = ' + json.dumps(origin + '/v1/models') + '\n')
     if helper is None:
@@ -101,7 +102,7 @@ def _parse_record(text):
                 or ("managed_llama" in record and record["managed_llama"] is not True)
                 or not isinstance(record["generation"], str) or not re.fullmatch("[a-f0-9]{32}", record["generation"])
                 or record["phase"] not in {"prepared", "connected", "disconnecting", "restore_required", "disconnected"}
-                or not isinstance(record["client_version"], str) or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", record["client_version"])
+                or not isinstance(record["client_version"], str) or not re.fullmatch(CODEX_VERSION_PATTERN, record["client_version"])
                 or not isinstance(record["gateway_config"], str) or not Path(record["gateway_config"]).is_absolute()
                 or not isinstance(record["gateway_digest"], str) or not re.fullmatch("[a-f0-9]{64}", record["gateway_digest"])
                 or not isinstance(record["actor_id"], str) or not 1 <= len(record["actor_id"]) <= 256
@@ -129,9 +130,11 @@ def _parse_record(text):
                 or not 1 <= endpoint.port <= 65535 or endpoint.path != "/v1" or endpoint.query or endpoint.fragment
                 or endpoint.username is not None
                 or (helper is None and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", table["env_key"]))
+                or table.get("name") not in {"Koto", "Hormuz"}
                 or record["provider_block"] != _provider_block(record["installed"]["model_provider"],
                     f"http://127.0.0.1:{endpoint.port}", table.get("env_key"), helper=helper,
-                    generation=record["generation"], client_version=record["client_version"])):
+                    generation=record["generation"], client_version=record["client_version"],
+                    display_name=table["name"])):
             raise ValueError()
         retained = record.get("retained_settings", [])
         if (not isinstance(retained, list) or len(retained) > 4 or len(set(retained)) != len(retained)
@@ -369,14 +372,17 @@ def _setting(text, key, value):
     return key + " = " + json.dumps(value) + "\n" + text
 
 
-def _control(record, command):
+def _control(record, command, **payload):
     from ._config_input import MAX_CONFIGURATION_BYTES
 
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.settimeout(1)
     try:
         connection.connect(record["control"])
-        connection.sendall(json.dumps({"generation": record["generation"], "command": command}).encode() + b"\n")
+        request = json.dumps({"generation": record["generation"], "command": command, **payload}).encode()
+        if len(request) > 4096:
+            raise ValueError()
+        connection.sendall(request + b"\n")
         # Routing metadata is derived from the bounded configuration. Reserve
         # room for JSON escaping and per-route summaries; ordinary control
         # replies retain their existing small bound.
@@ -395,6 +401,12 @@ def _control(record, command):
                 raise ValueError()
             validate_contract(admission)
             return admission
+        if command == "qualify":
+            probe = value.get("probe")
+            if not isinstance(probe, dict) or probe.get("schema_id") not in {"hormuz.coding-probe-status", "hormuz.coding-probe-error"}:
+                raise ValueError()
+            validate_contract(probe)
+            return probe
         if value.get("router") not in {"ready", "stopping", "unavailable"}:
             raise ValueError()
         return value["router"]
@@ -523,13 +535,52 @@ class ConnectedClientLifetime:
                 binding = "matching" if matches else "different"
             return status, binding
 
+    def qualify(self, plan_path=None, *, revoke=False):
+        plan = None
+        if plan_path is not None:
+            try:
+                text = _read(plan_path.expanduser())
+                if text is None or len(text.encode()) > 3072:
+                    raise ValueError()
+                plan = strict_json_loads(text)
+                validate_contract(plan)
+                if plan["schema_id"] != "hormuz.coding-probe-plan":
+                    raise ValueError()
+            except (ValueError, TypeError, KeyError, RecursionError):
+                raise ConnectedClientError("router_configuration_unsupported") from None
+        with self._transaction():
+            record = self._record()
+            if record is None or record["phase"] != "connected":
+                raise ConnectedClientError("router_unavailable")
+            if self._configuration_state(record) != "installed":
+                raise ConnectedClientError("configuration_changed")
+            source = _read(Path(record["gateway_config"]))
+            if source is None or hashlib.sha256(source.encode()).hexdigest() != record["gateway_digest"]:
+                raise ConnectedClientError("setup_changed")
+            if plan is not None and plan["subject"]["client_version"] != record["client_version"]:
+                raise ConnectedClientError("version_unsupported")
+            result = _control(record, "qualify", plan=plan, revoke=revoke)
+            if not isinstance(result, dict):
+                raise ConnectedClientError("router_unavailable")
+            return result
+
     def local_token(self, generation):
         with self._transaction():
             record = self._record()
             if (record is None or record.get("credential_helper") is None
                     or record["generation"] != generation or record["phase"] != "connected"
-                    or self._configuration_state(record) != "installed" or _control(record, "status") != "ready"):
+                    or _control(record, "status") != "ready"):
                 raise ConnectedClientError("authentication_unsupported")
+            # App model selections are preferences, not credential authority.
+            # The exact generation-owned provider/auth table must still match.
+            try:
+                document = _document(_read(self.config_path) or "")
+                provider = record["installed"]["model_provider"]
+                expected = _document(record["provider_block"])["model_providers"][provider]
+                if document.get("model_providers", {}).get(provider) != expected:
+                    raise ConnectedClientError("authentication_unsupported")
+            except (ConnectedClientError, OSError, AttributeError):
+                raise ConnectedClientError("authentication_unsupported") from None
             path = Path(record["gateway_config"])
             text = _read(path)
             if text is None or hashlib.sha256(text.encode()).hexdigest() != record["gateway_digest"]:

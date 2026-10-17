@@ -305,6 +305,24 @@ class ModelBenchmarkWorkflowTests(unittest.TestCase):
                                  (200, "7", "benchmark_scorecard", "selected"))
             self.assertEqual((len(first_requests), len(second_requests)), (1, 2))
 
+    def test_explicit_task_model_is_pinned_before_scorecard_selection(self):
+        suite = self.suite()
+        suite['cases'] = suite['cases'][:1]
+        suite['targets']['min_cases'] = 1
+        with workflow.provider('0') as (first, first_requests), workflow.provider('7') as (second, second_requests):
+            value = self.two_local_configuration(first, second)
+            value['route_admission']['scorecard'] = str(self.report_path)
+            with self.fixture.connected_client(value) as submit:
+                self.run_benchmark('local-code','local-better',suite=suite)
+                request = {'input':'Summarize seven boxes as a digit.'}
+                router = submit(headers={'X-Hormuz-Task-Selection':'router'},request=request)
+                self.assertEqual(router['body']['output'][0]['content'][0]['text'],'7')
+                exact = submit(headers={'X-Hormuz-Task-Selection':'model'},request=request)
+                self.assertEqual(exact['status'],200,exact)
+                self.assertEqual(exact['body']['output'][0]['content'][0]['text'],'0')
+                self.assertEqual(exact['headers']['x-hormuz-routed-model'],'fixture-local-model')
+            self.assertEqual((len(first_requests),len(second_requests)),(2,2))
+
     def test_routing_matches_the_effective_policy_cap_not_the_uncapped_request(self):
         for measured_budget, expected_model, expected_status in (
                 (8, "fixture-local-model", "no_target_match"),

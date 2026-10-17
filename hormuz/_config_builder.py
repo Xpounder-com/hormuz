@@ -1,4 +1,4 @@
-"""Typed construction for already validated Hormuz configuration input."""
+"""Typed construction for already validated Koto configuration input."""
 
 from __future__ import annotations
 

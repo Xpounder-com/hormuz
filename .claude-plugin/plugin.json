@@ -1,6 +1,6 @@
 {
-  "name": "hormuz",
-  "version": "0.2.1",
+  "name": "koto",
+  "version": "0.3.1",
   "description": "Diagnose, explain and qualify local model routing with explicit privacy, budget and history controls.",
   "author": {
     "name": "mehrdadxzaker"

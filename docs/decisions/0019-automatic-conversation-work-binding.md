@@ -7,7 +7,7 @@
   at the approved connect/request/result/status/disconnect workflow seam.
 - Parent specification: [#523](https://github.com/Xpounder-com/hormuz/issues/523)
 
-Native Codex retains thread identity between requests but does not copy Hormuz's
+Native Codex retains thread identity between requests but does not copy Koto's
 work receipt header into its next model request. Requiring a manual per-process
 work-ID override prevents automatic tool continuation. The router now associates
 a validated native thread with authenticated actor-owned work, using the existing

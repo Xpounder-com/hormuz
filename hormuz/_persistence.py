@@ -1,6 +1,6 @@
 """Backend-neutral persistence contracts and durable-state normalization.
 
-This module owns the values and state transitions shared by Hormuz storage
+This module owns the values and state transitions shared by Koto storage
 adapters.  It deliberately contains no SQLite or PostgreSQL imports, SQL,
 transaction management, connection pooling, tenant context, or RLS behavior.
 """
