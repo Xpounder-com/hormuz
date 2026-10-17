@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://usehormuz.com/schemas/portfolio-role-views-wire-v1.json",
-  "title": "Hormuz portfolio role views v1",
+  "title": "Koto portfolio role views v1",
   "description": "Additive aggregate-only response contracts for issue 223. Authentication and scope authorization happen before this structural contract is selected.",
   "x-hormuz-schema-ids": [
     "hormuz.portfolio-role-view-item",

@@ -14,6 +14,7 @@ from . import __version__
 from .commands import client as client_commands
 from .commands import history as history_commands
 from .commands import capabilities as capability_commands
+from . import chat_task
 from .commands import benchmark as benchmark_commands
 from .config import ConfigError, GatewayConfig
 from .contracts import contract_manifest
@@ -23,18 +24,27 @@ from .store import StorageSchemaError
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="hormuz", description="Local routing for existing coding clients.")
+    parser = argparse.ArgumentParser(prog="koto", description="Koto: local routing for existing coding clients.")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("--config", default=os.environ.get("HORMUZ_CONFIG", "hormuz.json"),
-                        help="Router JSON configuration path (or HORMUZ_CONFIG)")
+    default_config = (os.environ.get("KOTO_CONFIG") or os.environ.get("HORMUZ_CONFIG")
+                      or ("hormuz.json" if not os.path.lexists("koto.json")
+                          and os.path.exists("hormuz.json")
+                          else "koto.json"))
+    parser.add_argument("--config", default=default_config,
+                        help="Router JSON configuration path (default: koto.json or KOTO_CONFIG)")
     parser.add_argument("--verbose", action="store_true", help="Enable content-free request logs")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("serve", help="Run the customer-local router")
+    disable = commands.add_parser("off", help="Disable Koto and restore the connected Codex settings")
+    disable.add_argument("--client-home", help="Codex home (default CODEX_HOME or ~/.codex)")
+    disable.add_argument("--generation", help="Disconnect only the receipt generation that you own")
+    disable.set_defaults(client="codex", client_command="disconnect")
     contract = commands.add_parser("contract", help="Inspect versioned routing and historical evidence contracts")
     contract.add_subparsers(dest="contract_command", required=True).add_parser("manifest")
     client_commands.add_client_commands(commands)
     history_commands.add_history_commands(commands)
     capability_commands.add_commands(commands)
+    chat_task.add_commands(commands)
     benchmark_commands.add_commands(commands)
     return parser
 
@@ -52,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "history":
         return history_commands.run(args)
+    if args.command == "chat":
+        return chat_task.run(args)
     if args.command == "benchmark":
         return benchmark_commands.run(args)
     if args.command in {"request", "policy", "model", "usage"}:
@@ -60,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.auth_command == "local-token":
             return client_commands.local_token(args)
         return client_commands._auth_token(args.env)
-    if args.command == "client" and args.client_command != "config":
+    if args.command == "off" or args.command == "client" and args.client_command != "config":
         return client_commands.run_lifetime(args)
     try:
         config = GatewayConfig.load(args.config)
@@ -96,7 +108,7 @@ def _serve(config: GatewayConfig) -> int:
     previous_term = signal.signal(signal.SIGTERM, stop)
     previous_int = signal.signal(signal.SIGINT, stop)
     try:
-        print(f"Hormuz router listening on http://{config.listen.host}:{config.listen.port}", flush=True)
+        print(f"Koto router listening on http://{config.listen.host}:{config.listen.port}", flush=True)
         server.serve_forever()
     finally:
         signal.signal(signal.SIGTERM, previous_term)

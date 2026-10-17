@@ -7,7 +7,7 @@ preview and explicitly requested downloads using pinned artifacts."
 
 ## Scope
 
-Add `hormuz client acquire codex --directory PATH`. Its default is a read-only,
+Add `koto client acquire codex --directory PATH`. Its default is a read-only,
 offline preview; `--download` explicitly authorizes fetching the displayed pinned
 artifacts, and `--offline` verifies/reuses a completed installation without
 network access. CLI and plugin callers use this same operation. Acquisition

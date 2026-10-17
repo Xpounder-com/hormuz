@@ -1,0 +1,7 @@
+{
+  "schema_id": "hormuz.chat-owner",
+  "schema_version": 1,
+  "normal_home": "/private/normal-codex",
+  "router_home": "/private/hormuz-control",
+  "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

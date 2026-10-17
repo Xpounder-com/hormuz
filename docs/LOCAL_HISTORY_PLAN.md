@@ -10,7 +10,7 @@ An individual using the customer-local router can choose to retain a bounded
 history on that device, inspect individual entries and spending, export a
 selected history, and delete an entry or all entries. Existing coding clients
 keep their editor, tools and permissions. Fine-tuning, dataset uploads, cloud
-sync and a standalone Hormuz UI are outside this release.
+sync and a standalone Koto UI are outside this release.
 
 ## Proposed behavior
 

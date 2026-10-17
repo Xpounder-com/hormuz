@@ -1,6 +1,6 @@
 # Secret egress controls
 
-Hormuz inspects JSON string values after identity and model policy evaluation and before the request is serialized to OpenAI or Anthropic. It never changes JSON keys. Prompt text, system instructions, and tool outputs pass through the same boundary when they are represented as JSON strings.
+Koto inspects JSON string values after identity and model policy evaluation and before the request is serialized to OpenAI or Anthropic. It never changes JSON keys. Prompt text, system instructions, and tool outputs pass through the same boundary when they are represented as JSON strings.
 
 ## Configuration
 
@@ -18,13 +18,13 @@ Secret controls are global because every provider-bound request must cross the s
 }
 ```
 
-Set custom values only in the Hormuz service environment:
+Set custom values only in the Koto service environment:
 
 ```bash
 export HORMUZ_INTERNAL_SECRET="an-exact-company-secret-value"
 ```
 
-Hormuz refuses to start when a configured custom-secret variable is absent or shorter than eight characters. The configuration stores only the environment-variable name; the value stays in the service's secret store and process memory.
+Koto refuses to start when a configured custom-secret variable is absent or shorter than eight characters. The configuration stores only the environment-variable name; the value stays in the service's secret store and process memory.
 
 Modes:
 
@@ -41,9 +41,9 @@ Built-in high-confidence detectors currently cover:
 - Google API keys.
 - Slack tokens.
 
-Hormuz also treats every configured employee identity token and every available upstream provider credential as an exact protected value, regardless of its format.
+Koto also treats every configured employee identity token and every available upstream provider credential as an exact protected value, regardless of its format.
 
-For redacted requests, Hormuz returns `X-Hormuz-Redactions` and appends `+redacted` to `X-Hormuz-Policy-Decision`. A separate security event stores the action, detection count, and rule identifiers for every inspected endpoint, including token-count calls that are excluded from inference usage. Accounted generation events also carry the redaction count for usage reporting. Neither ledger stores the matched value, prompt, transformed prompt, or response.
+For redacted requests, Koto returns `X-Hormuz-Redactions` and appends `+redacted` to `X-Hormuz-Policy-Decision`. A separate security event stores the action, detection count, and rule identifiers for every inspected endpoint, including token-count calls that are excluded from inference usage. Accounted generation events also carry the redaction count for usage reporting. Neither ledger stores the matched value, prompt, transformed prompt, or response.
 
 The opt-in [native Codex Responses](NATIVE_CODEX_RESPONSES.md) route uses the same
 redaction header and content-free security totals. Native protected-member
@@ -52,7 +52,7 @@ events do not add native requests, tokens or plan charges to priced API usage.
 
 ## OpenAI provider storage policy
 
-Hormuz also enforces provider-side storage policy for `POST /v1/responses`:
+Koto also enforces provider-side storage policy for `POST /v1/responses`:
 
 ```json
 {
@@ -65,7 +65,7 @@ Hormuz also enforces provider-side storage policy for `POST /v1/responses`:
 }
 ```
 
-With the defaults above, Hormuz overwrites any client value with `store: false` and rejects `background: true` with `hormuz_provider_policy_denied`. An administrator must set either flag to `true` explicitly to allow that behavior. OpenAI documents that Responses API application state is retained for at least 30 days by default or when `store` is true, and that background mode requires temporary storage; see [OpenAI platform data controls](https://platform.openai.com/docs/models/default-usage-policies-by-endpoint).
+With the defaults above, Koto overwrites any client value with `store: false` and rejects `background: true` with `hormuz_provider_policy_denied`. An administrator must set either flag to `true` explicitly to allow that behavior. OpenAI documents that Responses API application state is retained for at least 30 days by default or when `store` is true, and that background mode requires temporary storage; see [OpenAI platform data controls](https://platform.openai.com/docs/models/default-usage-policies-by-endpoint).
 
 This request-level policy does not itself enroll an organization in OpenAI Zero Data Retention, configure Anthropic retention, or replace provider-side enterprise agreements. Those remain provider-account controls outside the customer-local router scope.
 
@@ -73,7 +73,7 @@ This request-level policy does not itself enroll an organization in OpenAI Zero 
 
 This layer is deterministic secret detection, not a complete data-loss-prevention system. It does not currently inspect image contents, decode arbitrary base64 or archives, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact textual representation.
 
-Use `deny` when forwarding a detected credential is unacceptable. Production deployments should combine Hormuz with least-privilege provider keys, short-lived employee identity, network controls, provider retention settings, code-host secret scanning, and a reviewed list of organization-specific values. Semantic classification and structured PII policies are later milestones and require measured false-positive/false-negative evaluation before enforcement.
+Use `deny` when forwarding a detected credential is unacceptable. Production deployments should combine Koto with least-privilege provider keys, short-lived employee identity, network controls, provider retention settings, code-host secret scanning, and a reviewed list of organization-specific values. Semantic classification and structured PII policies are later milestones and require measured false-positive/false-negative evaluation before enforcement.
 
 ## Verify
 

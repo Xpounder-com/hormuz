@@ -30,6 +30,7 @@ class ProviderAttemptMetrics:
     total_us: int
     provider_bytes_read: int
     downstream_bytes_sent: int
+    body_transformed: bool = False
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,7 @@ def build_provider_attempt_metrics_event(
     event: dict[str, object] = {
         "event_id": str(uuid.uuid4()),
         "event_schema_id": PROVIDER_ATTEMPT_METRICS_SCHEMA_ID,
-        "event_schema_version": PROVIDER_ATTEMPT_METRICS_SCHEMA_VERSION,
+        "event_schema_version": 2 if metrics.body_transformed else PROVIDER_ATTEMPT_METRICS_SCHEMA_VERSION,
         "organization_id": organization_id,
         "attempt_id": attempt_id,
         "recorded_at": recorded_at.isoformat(),
@@ -66,6 +67,8 @@ def build_provider_attempt_metrics_event(
         "provider_bytes_read": metrics.provider_bytes_read,
         "downstream_bytes_sent": metrics.downstream_bytes_sent,
     }
+    if type(metrics.body_transformed) is not bool:
+        raise ValueError("provider_attempt_metrics_invalid")
     _validate_metrics_event(event)
     return event
 
@@ -107,7 +110,7 @@ def _validate_metrics_event(event: dict[str, object]) -> None:
     if (
         (headers is not None and headers > total)
         or (first_byte is not None and (first_byte > total or headers is None or first_byte < headers))
-        or downstream_bytes > provider_bytes
+        or event["event_schema_version"] == 1 and downstream_bytes > provider_bytes
     ):
         raise ValueError("provider_attempt_metrics_invalid")
 

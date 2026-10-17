@@ -12,7 +12,7 @@ for exact asset hashes and bounds.
 | Client surface | Codex terminal CLI 0.160.0, one agent, Responses HTTP |
 | Observed host | macOS 26.2 (25C56), Darwin arm64, Mac17,2, Apple M5, 32 GiB RAM |
 | Client executable | Native aarch64-apple-darwin binary, independently hashed; the npm launcher hash is recorded separately |
-| Hormuz runtime | Main `c7f8e1d7b7992c308d679db1e886f10e68bc4fb0`, CI wheel 2.0.0a2 |
+| Koto runtime | Main `c7f8e1d7b7992c308d679db1e886f10e68bc4fb0`, CI wheel 2.0.0a2 |
 | Local engine | llama.cpp b11617, existing verified macOS arm64 archive and executable |
 | Local model | Existing Qwen3-4B-Q4_K_M GGUF, SHA256 `7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5` |
 | Envelope | Inline function tools and streaming; 65,536 request bytes, 512 output tokens per generation, 90-second upstream deadline |
@@ -49,7 +49,7 @@ does not activate routing. This decision adds no coding UI, second agent loop,
 mandatory MCP server, startup registration or user settings change.
 
 The selected cloud target is the native Codex gateway path: client-owned native
-ChatGPT credentials and a separate Hormuz gateway key, to the fixed native
+ChatGPT credentials and a separate Koto gateway key, to the fixed native
 backend. At the pinned source baseline, [catalog discovery](NATIVE_CODEX_CATALOG.md)
 is implemented, while inference, managed-provider activation and actual account
 permission remain unqualified. A catalog response does not establish any of

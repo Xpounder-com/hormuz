@@ -1,0 +1,13 @@
+{
+  "schema_id": "hormuz.chat-task",
+  "schema_version": 1,
+  "text": "7",
+  "model": "local-code",
+  "routed_model": "fixture-local-model",
+  "locality": "local",
+  "destination": "local-llama",
+  "generation": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "work_id": "fixture-work",
+  "selection": "model",
+  "reasoning_effort": "max"
+}

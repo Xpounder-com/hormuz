@@ -1,7 +1,7 @@
 # Domain terms
 
 - **Coding client:** Existing application owning editing, tools, permissions
-  and the agent loop. Hormuz connects to it.
+  and the agent loop. Koto connects to it.
 - **Router:** Customer-local process that admits and forwards intercepted model
   requests, owns credentials and preserves outcomes and continuation affinity.
 - **Execution destination:** Immutable endpoint, protocol, authentication,
@@ -31,7 +31,7 @@
   responses and usage, kept on their device for review, export and deletion.
 - **Spending estimate:** A calculation from observed usage and configured
   prices; it is distinct from an invoice or provider-confirmed charge.
-- **Gateway credential:** Credential authorizing a coding client as a Hormuz
+- **Gateway credential:** Credential authorizing a coding client as a Koto
   identity, separate from that client's provider or native account credential.
 - **Native ChatGPT credential:** Client-owned account credential for the native
   ChatGPT backend; its validity and permitted account scope belong to that backend.

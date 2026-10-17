@@ -23,6 +23,7 @@ def contains_provider_state(value, depth=0):
             return True
         if value.get("role") in {"assistant", "tool"} or value.get("type") in {
             "function_call", "function_call_output", "tool_use", "tool_result", "computer_call", "computer_call_output",
+            "custom_tool_call", "custom_tool_call_output", "tool_search_call", "tool_search_output",
             "reasoning", "item_reference"
         }:
             return True

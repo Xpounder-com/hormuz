@@ -134,7 +134,7 @@ obsolete commercial scope. The current
 [approved catalog and terms](https://github.com/Xpounder-com/hormuz/blob/2e5011f8e1064976c33c5694e74fd0bb17539c14/marketing/COMMERCIAL_SETUP.md) describe Cloud
 at $49.99/workspace/month and managed site at $499/month including its workspace,
 with no additional Hormuz usage/seat/software-edition/support tier charge.
-[Live pricing](https://usehormuz.github.io/plans/) matched those amounts at the
+The public pricing page, now retired, matched those amounts at the
 audit read and conditions checkout on agreed scope/activation. This audit
 changes no price, checkout, payment, subscription or offer. Revival of an old
 hosted billing design requires a current commercial contract; a new paid

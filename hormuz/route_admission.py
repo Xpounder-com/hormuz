@@ -25,7 +25,7 @@ class LocalQualification:
     coding_evidence: str | None = None
 
     def automatic_task_types(self, coding):
-        return tuple(kind for kind in self.task_types if kind not in {"code_change", "code_review"}
+        return tuple(kind for kind in self.task_types if kind not in {"code_change", "code_review", "interactive"}
                      or kind == "code_change" and coding.readiness == "qualified")
 
 
@@ -55,7 +55,7 @@ def build_route_admission(raw, routes, upstreams):
         raise ConfigError("route_admission.local_routes is invalid")
     result = []
     fields = {"qualification_id", "model_revision", "max_request_bytes", "max_output_tokens", "task_types"}
-    tasks = {"summarization", "translation", "structured_extraction", "code_change", "code_review"}
+    tasks = {"summarization", "translation", "structured_extraction", "code_change", "code_review", "interactive"}
     for alias, record in local.items():
         route = routes.get(alias)
         if route is None or upstreams[route.destination_id].locality != "local":
@@ -75,6 +75,8 @@ def build_route_admission(raw, routes, upstreams):
         kinds = record["task_types"]
         if type(kinds) is not list or not kinds or any(type(k) is not str or k not in tasks for k in kinds) or len(kinds) != len(set(kinds)):
             raise ConfigError("local qualification task types are invalid")
+        if "interactive" in kinds and "codex_llama_v1" not in route.capabilities:
+            raise ConfigError("interactive qualification requires the Codex local transport")
         evidence = record.get("coding_evidence")
         if evidence is not None:
             from .contracts import ContractValidationError, validate_contract
@@ -99,6 +101,13 @@ def build_route_admission(raw, routes, upstreams):
 
 def _text_envelope(value, protocol, endpoint):
     """Only self-contained text and inline function tools are qualified here."""
+    from .codex_llama import CAPABILITY, CodexLlamaRequest, needs_adapter
+    if protocol == 'openai' and endpoint == '/v1/responses' and needs_adapter(value):
+        try:
+            required = _text_envelope(CodexLlamaRequest(value).admission_value(), protocol, endpoint)
+        except (ValueError, TypeError, RecursionError):
+            return None
+        return required | {CAPABILITY} if required is not None else None
     common = {"model", "stream", "temperature", "top_p", "tools", "tool_choice", "metadata"}
     fields = {
         "/v1/responses": {"input", "instructions", "max_output_tokens", "text", "store", "parallel_tool_calls", "service_tier",
@@ -287,6 +296,11 @@ class RouteAdmission:
         if len(requested) > 1 or requested and requested[0] != "local_only":
             raise RouteAdmissionError("invalid_routing_mode")
         mode = "local_only" if requested else self.settings.mode
+        task_selection = handler.headers.get_all('X-Hormuz-Task-Selection', [])
+        if (len(task_selection) > 1 or task_selection and
+                (task_selection[0] not in {'model','router'} or mode != 'local_only')):
+            raise RouteAdmissionError('invalid_task_selection')
+        handler._route_admission_task_selection = task_selection[0] if task_selection else None
         handler._route_admission_mode = mode
         if mode == "configured":
             return decision
@@ -355,9 +369,12 @@ class RouteAdmission:
             if not self._within_envelope(handler, route, qualification, value, output_field):
                 continue
             automatic_tasks = qualification.automatic_task_types(self.coding[alias])
-            task_admitted = hint in automatic_tasks or continuation and hint == "unknown"
-            if (not automatic_tasks or not task_admitted
-                    or continuation and inherited_task not in automatic_tasks):
+            explicitly_selected = (alias == decision.requested_model and "interactive" in qualification.task_types
+                and hint not in {"code_change", "code_review"}
+                and inherited_task not in {"code_change", "code_review"})
+            task_admitted = hint in automatic_tasks or continuation and hint == "unknown" or explicitly_selected
+            if (not automatic_tasks and not explicitly_selected or not task_admitted
+                    or continuation and inherited_task not in automatic_tasks and not explicitly_selected):
                 continue
             if handler._route_admission_coding_required and (
                     "code_change" not in automatic_tasks or not self._coding_request_matches(handler, alias, value, client)):
@@ -369,9 +386,9 @@ class RouteAdmission:
                     candidates[alias] = candidate
         if continuation and mode == "auto" and self.destinations.resolve(decision.route).locality == "cloud":
             candidates[decision.resolved_alias] = decision
-        if probes:
-            # A benchmark must observe the requested alias, including its
-            # failures, rather than credit another admitted model's reply.
+        if probes or handler._route_admission_task_selection == 'model':
+            # Benchmarks and explicit chat choices must observe the requested
+            # alias, including failures, before dispatch or scorecard selection.
             candidates = ({decision.requested_model: candidates[decision.requested_model]}
                           if decision.requested_model in candidates else {})
         if candidates:
@@ -389,7 +406,9 @@ class RouteAdmission:
             selection_candidates = candidates
         scorecard_headers = {}
         if self.settings.scorecard:
-            if continuation or probes:
+            if handler._route_admission_task_selection == 'model':
+                scorecard_headers['X-Hormuz-Scorecard-Status'] = 'explicit_model'
+            elif continuation or probes:
                 scorecard_headers["X-Hormuz-Scorecard-Status"] = "affinity_preserved" if continuation else "benchmark_probe"
             elif protocol != "openai" or endpoint != "/v1/responses":
                 scorecard_headers["X-Hormuz-Scorecard-Status"] = "no_target_match"
@@ -466,6 +485,8 @@ class RouteAdmission:
         headers.update({"X-Hormuz-Destination": destination.name,
                         "X-Hormuz-Destination-Locality": destination.locality,
                         "X-Hormuz-Destination-Generation": destination.generation})
+        if getattr(handler, '_route_admission_task_selection', None):
+            headers['X-Hormuz-Task-Selection'] = handler._route_admission_task_selection
         return headers
 
     def status(self, identity, policy_engine):

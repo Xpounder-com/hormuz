@@ -8,15 +8,15 @@ conversations, or record process-memory answer-cache hits.
 Use the same configuration path used to connect your coding client:
 
 ```sh
-hormuz --config hormuz.json history status
-hormuz --config hormuz.json history enable
-hormuz --config hormuz.json history list
-hormuz --config hormuz.json history show ENTRY_ID
-hormuz --config hormuz.json history insights
-hormuz --config hormuz.json history export --id ENTRY_ID --output ./history-export.json
-hormuz --config hormuz.json history delete ENTRY_ID
-hormuz --config hormuz.json history disable
-hormuz --config hormuz.json history delete --all
+koto --config koto.json history status
+koto --config koto.json history enable
+koto --config koto.json history list
+koto --config koto.json history show ENTRY_ID
+koto --config koto.json history insights
+koto --config koto.json history export --id ENTRY_ID --output ./history-export.json
+koto --config koto.json history delete ENTRY_ID
+koto --config koto.json history disable
+koto --config koto.json history delete --all
 ```
 
 When multiple actor IDs are configured, enable with `--actor ACTOR_ID`. The
@@ -71,11 +71,12 @@ oldest entries as needed. Retention is applied on capture and management
 operations, including review and export. An idle or stopped router does not
 promise deletion at the exact expiration instant.
 
-The store defaults to `~/Library/Application Support/Hormuz/history-v1` on
-macOS and `$XDG_DATA_HOME/hormuz/history-v1` (or
-`~/.local/share/hormuz/history-v1`) elsewhere on supported POSIX platforms.
+The store defaults to `~/Library/Application Support/Koto/history-v1` on
+macOS and `$XDG_DATA_HOME/koto/history-v1` (or
+`~/.local/share/koto/history-v1`) elsewhere on supported POSIX platforms.
+Existing history profiles are read from their original location until migrated.
 Each canonical configuration path has a separate hashed directory. `status`
-shows its exact location. `HORMUZ_HISTORY_HOME` can select another local base
+shows its exact location. `KOTO_HISTORY_HOME` can select another local base
 directory, and must be identical for the router and management commands. Keep
 the base on a private local filesystem outside synchronized folders. Unsafe
 permissions or symlinks cause collection to fail closed with content-free

@@ -4,7 +4,7 @@ include plugin.json gemini-extension.json
 recursive-include .agents/plugins *.json
 recursive-include .claude-plugin *.json
 recursive-include skills *.md
+recursive-include assets *.png *.ico *.md
 recursive-include docs *.md *.json
-recursive-include docs/migrations *.patch
 recursive-include tests *.py *.json *.sql
 recursive-include tools *.py

@@ -6,7 +6,7 @@ authentication. [Local route admission](LOCAL_ROUTE_ADMISSION.md) adds automatic
 selection and a hard local-only transport ceiling. Model/runtime acquisition,
 subscription authorization and plugin publication remain separate.
 [Persistent CLI setup](CONNECTED_CLIENT_LIFETIME.md) now owns connection and restoration.
-Existing coding apps remain the client; this adds no Hormuz UI.
+Existing coding apps remain the client; this adds no Koto UI.
 
 ## Configuration
 

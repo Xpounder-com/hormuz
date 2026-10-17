@@ -106,3 +106,33 @@ def verify_sqlite_provider_reliability(connection, error_factory) -> None:
     }
     if any(" ".join(statement.split()) not in observed for statement in sqlite_statements()):
         raise error_factory("storage_schema_partial_upgrade")
+
+
+def sqlite_translated_metrics_statements() -> tuple[str, ...]:
+    """Add v2 byte observations without changing legacy append-only evidence."""
+    table = "gateway_provider_attempt_metrics_v2"
+    ddl = TABLE_DDL["gateway_provider_attempt_metrics"].replace(
+        "event_schema_version = 1", "event_schema_version = 2").replace(
+        ",\n        CHECK (downstream_bytes_sent <= provider_bytes_read)", "")
+    return (
+        f"CREATE TABLE {table} ({ddl.format(prefix='')}) WITHOUT ROWID",
+        *(f"CREATE TRIGGER {table}_no_{operation.lower()} BEFORE {operation} ON {table} "
+          "BEGIN SELECT RAISE(ABORT, 'provider_reliability_append_only'); END"
+          for operation in ("UPDATE", "DELETE")),
+        f"CREATE TRIGGER {table}_no_replace BEFORE INSERT ON {table} "
+        f"WHEN EXISTS (SELECT 1 FROM {table} WHERE organization_id=NEW.organization_id "
+        "AND (event_id=NEW.event_id OR attempt_id=NEW.attempt_id)) "
+        "OR EXISTS (SELECT 1 FROM gateway_provider_attempt_metrics WHERE organization_id=NEW.organization_id "
+        "AND attempt_id=NEW.attempt_id) "
+        "BEGIN SELECT RAISE(ABORT, 'provider_reliability_append_only'); END",
+        "CREATE TRIGGER gateway_provider_attempt_metrics_no_v2 BEFORE INSERT ON gateway_provider_attempt_metrics "
+        f"WHEN EXISTS (SELECT 1 FROM {table} WHERE organization_id=NEW.organization_id AND attempt_id=NEW.attempt_id) "
+        "BEGIN SELECT RAISE(ABORT, 'provider_reliability_append_only'); END",
+    )
+
+
+def verify_sqlite_translated_metrics(connection, error_factory) -> None:
+    observed = {" ".join(row[0].split()) for row in connection.execute(
+        "SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name LIKE 'gateway_provider_%'").fetchall()}
+    if any(" ".join(statement.split()) not in observed for statement in sqlite_translated_metrics_statements()):
+        raise error_factory("storage_schema_partial_upgrade")

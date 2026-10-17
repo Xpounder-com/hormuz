@@ -3,7 +3,7 @@
 The default-off `native_codex_responses` flag adds HTTP/SSE inference at
 `POST /backend-api/codex/responses`, alongside separately enabled
 [native model discovery](NATIVE_CODEX_CATALOG.md). Both use the client's native
-ChatGPT grant and a separate Hormuz gateway credential. This transport checkpoint
+ChatGPT grant and a separate Koto gateway credential. This transport checkpoint
 has synthetic workflow evidence; actual account consent/eligibility, managed
 client setup and supported host/build qualification remain incomplete.
 [Cloud readiness](CLOUD_READINESS.md) therefore keeps the full native path
@@ -20,7 +20,7 @@ The flag does not restore retired external-proxy ingress configuration, which
 the public configuration loader continues to reject before server construction.
 
 Supply one `X-Gateway-Key`, one native `Authorization: Bearer ...` and, when
-available, one `ChatGPT-Account-ID`. Hormuz consumes its gateway key and forwards
+available, one `ChatGPT-Account-ID`. Koto consumes its gateway key and forwards
 only native authorization/account headers, JSON content type and SSE accept to
 the fixed, certificate-verified `https://chatgpt.com/backend-api/codex/responses`.
 The client owns sign-in and refresh. The gateway never reads a login cache or
@@ -98,7 +98,7 @@ output closes without a second HTTP response, retry or alternate provider.
 
 HTTP continuation uses replayed input. Function/custom tool calls, matching tool
 results and encrypted reasoning/compaction content require retained successful
-native affinity. It binds the Hormuz identity, exact native credential/account,
+native affinity. It binds the Koto identity, exact native credential/account,
 model/destination generation, body thread/session/cache identity and any
 `thread-id`/`session-id` headers. Tool kind, namespace, direct/program caller and
 async execution mode and status retain their validated issued values. Absent/null optional

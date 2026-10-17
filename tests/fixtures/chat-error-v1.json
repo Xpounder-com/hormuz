@@ -1,0 +1,7 @@
+{
+  "schema_id": "hormuz.chat-error",
+  "schema_version": 1,
+  "error": {"code": "router_unavailable"},
+  "submission": "not_submitted",
+  "retried": false
+}

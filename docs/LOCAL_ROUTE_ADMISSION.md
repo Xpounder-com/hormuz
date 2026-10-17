@@ -2,7 +2,7 @@
 
 This implements the admission slice of [router spec #523](https://github.com/Xpounder-com/hormuz/issues/523)
 on top of [execution destinations](EXECUTION_DESTINATIONS.md). Existing coding
-apps submit requests to one router. No additional Hormuz UI is introduced.
+apps submit requests to one router. No additional Koto UI is introduced.
 Runtime/model acquisition, subscription adapters and plugin publication
 remain separate work. [Persistent CLI setup](CONNECTED_CLIENT_LIFETIME.md) now owns
 connection and restoration.
@@ -40,7 +40,7 @@ this slice does not invent a paid provider fallback.
 
 `X-Hormuz-Routing-Mode: local_only` tightens an individual request, including a
 helper request. Other values and duplicate headers are rejected. A caller cannot
-relax an operator's local-only mode. This header is consumed by Hormuz.
+relax an operator's local-only mode. This header is consumed by Koto.
 
 A fresh request that explicitly names an eligible local alias retains that
 model and destination. Only that alias reaches optional AI Work ranking. In
@@ -58,7 +58,10 @@ features, byte/output envelope, tool and streaming behavior, and runtime egress.
 The revision must match the route. Configurations accept at most eight records;
 unknown fields, malformed bounds and mismatched revisions fail startup.
 Available task labels are `summarization`, `translation`, `structured_extraction`,
-`code_change` and `code_review`. A fixed, bounded local heuristic recognizes
+`code_change` and `code_review`. The opt-in [Codex app transport](CODEX_APP_COMPATIBILITY.md)
+also permits `interactive` for explicitly selected ordinary local tasks; coding
+requests still require the existing evidence and request-profile checks. It does
+not admit arbitrary automatic cloud-to-local redirection. A fixed, bounded local heuristic recognizes
 leading instructions; it neither measures task difficulty nor calls a model.
 Unknown work never gains local qualification merely from its size.
 
@@ -91,6 +94,10 @@ The separate [`codex_http_0160` profile](CODEX_0160.md) adds the observed bounde
 to the empty object. Other effort and summary controls remain blocked. It
 requires a new qualification declaration rather than broadening existing
 0.147.0 evidence.
+The separate `codex_llama_v1` capability admits the versioned app profile's
+namespace, custom and client-discovered tools and plain reasoning controls/history.
+Its adapter preserves client tool execution and affinity; legacy capabilities
+retain the exclusions above. See [app compatibility](CODEX_APP_COMPATIBILITY.md).
 The [pinned Codex/llama.cpp profile](qualifications/codex-0147-llama-b11617-qwen3-4b.md)
 records real supplied-script, streaming and cancellation evidence, along with
 the model's failed autonomous repair and strict formatting cases.
@@ -120,7 +127,7 @@ headers and body writes also use the remaining absolute deadline. A disconnect
 is observed by the existing relay when it next reads/writes, not by a separate
 background cancellation worker.
 
-Immediately before cache delivery and provider open, Hormuz rechecks admission,
+Immediately before cache delivery and provider open, Koto rechecks admission,
 the actual final body, current policy digest, destination custody and readiness.
 A policy change blocks the in-flight request and requires a fresh request. A
 known rejection before provider open settles its reservation at zero. Existing
@@ -135,7 +142,7 @@ blocks with HTTP 409. A known cloud continuation is blocked when local-only is
 requested; it is never translated into a local session. Helpers without this
 retained accounting path conservatively block opaque continuation state.
 
-Locality enforcement concerns Hormuz's configured transport destinations: local
+Locality enforcement concerns Koto's configured transport destinations: local
 origins are literal loopback addresses and bypass proxies/redirects. The operator
 must separately establish that the process listening there performs inference
 locally and does not forward it elsewhere. No subscription entitlement or model
@@ -151,7 +158,7 @@ generation, declared feature/bounds and readiness (`unchecked`, `ready`,
 Version 2 additionally separates `coding_readiness`, content-free `coding_evidence`
 and the actually admissible `automatic_task_types`. Version-1 status fixtures
 remain readable. CLI and plugin callers can inspect the same live owner through
-`hormuz client status codex --client-home /path/to/codex-home --routing`, without
+`koto client status codex --client-home /path/to/codex-home --routing`, without
 exporting a token or making an inference call.
 
 Admitted responses and exact-answer hits declare `hormuz.relay-metadata;v=3`.
