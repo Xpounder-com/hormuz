@@ -52,12 +52,13 @@ def main():
                                          capture_output=True, text=True, check=True, timeout=10)
             if 'usage: koto ' not in help_result.stdout:
                 raise SystemExit('Installed CLI does not expose the Koto identity: ' + name)
+        # unittest timings include setup and cleanup. Python 3.11 runs the same
+        # complete suite without the duration flag introduced in Python 3.12.
+        durations = ['--durations', '20'] if sys.version_info >= (3, 12) else []
         subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
-                        '-p', 'test_*workflow.py', '-f', '-v'],
-                       # The 408-test main job on 2026-10-16 took 1118 seconds.
-                       # The expanded 461-test suite retains every case within
-                       # a finite twenty-five-minute budget, leaving
-                       # two minutes for build, artifacts and job cleanup.
+                        '-p', 'test_*workflow.py', '-f', '-v', *durations],
+                       # Retain main's finite twenty-five-minute suite budget,
+                       # leaving two minutes for installation and job cleanup.
                        cwd=temporary, env=environment, check=True, timeout=1500)
     print('Installed-wheel workflow passed outside the source checkout')
 
