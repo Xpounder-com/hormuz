@@ -87,10 +87,10 @@ def _launch(arguments, client_version):
             break
         if token in {'exec', 'e', 'resume', 'review'}:
             continue
-        if token == '--ignore-user-config' and client_version == '0.160.0':
+        if token == '--ignore-user-config' and client_version != '0.147.0':
             ignore_user = True
             continue
-        if token == '--ignore-rules' and client_version == '0.160.0':
+        if token == '--ignore-rules' and client_version != '0.147.0':
             continue
         if token == '--search':
             dedicated['web_search'] = 'live'
@@ -199,7 +199,7 @@ def inspect_overrides(home, project, arguments=None, *, client_version=SUPPORTED
         layers.append({'source': 'profile', 'state': 'applied', 'keys': keys, 'ignored_keys': []})
     context = copy.deepcopy(effective)
     _merge(context, generic)
-    project_denied = PROJECT_DENIED | {'responses_api_metadata'} if client_version == '0.160.0' else PROJECT_DENIED
+    project_denied = PROJECT_DENIED | {'responses_api_metadata'} if client_version != '0.147.0' else PROJECT_DENIED
     root = _root(project, context)
     repository = _repository_root(project)
     directories = [project, *project.parents]

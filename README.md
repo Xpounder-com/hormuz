@@ -111,12 +111,17 @@ npx skills add mehrdadxzaker/hormuz --skill hormuz
 
 Or select it explicitly with `--agent cursor` or `--agent opencode`.
 
-After installation, ask: **“Use Hormuz to set up local-only routing for Codex.”**
-The skill checks the installed router, client version and route qualification
-before using shared setup. Plugin installation installs instructions; the
+After installation, ask: **“Use Hormuz in this chat. Let me choose the configured
+router or a qualified local model.”** Follow the [explicit chat workflow](docs/HORMUZ_CHAT.md)
+to preserve the native model, account, plugins, MCP and reasoning. Normal-app
+startup bridge activation is disabled. For an explicitly requested persistent
+CLI connection, the skill checks the router, client version and qualification
+before shared setup. Plugin installation installs instructions; the
 router runtime and a qualified local model are separate prerequisites. The
 implemented persistent connection supports Codex CLI 0.147.0 and the
-[0.160.0 single-agent HTTP profile](docs/CODEX_0160.md). Other agents can
+[0.160.0 single-agent HTTP profile](docs/CODEX_0160.md), plus the
+[isolated Codex app engine 0.162.0-alpha.17.2 qualification](docs/CODEX_APP_COMPATIBILITY.md) with
+plugins, MCP discovery and reasoning enabled. Other agents can
 use the skill to manage that connection; their own inference-routing adapters
 are not implemented. See [installation, updates, removal and compatibility](docs/AGENT_INSTALLATION.md).
 

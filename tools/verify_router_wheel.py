@@ -19,9 +19,10 @@ def main():
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
         required = {'hormuz/codex-0160-base-instructions.json', 'hormuz/codex-0160-LICENSE.txt',
-                    'hormuz/local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json'}
+                    'hormuz/local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json',
+                    'hormuz/local-setup-codex-app-0162-llama-b11617-qwen3-4b-v3.json'}
         if not required <= set(names):
-            raise SystemExit('Wheel is missing Codex 0.160.0 compatibility assets')
+            raise SystemExit('Wheel is missing Codex CLI/app compatibility assets')
         if any('/migrations/postgresql/' in name or name.startswith(('clients/', 'apps/', 'deploy/'))
                or name.endswith('.css') or name in {'hormuz/postgres.py', 'hormuz/work_billing.py',
                'hormuz/hosted.py', 'hormuz/commands/agent.py'} for name in names):
@@ -39,11 +40,11 @@ def main():
                        cwd=temporary, env=environment, check=True, timeout=10)
         subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
                         '-p', 'test_*workflow.py', '-f', '-v'],
-                       # The 392-test installed CI suite passed in 1046 seconds.
-                       # Additional benchmark and managed-runtime cases need
-                       # a finite twenty-minute budget, leaving
+                       # The 408-test main job on 2026-10-16 took 1118 seconds.
+                       # The expanded 461-test suite retains every case within
+                       # a finite twenty-five-minute budget, leaving
                        # two minutes for build, artifacts and job cleanup.
-                       cwd=temporary, env=environment, check=True, timeout=1200)
+                       cwd=temporary, env=environment, check=True, timeout=1500)
     print('Installed-wheel workflow passed outside the source checkout')
 
 
