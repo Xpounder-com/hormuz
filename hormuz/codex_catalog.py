@@ -1,4 +1,4 @@
-"""Codex 0.160.0 model metadata for actor-visible qualified local aliases.
+"""Codex CLI/app model metadata for actor-visible qualified local aliases.
 
 The regular OpenAI data list remains authoritative for other API clients.
 Metadata describes the admitted HTTP profile, not model quality or hardware fit.
@@ -39,4 +39,11 @@ def qualified_models(config, aliases):
             'truncation_policy': {'mode': 'bytes', 'limit': 10000},
             'experimental_supported_tools': [], 'input_modalities': ['text'],
         })
+        if 'codex_llama_v1' in route.capabilities:
+            result[-1].update(supports_search_tool=True, supports_reasoning_summary_parameter=True,
+                default_reasoning_summary='auto', default_reasoning_level='medium',
+                include_skills_usage_instructions=True, include_plugin_usage_instructions=True,
+                include_apps_usage_instructions=True, apply_patch_tool_type='freeform', context_window=32768,
+                supported_reasoning_levels=[{'effort': level, 'description': 'Local model reasoning; native effort semantics apply.'}
+                                           for level in ('none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max')])
     return result

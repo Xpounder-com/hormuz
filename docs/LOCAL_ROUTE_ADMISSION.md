@@ -58,7 +58,10 @@ features, byte/output envelope, tool and streaming behavior, and runtime egress.
 The revision must match the route. Configurations accept at most eight records;
 unknown fields, malformed bounds and mismatched revisions fail startup.
 Available task labels are `summarization`, `translation`, `structured_extraction`,
-`code_change` and `code_review`. A fixed, bounded local heuristic recognizes
+`code_change` and `code_review`. The opt-in [Codex app transport](CODEX_APP_COMPATIBILITY.md)
+also permits `interactive` for explicitly selected ordinary local tasks; coding
+requests still require the existing evidence and request-profile checks. It does
+not admit arbitrary automatic cloud-to-local redirection. A fixed, bounded local heuristic recognizes
 leading instructions; it neither measures task difficulty nor calls a model.
 Unknown work never gains local qualification merely from its size.
 
@@ -91,6 +94,10 @@ The separate [`codex_http_0160` profile](CODEX_0160.md) adds the observed bounde
 to the empty object. Other effort and summary controls remain blocked. It
 requires a new qualification declaration rather than broadening existing
 0.147.0 evidence.
+The separate `codex_llama_v1` capability admits the versioned app profile's
+namespace, custom and client-discovered tools and plain reasoning controls/history.
+Its adapter preserves client tool execution and affinity; legacy capabilities
+retain the exclusions above. See [app compatibility](CODEX_APP_COMPATIBILITY.md).
 The [pinned Codex/llama.cpp profile](qualifications/codex-0147-llama-b11617-qwen3-4b.md)
 records real supplied-script, streaming and cancellation evidence, along with
 the model's failed autonomous repair and strict formatting cases.

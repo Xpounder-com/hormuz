@@ -13,11 +13,11 @@
       "onboardingSkill": "./skills/koto/SKILL.md",
       "interface": {
         "displayName": "Koto",
-        "shortDescription": "Manage your local model router",
+        "shortDescription": "Choose local models in your chat",
         "developerName": "mehrdadxzaker",
         "category": "Developer Tools",
         "defaultPrompt": [
-          "Use Koto to set up local-only routing for Codex."
+          "Use Koto in this chat. Let me choose the configured router or a qualified local model."
         ],
         "logo": "./assets/koto-icon-512.png",
         "logoDark": "./assets/koto-icon-512.png",

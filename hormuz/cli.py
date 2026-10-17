@@ -14,6 +14,7 @@ from . import __version__
 from .commands import client as client_commands
 from .commands import history as history_commands
 from .commands import capabilities as capability_commands
+from . import chat_task
 from .commands import benchmark as benchmark_commands
 from .config import ConfigError, GatewayConfig
 from .contracts import contract_manifest
@@ -34,11 +35,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verbose", action="store_true", help="Enable content-free request logs")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("serve", help="Run the customer-local router")
+    disable = commands.add_parser("off", help="Disable Koto and restore the connected Codex settings")
+    disable.add_argument("--client-home", help="Codex home (default CODEX_HOME or ~/.codex)")
+    disable.add_argument("--generation", help="Disconnect only the receipt generation that you own")
+    disable.set_defaults(client="codex", client_command="disconnect")
     contract = commands.add_parser("contract", help="Inspect versioned routing and historical evidence contracts")
     contract.add_subparsers(dest="contract_command", required=True).add_parser("manifest")
     client_commands.add_client_commands(commands)
     history_commands.add_history_commands(commands)
     capability_commands.add_commands(commands)
+    chat_task.add_commands(commands)
     benchmark_commands.add_commands(commands)
     return parser
 
@@ -56,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "history":
         return history_commands.run(args)
+    if args.command == "chat":
+        return chat_task.run(args)
     if args.command == "benchmark":
         return benchmark_commands.run(args)
     if args.command in {"request", "policy", "model", "usage"}:
@@ -64,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.auth_command == "local-token":
             return client_commands.local_token(args)
         return client_commands._auth_token(args.env)
-    if args.command == "client" and args.client_command != "config":
+    if args.command == "off" or args.command == "client" and args.client_command != "config":
         return client_commands.run_lifetime(args)
     try:
         config = GatewayConfig.load(args.config)

@@ -24,6 +24,17 @@ def add_client_commands(
     connect = client_subparsers.add_parser("config", help="Print client configuration for this gateway")
     _client_config_arguments(connect)
 
+    bridge = client_subparsers.add_parser("bridge", help="Isolated app-adapter experiment; normal app activation is disabled")
+    bridge.add_argument("client", choices=["codex"])
+    bridge.add_argument("--client-home", help="Normal Codex home (default CODEX_HOME or ~/.codex)")
+    bridge.add_argument("--router-home", required=True, help="Separate home with a ready shared Koto connection")
+    bridge.add_argument("--directory", required=True, help="New private directory for the reversible app adapter")
+    bridge.add_argument("--executable", required=True, help="Unchanged native Codex app engine")
+    bridge.add_argument("--launchctl", default="/bin/launchctl", help="Launch environment controller")
+    bridge.add_argument("--isolated-test", action="store_true",
+                        help="Require a disposable home and fake launch controller; never activate normal Codex")
+    bridge.add_argument("--dry-run", action="store_true", help="Preview without changing files or the launch environment")
+
     acquire = client_subparsers.add_parser("acquire", help="Preview or explicitly download pinned local runtime/model assets")
     acquire.add_argument("client", choices=["codex"])
     acquire.add_argument("--directory", required=True, help="Private parent directory for digest-bound asset generations")
@@ -236,7 +247,10 @@ def run_lifetime(args: argparse.Namespace) -> int:
     from ..connected_client import ConnectedClientError, ConnectedClientLifetime, lifetime_error
     try:
         lifetime = ConnectedClientLifetime(Path(args.client_home or os.environ.get("CODEX_HOME", "~/.codex")))
-        if args.client_command == "qualify":
+        if args.client_command == "bridge":
+            from ..codex_app_bridge_control import install_bridge
+            result = install_bridge(lifetime.home, args)
+        elif args.client_command == "qualify":
             result = lifetime.qualify(Path(args.plan) if args.plan else None, revoke=args.revoke)
             if result["schema_id"] == "hormuz.coding-probe-error":
                 print(json.dumps(result), file=sys.stderr)
@@ -255,7 +269,12 @@ def run_lifetime(args: argparse.Namespace) -> int:
         elif args.client_command == "status":
             result = lifetime.status(routing=args.routing)
         else:
-            result = lifetime.disconnect(generation=args.generation)
+            result = None
+            if args.command == "off":
+                from ..chat_owner import disconnect_owner
+                result = disconnect_owner(lifetime.home, generation=args.generation)
+            if result is None:
+                result = lifetime.disconnect(generation=args.generation)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ConnectedClientError, ConfigError, OSError, subprocess.SubprocessError) as error:

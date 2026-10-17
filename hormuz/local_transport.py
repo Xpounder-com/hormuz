@@ -58,7 +58,7 @@ class LocalResponse:
         self.close()
 
 
-def open_local_upstream(request, *, timeout, absolute_timeout=None, cancel_check=None):
+def open_local_upstream(request, *, timeout, absolute_timeout=None, cancel_check=None, response_timeout=None):
     origin = urlsplit(request.full_url)
     connection_type = http.client.HTTPSConnection if origin.scheme == "https" else http.client.HTTPConnection
     connection = connection_type(origin.hostname, origin.port, timeout=timeout)
@@ -90,6 +90,11 @@ def open_local_upstream(request, *, timeout, absolute_timeout=None, cancel_check
             timer = threading.Timer(remaining if cancel_check is None else 0, expire)
             timer.daemon = True
             timer.start()
+        if response_timeout is not None:
+            remaining = deadline - time.monotonic() if deadline is not None else response_timeout
+            if remaining <= 0:
+                raise TimeoutError("local_request_deadline")
+            transport_socket.settimeout(min(response_timeout, remaining))
         path = (origin.path or "/") + ("?" + origin.query if origin.query else "")
         connection.request(request.get_method(), path, body=request.data,
                            headers=dict(request.header_items()))

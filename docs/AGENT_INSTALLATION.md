@@ -71,7 +71,7 @@ at the same skill; no setup logic is hidden in its manifests.
 
 | Installed surface | What this package supplies | Routing evidence |
 | --- | --- | --- |
-| Codex | Native marketplace entry and portable skills plugin | Persistent adapter supports exact CLI versions 0.147.0 and [0.160.0](CODEX_0160.md); host/plugin installation is a separate version check |
+| Codex | Native marketplace entry and portable skills plugin | Exact CLI versions 0.147.0 and [0.160.0](CODEX_0160.md), plus [app engine 0.162.0-alpha.17.2](CODEX_APP_COMPATIBILITY.md); host/plugin installation is a separate version check |
 | Gemini CLI | Skills-only extension | Gemini inference-routing adapter is not implemented |
 | GitHub Copilot CLI | Marketplace plugin; reads the Claude-compatible catalog | Copilot inference-routing adapter is not implemented |
 | Claude Code | Native marketplace and plugin manifest | Persistent Claude adapter is not implemented; non-Claude main-model substitution is not promised |

@@ -88,7 +88,7 @@ if "idle" in sys.argv:
     sys.exit(0)
 try:
     control = "work-state" in sys.argv or "router-state" in sys.argv
-    request = {"model": view["model"], "max_output_tokens": 8,
+    request = {"model": "local-code" if "request-local-model" in sys.argv else view["model"], "max_output_tokens": 8,
                "input": "Fix the arithmetic function in this Python code." if "code-change" in sys.argv else
                         "Review this code diff." if "code-review" in sys.argv else
                         "Consider this fixture." if "unknown-task" in sys.argv else "Summarize this fixture."}
@@ -1301,7 +1301,7 @@ class ConnectedClientLifetimeWorkflowTests(unittest.TestCase):
             profile_path = Path(options[1])
             original = json.loads(profile_path.read_text())
             for change, code in (
-                ({"schema_version": 2}, "router_configuration_unsupported"),
+                ({"schema_version": 3}, "router_configuration_unsupported"),
                 ({"runtime_sha256": "a" * 63}, "router_configuration_unsupported"),
                 ({"system": "unsupported-platform"}, "platform_unsupported"),
                 ({"client_version": "0.0.0"}, "version_unsupported"),

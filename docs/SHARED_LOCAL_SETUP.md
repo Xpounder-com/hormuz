@@ -58,6 +58,8 @@ matching staging-link cleanup described below.
 Setup chooses a bundled profile using the actual target version. The
 [0.160.0 HTTP profile](CODEX_0160.md) has its own version-matched row; explicit
 qualification documents must match the executable at both preflight and connect.
+The [app profile](CODEX_APP_COMPATIBILITY.md) matches the bundled
+`0.162.0-alpha.17.2` engine and preserves plugins, MCP discovery and reasoning.
 
 The historical [0.147.0 version-1 profile](../hormuz/local-setup-codex-0147-llama-b11617-qwen3-4b-v1.json)
 contains the exact digests, client/platform row and bounded request envelope
@@ -136,6 +138,13 @@ reuse. Removal of the plugin removes instructions; disconnect first.
 - `hormuz.local-setup-profile` version 1 is the strict, bounded input declaration.
   It includes exact digests, client/platform, model, capabilities, task types
   and request/output/startup/upstream limits. Unknown fields/versions fail.
+  Version 2 adds nullable coding evidence and preserves the original limits;
+  its [fixture](../tests/fixtures/local-setup-profile-v2.json) stays unchanged.
+  Version 3 adds the explicit local transport, interactive local selection and
+  expanded limits while retaining coding evidence and admission safeguards.
+  Its [fixture](../tests/fixtures/local-setup-profile-v3.json) freezes that
+  declaration. See the app compatibility document for managed
+  profile v2, metrics migration 20 and rollback boundaries.
 - `hormuz.local-setup` version 1 is the environment-backed, content-free receipt containing
   `configuration` and `connection`. Configuration has operation `create` or
   `reuse`, mode `local_only`, qualification/model identifiers, credential
