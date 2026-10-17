@@ -4,6 +4,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 import re
 from typing import Any
+from ..client_versions import CODEX_VERSION_PATTERN
 
 from .common import (
     ContractValidationError, _exact_keys, _value_mapping, _value_string, _value_string_list,
@@ -34,7 +35,7 @@ def _validate_status(value: Mapping[str, Any]) -> None:
         generation = _value_string(value, "generation")
         if re.fullmatch(r"[a-f0-9]{32}", generation) is None:
             raise ContractValidationError("invalid connected-client generation")
-        if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", _value_string(value, "client_version")) is None:
+        if re.fullmatch(CODEX_VERSION_PATTERN, _value_string(value, "client_version")) is None:
             raise ContractValidationError("invalid connected-client version")
         owned = _value_string_list(value, "owned_settings")
         fields = {"model", "model_provider", "web_search"}
@@ -55,7 +56,7 @@ def _validate_preview(value: Mapping[str, Any]) -> None:
                         "client_version", "settings", "changes"})
     if _value_string(value, "scope") != "codex_user_defaults" or _value_string(value, "phase") != "preview":
         raise ContractValidationError("invalid connected-client preview scope or phase")
-    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", _value_string(value, "client_version")) is None:
+    if re.fullmatch(CODEX_VERSION_PATTERN, _value_string(value, "client_version")) is None:
         raise ContractValidationError("invalid connected-client version")
     settings = _value_mapping(value, "settings")
     _exact_keys(settings, {"model", "model_provider", "web_search"})

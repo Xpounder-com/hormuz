@@ -1,10 +1,10 @@
 # Verified local asset acquisition
 
-`hormuz client acquire codex` obtains the runtime and model files consumed by
+`koto client acquire codex` obtains the runtime and model files consumed by
 [shared setup](SHARED_LOCAL_SETUP.md). It advances the acquisition gap in
 [#523](https://github.com/Xpounder-com/hormuz/issues/523) and
 [#542](https://github.com/Xpounder-com/hormuz/issues/542). The existing Codex CLI
-and installed Hormuz remain prerequisites. CLI and skills-only plugin callers
+and installed Koto remain prerequisites. CLI and skills-only plugin callers
 invoke this same operation; acquisition does not install a second connection
 owner or activate routing.
 
@@ -14,7 +14,7 @@ Choose a private directory with an existing parent. The default invocation is
 an offline preview, and `--dry-run` is an equivalent explicit spelling:
 
 ```sh
-hormuz client acquire codex --directory /absolute/private/hormuz-assets
+koto client acquire codex --directory /absolute/private/hormuz-assets
 ```
 
 The receipt shows the exact source URLs, SHA-256, byte sizes, license identifiers
@@ -23,11 +23,11 @@ disk space. Preview creates no directory, lock, configuration or network request
 If the shown files and licenses match the user's request, explicitly download:
 
 ```sh
-hormuz client acquire codex --directory /absolute/private/hormuz-assets --download
+koto client acquire codex --directory /absolute/private/hormuz-assets --download
 ```
 
 A ready receipt's `setup_arguments` is an argument array for the existing
-`hormuz --config /absolute/private/hormuz.json client setup codex` command.
+`koto --config /absolute/private/koto.json client setup codex` command.
 Pass its entries as separate arguments, along with the selected Codex executable
 and client home. Preview setup first with `--dry-run`, then apply the same
 authorized setup. Treat the array as data; do not evaluate it as shell code.
@@ -36,7 +36,7 @@ Normal status, request and disconnect behavior stays with the connection owner.
 To require a completed installation while offline:
 
 ```sh
-hormuz client acquire codex --directory /absolute/private/hormuz-assets --offline
+koto client acquire codex --directory /absolute/private/hormuz-assets --offline
 ```
 
 Completed installations are reverified on every reuse, including archive/model
@@ -162,7 +162,7 @@ The public catalog (`hormuz.local-acquisition-catalog`), receipt
 start at version 1, with [catalog](../tests/fixtures/local-acquisition-catalog-v1.json),
 [receipt](../tests/fixtures/local-acquisition-v1.json) and
 [error](../tests/fixtures/local-acquisition-error-v1.json) compatibility fixtures.
-They appear in `hormuz contract manifest`. Artifact URLs and installation paths
+They appear in `koto contract manifest`. Artifact URLs and installation paths
 are operational metadata; receipts contain no provider response body, credential,
 prompt or retained history text.
 

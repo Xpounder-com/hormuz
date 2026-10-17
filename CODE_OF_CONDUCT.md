@@ -71,7 +71,7 @@ without naming people or describing the incident publicly.
 
 All complaints will be reviewed and investigated promptly and fairly. All
 community leaders are obligated to respect the privacy and security of the
-reporter. Hormuz is currently maintained as an alpha project without a
+reporter. Koto is currently maintained as an alpha project without a
 guaranteed response SLA; maintainers aim to acknowledge a report within five
 business days.
 

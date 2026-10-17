@@ -15,9 +15,9 @@ def _tag(value, key):
         raise ContractValidationError("invalid local setup identifier")
 
 
-def validate_profile(value):
-    _exact_keys(value, PROFILE_FIELDS | ({"coding_evidence"} if value["schema_version"] == 2 else set()))
-    if value["schema_version"] == 2 and value["coding_evidence"] is not None:
+def validate_profile(value, *, extended=False):
+    _exact_keys(value, PROFILE_FIELDS | ({"coding_evidence"} if value["schema_version"] >= 2 else set()))
+    if value["schema_version"] >= 2 and value["coding_evidence"] is not None:
         from .local_coding import validate_evidence
         validate_evidence(value["coding_evidence"])
     for key in ("qualification_id", "client_version", "system", "machine", "model"):
@@ -25,13 +25,16 @@ def validate_profile(value):
     for key in ("runtime_sha256", "model_sha256"):
         if re.fullmatch(r"[a-f0-9]{64}", _value_string(value, key)) is None:
             raise ContractValidationError("invalid local setup digest")
-    for key, maximum in (("max_request_bytes", 65536), ("max_output_tokens", 512),
-                         ("upstream_timeout_seconds", 90), ("startup_timeout_seconds", 60)):
+    for key, maximum in (("max_request_bytes", 2 * 1024 * 1024 if extended else 65536),
+                         ("max_output_tokens", 8192 if extended else 512),
+                         ("upstream_timeout_seconds", 360 if extended else 90), ("startup_timeout_seconds", 60)):
         if type(value[key]) is not int or not 1 <= value[key] <= maximum:
             raise ContractValidationError("invalid local setup limit")
     choices = {
-        "capabilities": {"responses", "text", "streaming", "tools", "codex_http", "codex_http_0160", "structured_output"},
-        "task_types": {"summarization", "translation", "structured_extraction", "code_change", "code_review"},
+        "capabilities": {"responses", "text", "streaming", "tools", "codex_http", "codex_http_0160", "structured_output"}
+                        | ({"codex_llama_v1"} if extended else set()),
+        "task_types": {"summarization", "translation", "structured_extraction", "code_change", "code_review"}
+                      | ({"interactive"} if extended else set()),
     }
     for key, allowed in choices.items():
         items = value[key]
@@ -41,6 +44,10 @@ def validate_profile(value):
             raise ContractValidationError("invalid local setup capabilities")
     if not {"responses", "text"} <= set(value["capabilities"]):
         raise ContractValidationError("local setup requires text Responses")
+
+
+def validate_profile_v3(value):
+    validate_profile(value, extended=True)
 
 
 def validate_setup(value):

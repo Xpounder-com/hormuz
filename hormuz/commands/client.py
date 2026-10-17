@@ -24,6 +24,17 @@ def add_client_commands(
     connect = client_subparsers.add_parser("config", help="Print client configuration for this gateway")
     _client_config_arguments(connect)
 
+    bridge = client_subparsers.add_parser("bridge", help="Isolated app-adapter experiment; normal app activation is disabled")
+    bridge.add_argument("client", choices=["codex"])
+    bridge.add_argument("--client-home", help="Normal Codex home (default CODEX_HOME or ~/.codex)")
+    bridge.add_argument("--router-home", required=True, help="Separate home with a ready shared Koto connection")
+    bridge.add_argument("--directory", required=True, help="New private directory for the reversible app adapter")
+    bridge.add_argument("--executable", required=True, help="Unchanged native Codex app engine")
+    bridge.add_argument("--launchctl", default="/bin/launchctl", help="Launch environment controller")
+    bridge.add_argument("--isolated-test", action="store_true",
+                        help="Require a disposable home and fake launch controller; never activate normal Codex")
+    bridge.add_argument("--dry-run", action="store_true", help="Preview without changing files or the launch environment")
+
     acquire = client_subparsers.add_parser("acquire", help="Preview or explicitly download pinned local runtime/model assets")
     acquire.add_argument("client", choices=["codex"])
     acquire.add_argument("--directory", required=True, help="Private parent directory for digest-bound asset generations")
@@ -59,6 +70,13 @@ def add_client_commands(
             lifecycle.add_argument("--credential-env", help="Use an existing token environment variable instead of managed local authentication")
             lifecycle.add_argument("--shadow-router", action="store_true", help="Record bounded local model routing advice without changing routes")
 
+    qualify = client_subparsers.add_parser("qualify", help="Authorize, inspect or revoke one bounded experimental local coding probe")
+    qualify.add_argument("client", choices=["codex"])
+    qualify.add_argument("--client-home", required=True, help="Explicit private home owning this experimental connection")
+    probe = qualify.add_mutually_exclusive_group()
+    probe.add_argument("--plan", help="Frozen content-free probe plan; never a passing coding receipt")
+    probe.add_argument("--revoke", action="store_true", help="Revoke future probe dispatch; disconnect also stops owned resources")
+
     readiness = client_subparsers.add_parser("cloud-readiness", help="Inspect cloud authorization paths without activating them")
     readiness.add_argument("client", choices=["codex"])
     readiness.add_argument("--client-home", help="Codex home (default CODEX_HOME or ~/.codex)")
@@ -70,7 +88,9 @@ def add_client_commands(
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
     auth_token = auth_subparsers.add_parser("token", help="Print a credential from an environment variable")
-    auth_token.add_argument("--env", default="HORMUZ_GATEWAY_TOKEN", help="Credential environment variable")
+    auth_token.add_argument("--env", default=("HORMUZ_GATEWAY_TOKEN" if "KOTO_GATEWAY_TOKEN" not in os.environ
+                                             and "HORMUZ_GATEWAY_TOKEN" in os.environ else "KOTO_GATEWAY_TOKEN"),
+                            help="Credential environment variable (default: KOTO_GATEWAY_TOKEN)")
     local_token = auth_subparsers.add_parser("local-token", help="Generation-bound credential helper for Codex")
     local_token.add_argument("--client-home", required=True)
     local_token.add_argument("--generation", required=True)
@@ -163,11 +183,11 @@ def _client_config(
         lines = [
             "# Put this in the user-level ~/.codex/config.toml",
             f"model = {json.dumps(default_model)}",
-            'model_provider = "hormuz"',
+            'model_provider = "koto"',
             *(['web_search = "disabled"'] if work_headers else []),
             "",
-            "[model_providers.hormuz]",
-            'name = "Hormuz"',
+            "[model_providers.koto]",
+            'name = "Koto"',
             f"base_url = {json.dumps(base_url + '/v1')}",
             'wire_api = "responses"',
         ]
@@ -227,7 +247,15 @@ def run_lifetime(args: argparse.Namespace) -> int:
     from ..connected_client import ConnectedClientError, ConnectedClientLifetime, lifetime_error
     try:
         lifetime = ConnectedClientLifetime(Path(args.client_home or os.environ.get("CODEX_HOME", "~/.codex")))
-        if args.client_command == "cloud-readiness":
+        if args.client_command == "bridge":
+            from ..codex_app_bridge_control import install_bridge
+            result = install_bridge(lifetime.home, args)
+        elif args.client_command == "qualify":
+            result = lifetime.qualify(Path(args.plan) if args.plan else None, revoke=args.revoke)
+            if result["schema_id"] == "hormuz.coding-probe-error":
+                print(json.dumps(result), file=sys.stderr)
+                return 2
+        elif args.client_command == "cloud-readiness":
             result = lifetime.cloud_readiness(Path(args.config), executable=args.executable,
                                              actor_id=args.actor, surface=args.surface)
         elif args.client_command == "setup":
@@ -241,7 +269,12 @@ def run_lifetime(args: argparse.Namespace) -> int:
         elif args.client_command == "status":
             result = lifetime.status(routing=args.routing)
         else:
-            result = lifetime.disconnect(generation=args.generation)
+            result = None
+            if args.command == "off":
+                from ..chat_owner import disconnect_owner
+                result = disconnect_owner(lifetime.home, generation=args.generation)
+            if result is None:
+                result = lifetime.disconnect(generation=args.generation)
         print(json.dumps(result, sort_keys=True))
         return 0
     except (ConnectedClientError, ConfigError, OSError, subprocess.SubprocessError) as error:

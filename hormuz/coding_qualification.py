@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import json
 import platform
 
-from ._contract_schemas.local_coding import FAMILIES, canonical_digest
+from ._contract_schemas.local_coding import FAMILIES, canonical_digest, coding_input
 from . import client_versions
 
 
@@ -18,6 +18,7 @@ class CodingQualification:
     passed: int = 0
     request_profile_sha256: str | None = None
     client_version: str | None = None
+    profile_schema_version: int = 1
 
     def describe(self):
         if self.evidence_id is None:
@@ -28,13 +29,13 @@ class CodingQualification:
                 "evaluated": self.evaluated, "passed": self.passed}
 
 
-def request_profile_digest(value):
+def request_profile_digest(value, *, schema_version=1):
     # Task text and turn identifiers vary; instructions, tools and generation
     # controls do not inherit qualification from another experiment.
     fields = {"instructions", "tools", "tool_choice", "temperature", "top_p", "reasoning", "include",
               "text", "parallel_tool_calls", "store", "service_tier", "stream"}
     profile = {key: item for key, item in value.items() if key in fields}
-    items = value.get("input", [])
+    items = coding_input(value.get("input", []), schema_version=schema_version)
     if not isinstance(items, list):
         items = [items]
     instructions = [{"position": index, "message": item} for index, item in enumerate(items)
@@ -45,6 +46,22 @@ def request_profile_digest(value):
     if profile.get("service_tier") is None:
         profile["service_tier"] = "default"
     return canonical_digest(profile)
+
+
+def matches_coding_subject(subject, config, route, qualification):
+    managed = config.managed_llama
+    # Adapter upgrades may retain several qualified wire versions. Match the
+    # receipt's exact supported version, independently of the current default.
+    supported_versions = getattr(client_versions, "SUPPORTED_CODEX_VERSIONS", (client_versions.SUPPORTED_CODEX_VERSION,))
+    expected = {"client_version": subject["client_version"], "system": platform.system(), "machine": platform.machine(),
+                "runtime_profile": "managed-llama.v1", "runtime_sha256": managed.runtime_sha256 if managed else None,
+                "model_revision": route.model_revision, "upstream_model": route.upstream_model, "protocol": route.protocol,
+                "capabilities": sorted(route.capabilities), "max_request_bytes": qualification.max_request_bytes,
+                "max_output_tokens": qualification.max_output_tokens, "upstream_timeout_seconds": config.upstream_timeout_seconds,
+                "request_profile_sha256": subject["request_profile_sha256"]}
+    declared = {**subject, "capabilities": sorted(subject["capabilities"])}
+    return (subject["client_version"] in supported_versions and managed is not None
+               and managed.route == route.alias and declared == expected)
 
 
 def assess_coding_evidence(serialized, config, route, qualification):
@@ -75,20 +92,9 @@ def assess_coding_evidence(serialized, config, route, qualification):
                    or outcome["elapsed_ms"] is not None and outcome["elapsed_ms"] > subject["upstream_timeout_seconds"] * 1000)
     covered = all(sum(case["partition"] == partition and case["family"] == family for case in plan["cases"]) >= count
                   for family in FAMILIES for partition, count in (("development", 1), ("held_out", 3)))
-    managed = config.managed_llama
-    # Adapter upgrades may retain several qualified wire versions. Match the
-    # receipt's exact supported version, independently of the current default.
-    supported_versions = getattr(client_versions, "SUPPORTED_CODEX_VERSIONS", (client_versions.SUPPORTED_CODEX_VERSION,))
-    expected = {"client_version": subject["client_version"], "system": platform.system(), "machine": platform.machine(),
-                "runtime_profile": "managed-llama.v1", "runtime_sha256": managed.runtime_sha256 if managed else None,
-                "model_revision": route.model_revision, "upstream_model": route.upstream_model, "protocol": route.protocol,
-                "capabilities": sorted(route.capabilities), "max_request_bytes": qualification.max_request_bytes,
-                "max_output_tokens": qualification.max_output_tokens, "upstream_timeout_seconds": config.upstream_timeout_seconds,
-                "request_profile_sha256": subject["request_profile_sha256"]}
-    declared = {**subject, "capabilities": sorted(subject["capabilities"])}
-    matched = (subject["client_version"] in supported_versions and managed is not None
-               and managed.route == route.alias and declared == expected)
+    matched = matches_coding_subject(subject, config, route, qualification)
     readiness = ("subject_mismatch" if not matched else "failed" if failed else
                  "qualified" if covered and passed == len(plan["cases"]) else "incomplete")
     return CodingQualification(readiness, evidence["evidence_id"], evidence["plan_sha256"], canonical_digest(evidence),
-                               len(plan["cases"]), len(outcomes), passed, subject["request_profile_sha256"], subject["client_version"])
+                               len(plan["cases"]), len(outcomes), passed, subject["request_profile_sha256"], subject["client_version"],
+                               evidence["schema_version"])

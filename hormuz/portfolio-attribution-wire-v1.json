@@ -82,7 +82,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.governed-run-attribution-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -151,7 +151,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.governed-run-attribution-event",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -264,7 +264,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.governed-run-attribution-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",

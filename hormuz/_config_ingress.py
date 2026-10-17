@@ -75,7 +75,7 @@ def validate_dedicated_ingress_credential_env(config: GatewayConfig) -> None:
         credential_envs.add(config.custody_executor.postgres_executor_dsn_env)
 
     if ingress.credential_env in credential_envs:
-        raise ConfigError("ingress.credential_env must name a credential distinct from all other Hormuz secrets")
+        raise ConfigError("ingress.credential_env must name a credential distinct from all other Koto secrets")
 
 
 def _ingress_config(value: Any, *, listen_host: str) -> IngressConfig:

@@ -1,6 +1,6 @@
 {
   "name": "Bug report",
-  "description": "Report a reproducible Hormuz defect using synthetic, sanitized inputs.",
+  "description": "Report a reproducible Koto defect using synthetic, sanitized inputs.",
   "title": "[Bug]: ",
   "labels": [
     "bug"
@@ -16,7 +16,7 @@
       "type": "input",
       "id": "version",
       "attributes": {
-        "label": "Hormuz version",
+        "label": "Koto version",
         "description": "Provide the commit SHA, tag, package version.",
         "placeholder": "commit abc1234 or v0.1.3"
       },

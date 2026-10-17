@@ -3,7 +3,7 @@
 - Status: Implemented managed-runtime slice; external qualification remains separate
 - Date: 2026-10-15
 - Decision owner: Product owner
-- Approval: The owner requested managed llama.cpp lifetime with TDD at the approved connect/request/result/status/disconnect workflow seam, using existing verified files and stopping only engines Hormuz owns.
+- Approval: The owner requested managed llama.cpp lifetime with TDD at the approved connect/request/result/status/disconnect workflow seam, using existing verified files and stopping only engines Koto owns.
 - Parent specification: [#523](https://github.com/Xpounder-com/hormuz/issues/523)
 
 Connecting an existing coding client still required separately supervising its

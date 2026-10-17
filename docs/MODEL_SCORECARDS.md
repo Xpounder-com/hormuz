@@ -8,7 +8,7 @@ existing connect → coding-client request → result/status → disconnect work
 ## Create your benchmark
 
 ```sh
-hormuz benchmark init --output "$PWD/my-work.json"
+koto benchmark init --output "$PWD/my-work.json"
 ```
 
 This creates a private, editable version-1 `hormuz.benchmark-suite` file without
@@ -81,13 +81,13 @@ Responses aliases from your configuration; replace the example aliases below
 with your own. Models, runtimes and credentials are never downloaded or changed.
 
 ```sh
-hormuz --config /absolute/path/hormuz.json benchmark run \
+koto --config /absolute/path/koto.json benchmark run \
   --suite "$PWD/my-work.json" \
   --models local-code local-fast \
   --output "$PWD/scorecard.json" \
   --repeats 3 --timeout-seconds 30 --deadline-seconds 300
 
-hormuz benchmark show --scorecard "$PWD/scorecard.json" --format markdown
+koto benchmark show --scorecard "$PWD/scorecard.json" --format markdown
 ```
 
 Omit `--format markdown` for JSON. `show` works without the configuration,
@@ -180,11 +180,11 @@ Running a benchmark does not activate routing. Preview and stage the change in
 a new configuration beside the current one:
 
 ```sh
-hormuz --config /absolute/path/hormuz.json benchmark configure \
+koto --config /absolute/path/koto.json benchmark configure \
   --scorecard "$PWD/scorecard.json" \
   --output /absolute/path/hormuz-scorecards.json --dry-run
 
-hormuz --config /absolute/path/hormuz.json benchmark configure \
+koto --config /absolute/path/koto.json benchmark configure \
   --scorecard "$PWD/scorecard.json" \
   --output /absolute/path/hormuz-scorecards.json
 ```
@@ -251,7 +251,7 @@ the local account supplied honest references or outcomes. Scores express
 performance on the declared cases, not universal model quality.
 
 The suite, scorecard, runtime-snapshot, routing-configuration and error receipts start at schema
-version 1 and appear in `hormuz contract manifest`. The
+version 1 and appear in `koto contract manifest`. The
 personal report uses `hormuz.personal-model-scorecard`, distinct from the older
 portfolio `hormuz.model-scorecard` contract. The
 [compatibility fixture](../tests/fixtures/model-benchmark-v1.json) freezes the

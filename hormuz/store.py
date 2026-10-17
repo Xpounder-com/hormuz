@@ -1446,9 +1446,10 @@ class UsageStore:
             )
         except ValueError:
             raise StorageSchemaError("provider_attempt_metrics_invalid") from None
+        table = "gateway_provider_attempt_metrics_v2" if event["event_schema_version"] == 2 else "gateway_provider_attempt_metrics"
         connection.execute(
-            """
-            INSERT INTO gateway_provider_attempt_metrics (
+            f"""
+            INSERT INTO {table} (
                 event_id, event_schema_id, event_schema_version, organization_id,
                 attempt_id, recorded_at, provider_status, response_headers_us,
                 first_body_byte_us, total_us, provider_bytes_read,
@@ -1542,7 +1543,8 @@ class UsageStore:
             metrics = connection.execute(
                 "SELECT COUNT(*) AS records, COUNT(m.response_headers_us) AS headers, "
                 "COUNT(m.first_body_byte_us) AS first_bytes, COUNT(m.total_us) AS totals "
-                "FROM gateway_provider_attempt_metrics m "
+                "FROM (SELECT * FROM gateway_provider_attempt_metrics UNION ALL "
+                "SELECT * FROM gateway_provider_attempt_metrics_v2) m "
                 "JOIN gateway_request_attempts a ON a.organization_id = m.organization_id "
                 "AND a.attempt_id = m.attempt_id "
                 "WHERE m.organization_id = ? AND a.actor_id = ?",

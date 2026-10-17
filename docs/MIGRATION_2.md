@@ -4,7 +4,7 @@ Version `2.0.0a1` is a source-development prerelease. This cleanup does not publ
 a release or establish installed-client support.
 
 Supported commands: `serve`, `client config/connect/status/disconnect`, `auth
-token` and `contract manifest`. Invoking `hormuz` prints help. It no longer
+token` and `contract manifest`. Invoking `koto` prints help. It no longer
 launches a coding app. Agent, personal/desktop, account, finance, policy-admin,
 hosted and storage-migration commands are rejected by the parser.
 

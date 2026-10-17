@@ -1,0 +1,529 @@
+{
+  "stage": "native-development-repair",
+  "campaign_id": "local-repair-20261016-v4",
+  "case_id": "dev-clamp",
+  "baseline_exit_code": 1,
+  "native_episodes": 1,
+  "quality_retries": 0,
+  "automatic_admission_effect": "none",
+  "setup": {
+    "configuration": {
+      "authentication": "managed_local",
+      "listen_port": 62652,
+      "mode": "local_only",
+      "model": "Qwen3-4B-Q4_K_M",
+      "operation": "reuse",
+      "qualification_id": "codex0160-m5-32g-local-repair-v4-probe",
+      "runtime_port": 62653
+    },
+    "connection": {
+      "client_version": "0.160.0",
+      "configuration": "installed",
+      "generation": "bad486235a8f081aa8d55ca0e65431b9",
+      "local_runtime": {
+        "ownership": "owned",
+        "state": "ready"
+      },
+      "owned_settings": [
+        "model",
+        "model_provider",
+        "web_search"
+      ],
+      "phase": "connected",
+      "retained_settings": [],
+      "router": "ready",
+      "schema_id": "hormuz.connected-client-status",
+      "schema_version": 2,
+      "scope": "codex_user_defaults"
+    },
+    "schema_id": "hormuz.local-setup",
+    "schema_version": 2
+  },
+  "readiness_before": {
+    "local_capacity": {
+      "active": 0,
+      "limit": 1
+    },
+    "mode": "local_only",
+    "routes": [
+      {
+        "automatic_task_types": [],
+        "capabilities": [
+          "responses",
+          "text",
+          "streaming",
+          "tools",
+          "codex_http",
+          "codex_http_0160"
+        ],
+        "coding_evidence": null,
+        "coding_readiness": "unknown",
+        "destination": "local-llama",
+        "evidence_basis": "operator_declared",
+        "generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+        "max_output_tokens": 512,
+        "max_request_bytes": 65536,
+        "model": "Qwen3-4B-Q4_K_M",
+        "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+        "qualification_id": "codex0160-m5-32g-local-repair-v4-probe",
+        "readiness": "unchecked",
+        "task_types": [
+          "code_change"
+        ]
+      }
+    ],
+    "schema_id": "hormuz.route-admission",
+    "schema_version": 2,
+    "task_classifier": "bounded_local_heuristic"
+  },
+  "native": {
+    "exit_code": 1,
+    "termination": "completed",
+    "elapsed_ms": 315,
+    "cleanup_error": null
+  },
+  "probe_after": {
+    "automatic_admission_effect": "none",
+    "case_id": "dev-clamp",
+    "destination_generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+    "max_requests": 8,
+    "model": "Qwen3-4B-Q4_K_M",
+    "plan_sha256": "7540ade10075e40883f22d81a5a4fc77b2a874a2fdd670eb2cf857f2a337fd58",
+    "probe_id": "a137ff5ce7e7d14baf6f6c0cc7676821",
+    "remaining_ms": 89588,
+    "schema_id": "hormuz.coding-probe-status",
+    "schema_version": 1,
+    "state": "armed",
+    "submitted_requests": 0
+  },
+  "readiness_after": {
+    "local_capacity": {
+      "active": 0,
+      "limit": 1
+    },
+    "mode": "local_only",
+    "routes": [
+      {
+        "automatic_task_types": [],
+        "capabilities": [
+          "responses",
+          "text",
+          "streaming",
+          "tools",
+          "codex_http",
+          "codex_http_0160"
+        ],
+        "coding_evidence": null,
+        "coding_readiness": "unknown",
+        "destination": "local-llama",
+        "evidence_basis": "operator_declared",
+        "generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+        "max_output_tokens": 512,
+        "max_request_bytes": 65536,
+        "model": "Qwen3-4B-Q4_K_M",
+        "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+        "qualification_id": "codex0160-m5-32g-local-repair-v4-probe",
+        "readiness": "unchecked",
+        "task_types": [
+          "code_change"
+        ]
+      }
+    ],
+    "schema_id": "hormuz.route-admission",
+    "schema_version": 2,
+    "task_classifier": "bounded_local_heuristic"
+  },
+  "work_state": {
+    "schema_id": "hormuz.ai-work-state",
+    "schema_version": 3,
+    "organization_id": "organization",
+    "actor_id": "local-user",
+    "as_of": "2026-10-16T15:24:52.284417+00:00",
+    "works": [],
+    "plans": [],
+    "totals": {
+      "attempts": 0,
+      "committed_microusd": 0,
+      "estimated_cost_microusd": 0,
+      "provider_confirmed_cost_microusd": 0,
+      "provider_confirmed_attempts": 0,
+      "unconfirmed_attempts": 0,
+      "pending_microusd": 0,
+      "uncertain_microusd": 0,
+      "cache_hits": 0,
+      "denied": 0,
+      "failed_attempts": 0,
+      "unknown_attempts": 0,
+      "retry_attempts": 0,
+      "failover_attempts": 0,
+      "reservation_exceeded": 0,
+      "repeated_requests": 0,
+      "provider_latency_ms": null,
+      "timed_attempts": 0,
+      "gateway_wall_ms": null,
+      "gateway_overhead_ms": null,
+      "timed_gateway_attempts": 0,
+      "consumed_microusd": 0,
+      "cost_basis": "gateway_reported_or_configured_estimate",
+      "invoice_finality": false,
+      "latency_basis": "sum_external_or_legacy_observed_attempt_latency",
+      "gateway_timing_basis": "entry_through_work_settlement_wall_time",
+      "summed_provider_ms": null,
+      "timing_coverage": {
+        "observed": 0,
+        "attempts": 0,
+        "basis": "gateway_observed_wall_and_provider_intervals"
+      },
+      "gateway_overhead_cost_microusd": null,
+      "cost_coverage": "covered_provider_attempts_excludes_unallocated_platform_and_compute_charges",
+      "works": 0,
+      "completed": 0
+    },
+    "scope": "actor",
+    "display": {
+      "job_limit": 100,
+      "shown_jobs": 0,
+      "total_jobs": 0,
+      "jobs_truncated": false,
+      "attempt_limit_per_job": 5,
+      "observation_limit_per_job": 5,
+      "plan_limit": 100,
+      "shown_plans": 0,
+      "total_plans": 0,
+      "plans_truncated": false
+    },
+    "coverage": "gateway_captured_work_requests_only",
+    "provider_account_costs": {
+      "status": "unavailable",
+      "reason": "external_account_collection_retired",
+      "accounts": []
+    },
+    "routing": {
+      "minimum_samples": 5,
+      "exploration_enabled": false,
+      "exploration_aliases": [],
+      "exploration_rate_percent": 5,
+      "exploration_max_cost_microusd": 0,
+      "evidence_basis": "local_observational_work_episodes",
+      "exploration_allocation_count": 0,
+      "exploration_reserved_microusd": 0,
+      "exploration_remaining_microusd": 0,
+      "exploration_allowance_basis": "monthly_quoted_reservations_including_unused_or_unknown_allocations"
+    },
+    "cache": {
+      "enabled": false,
+      "retention": "bounded_process_memory",
+      "exact_only": true
+    },
+    "connection": {
+      "endpoint": "http://127.0.0.1:62652",
+      "routes": [
+        {
+          "model": "Qwen3-4B-Q4_K_M",
+          "destination": "local-llama",
+          "protocol": "openai",
+          "locality": "local",
+          "authentication": "none",
+          "generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+          "upstream_model": "Qwen3-4B-Q4_K_M",
+          "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+          "capabilities": [
+            "responses",
+            "text",
+            "streaming",
+            "tools",
+            "codex_http",
+            "codex_http_0160"
+          ],
+          "credential_configured": false,
+          "eligible": true
+        }
+      ],
+      "shadow_router_enabled": false,
+      "credential_location": "router",
+      "coverage": "only_authenticated_intercepted_model_requests"
+    },
+    "onboarding": {
+      "choices": [
+        {
+          "model": "Qwen3-4B-Q4_K_M",
+          "destination": "local-llama",
+          "protocol": "openai",
+          "locality": "local",
+          "authentication": "none",
+          "generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+          "upstream_model": "Qwen3-4B-Q4_K_M",
+          "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+          "capabilities": [
+            "responses",
+            "text",
+            "streaming",
+            "tools",
+            "codex_http",
+            "codex_http_0160"
+          ],
+          "credential_configured": false,
+          "eligible": true,
+          "client": "codex"
+        }
+      ]
+    }
+  },
+  "revoked": {
+    "automatic_admission_effect": "none",
+    "case_id": "dev-clamp",
+    "destination_generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+    "max_requests": 8,
+    "model": "Qwen3-4B-Q4_K_M",
+    "plan_sha256": "7540ade10075e40883f22d81a5a4fc77b2a874a2fdd670eb2cf857f2a337fd58",
+    "probe_id": "a137ff5ce7e7d14baf6f6c0cc7676821",
+    "remaining_ms": 0,
+    "schema_id": "hormuz.coding-probe-status",
+    "schema_version": 1,
+    "state": "revoked",
+    "submitted_requests": 0
+  },
+  "disconnect": {
+    "client_version": "0.160.0",
+    "configuration": "not_owned",
+    "generation": "bad486235a8f081aa8d55ca0e65431b9",
+    "local_runtime": {
+      "ownership": "owned",
+      "state": "stopped"
+    },
+    "owned_settings": [
+      "model",
+      "model_provider",
+      "web_search"
+    ],
+    "phase": "disconnected",
+    "retained_settings": [],
+    "router": "stopped",
+    "schema_id": "hormuz.connected-client-status",
+    "schema_version": 2,
+    "scope": "codex_user_defaults"
+  },
+  "settings_restored": true,
+  "owned_listeners_closed": true,
+  "receipts": [
+    {
+      "operation": [
+        "client",
+        "setup"
+      ],
+      "receipt": {
+        "configuration": {
+          "authentication": "managed_local",
+          "listen_port": 62652,
+          "mode": "local_only",
+          "model": "Qwen3-4B-Q4_K_M",
+          "operation": "reuse",
+          "qualification_id": "codex0160-m5-32g-local-repair-v4-probe",
+          "runtime_port": 62653
+        },
+        "connection": {
+          "client_version": "0.160.0",
+          "configuration": "installed",
+          "generation": "bad486235a8f081aa8d55ca0e65431b9",
+          "local_runtime": {
+            "ownership": "owned",
+            "state": "ready"
+          },
+          "owned_settings": [
+            "model",
+            "model_provider",
+            "web_search"
+          ],
+          "phase": "connected",
+          "retained_settings": [],
+          "router": "ready",
+          "schema_id": "hormuz.connected-client-status",
+          "schema_version": 2,
+          "scope": "codex_user_defaults"
+        },
+        "schema_id": "hormuz.local-setup",
+        "schema_version": 2
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "status"
+      ],
+      "receipt": {
+        "local_capacity": {
+          "active": 0,
+          "limit": 1
+        },
+        "mode": "local_only",
+        "routes": [
+          {
+            "automatic_task_types": [],
+            "capabilities": [
+              "responses",
+              "text",
+              "streaming",
+              "tools",
+              "codex_http",
+              "codex_http_0160"
+            ],
+            "coding_evidence": null,
+            "coding_readiness": "unknown",
+            "destination": "local-llama",
+            "evidence_basis": "operator_declared",
+            "generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+            "max_output_tokens": 512,
+            "max_request_bytes": 65536,
+            "model": "Qwen3-4B-Q4_K_M",
+            "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+            "qualification_id": "codex0160-m5-32g-local-repair-v4-probe",
+            "readiness": "unchecked",
+            "task_types": [
+              "code_change"
+            ]
+          }
+        ],
+        "schema_id": "hormuz.route-admission",
+        "schema_version": 2,
+        "task_classifier": "bounded_local_heuristic"
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "qualify"
+      ],
+      "receipt": {
+        "automatic_admission_effect": "none",
+        "case_id": "dev-clamp",
+        "destination_generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+        "max_requests": 8,
+        "model": "Qwen3-4B-Q4_K_M",
+        "plan_sha256": "7540ade10075e40883f22d81a5a4fc77b2a874a2fdd670eb2cf857f2a337fd58",
+        "probe_id": "a137ff5ce7e7d14baf6f6c0cc7676821",
+        "remaining_ms": 89999,
+        "schema_id": "hormuz.coding-probe-status",
+        "schema_version": 1,
+        "state": "armed",
+        "submitted_requests": 0
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "qualify"
+      ],
+      "receipt": {
+        "automatic_admission_effect": "none",
+        "case_id": "dev-clamp",
+        "destination_generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+        "max_requests": 8,
+        "model": "Qwen3-4B-Q4_K_M",
+        "plan_sha256": "7540ade10075e40883f22d81a5a4fc77b2a874a2fdd670eb2cf857f2a337fd58",
+        "probe_id": "a137ff5ce7e7d14baf6f6c0cc7676821",
+        "remaining_ms": 89588,
+        "schema_id": "hormuz.coding-probe-status",
+        "schema_version": 1,
+        "state": "armed",
+        "submitted_requests": 0
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "status"
+      ],
+      "receipt": {
+        "local_capacity": {
+          "active": 0,
+          "limit": 1
+        },
+        "mode": "local_only",
+        "routes": [
+          {
+            "automatic_task_types": [],
+            "capabilities": [
+              "responses",
+              "text",
+              "streaming",
+              "tools",
+              "codex_http",
+              "codex_http_0160"
+            ],
+            "coding_evidence": null,
+            "coding_readiness": "unknown",
+            "destination": "local-llama",
+            "evidence_basis": "operator_declared",
+            "generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+            "max_output_tokens": 512,
+            "max_request_bytes": 65536,
+            "model": "Qwen3-4B-Q4_K_M",
+            "model_revision": "sha256:7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5",
+            "qualification_id": "codex0160-m5-32g-local-repair-v4-probe",
+            "readiness": "unchecked",
+            "task_types": [
+              "code_change"
+            ]
+          }
+        ],
+        "schema_id": "hormuz.route-admission",
+        "schema_version": 2,
+        "task_classifier": "bounded_local_heuristic"
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "qualify"
+      ],
+      "receipt": {
+        "automatic_admission_effect": "none",
+        "case_id": "dev-clamp",
+        "destination_generation": "784d2f35130efbb12b489c98062142d60048dbec6b5f413f9ce0797042ed309c",
+        "max_requests": 8,
+        "model": "Qwen3-4B-Q4_K_M",
+        "plan_sha256": "7540ade10075e40883f22d81a5a4fc77b2a874a2fdd670eb2cf857f2a337fd58",
+        "probe_id": "a137ff5ce7e7d14baf6f6c0cc7676821",
+        "remaining_ms": 0,
+        "schema_id": "hormuz.coding-probe-status",
+        "schema_version": 1,
+        "state": "revoked",
+        "submitted_requests": 0
+      }
+    },
+    {
+      "operation": [
+        "client",
+        "disconnect"
+      ],
+      "receipt": {
+        "client_version": "0.160.0",
+        "configuration": "not_owned",
+        "generation": "bad486235a8f081aa8d55ca0e65431b9",
+        "local_runtime": {
+          "ownership": "owned",
+          "state": "stopped"
+        },
+        "owned_settings": [
+          "model",
+          "model_provider",
+          "web_search"
+        ],
+        "phase": "disconnected",
+        "retained_settings": [],
+        "router": "stopped",
+        "schema_id": "hormuz.connected-client-status",
+        "schema_version": 2,
+        "scope": "codex_user_defaults"
+      }
+    }
+  ],
+  "implementation_changed": false,
+  "patch_sha256": null,
+  "checks_sha256": "da25b64603054b72230db061e79855ed9d3f32b6f31076fa5755ac4eec12b942",
+  "checks_unchanged": true,
+  "check_exit_code": 1,
+  "completed_turns": 0,
+  "invalid_event_lines": 0,
+  "passed": false
+}

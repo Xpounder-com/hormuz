@@ -14,7 +14,7 @@ from .constants import (
 
 
 class ContractValidationError(ValueError):
-    """Raised when a public Hormuz contract is malformed or unsupported."""
+    """Raised when a public Koto contract is malformed or unsupported."""
 
 
 def _validate_identity_values(value: Mapping[str, Any]) -> None:

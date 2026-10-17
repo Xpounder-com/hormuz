@@ -48,7 +48,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.external-work-binding-event",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -138,7 +138,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.external-work-binding-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -196,7 +196,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.external-work-binding-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -262,7 +262,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.portfolio-error",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -409,7 +409,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-scope-create-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -468,7 +468,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-scope-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -526,7 +526,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-scope-version",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -654,7 +654,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-scope-version-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
