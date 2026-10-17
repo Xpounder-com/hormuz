@@ -22,14 +22,22 @@ def parse_version(value, component):
     return match
 
 
+def _binds_version(node):
+    if isinstance(node, ast.Name):
+        return node.id == "__version__" and isinstance(node.ctx, (ast.Store, ast.Del))
+    if isinstance(node, ast.alias):
+        return (node.asname or node.name.split(".")[0]) == "__version__"
+    # Definitions, exception handlers and named match patterns also bind names.
+    return (getattr(node, "name", None) == "__version__"
+            or isinstance(node, ast.MatchMapping) and node.rest == "__version__")
+
+
 def read_metadata(root):
     texts = {name: (root / name).read_text(encoding="utf-8")
              for name in (*RUNTIME_FILES, *PLUGIN_FILES)}
     runtime = tomllib.loads(texts["pyproject.toml"])["project"]["version"]
     tree = ast.parse(texts["hormuz/__init__.py"], filename="hormuz/__init__.py")
-    writes = [node for node in ast.walk(tree)
-              if isinstance(node, ast.Name) and node.id == "__version__"
-              and isinstance(node.ctx, (ast.Store, ast.Del))]
+    writes = [node for node in ast.walk(tree) if _binds_version(node)]
     assignments = [node.value for node in tree.body
                    if isinstance(node, ast.Assign)
                    and any(isinstance(target, ast.Name) and target.id == "__version__"
