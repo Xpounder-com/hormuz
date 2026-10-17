@@ -62,7 +62,7 @@ new held-out tasks. Preserve the original failures and invalid treatments.
 Receipts are bounded, content-free **operator-attested outcomes**. A digest
 binds the predeclared plan and makes evidence changes visible; it does not prove
 that an operator ran an honest experiment. The operator must review the frozen
-runner, patches and independent results before installing a receipt. Hormuz
+runner, patches and independent results before installing a receipt. Koto
 validates the receipt and its applicability, rather than running supplied code,
 fetching evidence URLs, or treating an assertion of confidence as certification.
 No second episode ledger or transcript store is introduced.
@@ -71,7 +71,7 @@ No second episode ledger or transcript store is introduced.
 
 `GET /v1/router/state` version 2 separates prompt-free engine health (`readiness`)
 from `coding_readiness`, evidence identity/digest and `automatic_task_types`.
-CLI/plugin callers use `hormuz client status codex --client-home /path/to/codex-home --routing`
+CLI/plugin callers use `koto client status codex --client-home /path/to/codex-home --routing`
 to read that same live, policy-filtered status through the owned local control
 socket. It makes no model call and needs no exported credential. Ordinary
 connection status retains its earlier contract. A stopped/unavailable owner

@@ -1,0 +1,8 @@
+{
+  "schema_id": "hormuz.connected-client-error",
+  "schema_version": 1,
+  "error": {
+    "code": "connected_client_app_activation_disabled",
+    "action": "keep_native_app_and_use_isolated_test"
+  }
+}

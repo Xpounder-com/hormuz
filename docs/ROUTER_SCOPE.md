@@ -11,7 +11,7 @@ result/status → disconnect**.
 | Keep | Retire |
 | --- | --- |
 | Local router, CLI and skills-only setup adapter | Standalone coding/chat UI and native/Electron clients |
-| Local/open-source inference; exact runtime/model qualification | Hormuz-owned agent execution app |
+| Local/open-source inference; exact runtime/model qualification | Koto-owned agent execution app |
 | Automatic admission and hard local-only enforcement | Hosted/enterprise accounts, console and workspace platform |
 | Destination/credential ownership, policy and secret controls | Billing, SSO and commercial entitlement front doors |
 | Streaming, tool affinity, cancellation and unknown outcomes | PostgreSQL, HA, Kubernetes and hosted deployment gates |

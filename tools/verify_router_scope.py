@@ -20,7 +20,7 @@ def verify_agent_package():
         '.agents/plugins/marketplace.json', '.claude-plugin/marketplace.json')}
     portable = manifests['plugin.json']
     identity = portable['name'], portable['version']
-    if identity[0] != 'hormuz' or not re.fullmatch(r'\d+\.\d+\.\d+', identity[1]):
+    if identity[0] != 'koto' or not re.fullmatch(r'\d+\.\d+\.\d+', identity[1]):
         raise SystemExit('Invalid portable plugin identity')
     if portable['$schema'] != 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json':
         raise SystemExit('Unsupported portable plugin schema')
@@ -29,7 +29,7 @@ def verify_agent_package():
             raise SystemExit('Agent plugin identity mismatch: ' + name)
     codex = manifests['.agents/plugins/marketplace.json']
     legacy = manifests['.claude-plugin/marketplace.json']
-    if codex['name'] != 'hormuz' or legacy['name'] != 'hormuz':
+    if codex['name'] != 'koto' or legacy['name'] != 'koto':
         raise SystemExit('Marketplace name differs from installation commands')
     if len(codex['plugins']) != 1 or len(legacy['plugins']) != 1:
         raise SystemExit('Unexpected marketplace entry')
@@ -39,8 +39,17 @@ def verify_agent_package():
             or legacy['plugins'][0]['source'] != './'):
         raise SystemExit('Marketplace must resolve the shared root plugin')
     overlay = portable['extensions']['com.openai']
-    if overlay['onboardingSkill'] != './skills/hormuz/SKILL.md':
+    if overlay['onboardingSkill'] != './skills/koto/SKILL.md':
         raise SystemExit('Onboarding must use the shared skill')
+    interface = overlay['interface']
+    if interface['displayName'] != 'Koto':
+        raise SystemExit('Plugin must use the Koto identity')
+    for name in ('logo', 'logoDark', 'composerIcon'):
+        asset = interface[name]
+        if not asset.startswith('./assets/koto-') or not (ROOT / asset).is_file():
+            raise SystemExit('Missing Koto plugin image: ' + name)
+    if portable.get('homepage'):
+        raise SystemExit('A product domain has not been configured')
     for name, manifest in manifests.items():
         if re.search(r'"(?:hooks|mcpServers|apps|agents|commands|settings|lspServers)"',
                      json.dumps(manifest)):
@@ -49,11 +58,11 @@ def verify_agent_package():
         if (ROOT / name).exists():
             raise SystemExit('Unexpected agent activation content: ' + name)
     skill_paths = sorted(p.relative_to(ROOT).as_posix() for p in (ROOT / 'skills').rglob('SKILL.md'))
-    expected = ['hormuz', 'hormuz-diagnose', 'hormuz-explain', 'hormuz-insights', 'hormuz-maintain', 'hormuz-model', 'hormuz-policy', 'hormuz-qualify']
+    expected = ['koto', 'koto-diagnose', 'koto-explain', 'koto-insights', 'koto-maintain', 'koto-model', 'koto-policy', 'koto-qualify']
     if skill_paths != sorted('skills/' + name + '/SKILL.md' for name in expected):
         raise SystemExit('Expected onboarding and focused shared CLI skills')
-    skill = (ROOT / 'skills/hormuz/SKILL.md').read_text()
-    if not skill.startswith('---\nname: hormuz\ndescription: ') or '\n---\n' not in skill[4:]:
+    skill = (ROOT / 'skills/koto/SKILL.md').read_text()
+    if not skill.startswith('---\nname: koto\ndescription: ') or '\n---\n' not in skill[4:]:
         raise SystemExit('Skill frontmatter must identify its invocation')
 
 
@@ -71,6 +80,8 @@ def main():
     metadata = tomllib.loads((ROOT / 'pyproject.toml').read_text())
     if 'optional-dependencies' in metadata['project']:
         raise SystemExit('Unscoped packaging extra')
+    if metadata['project']['name'] != 'koto-router' or metadata['project']['scripts'].get('koto') != 'hormuz.cli:main':
+        raise SystemExit('Missing Koto package or CLI entry point')
     for path in sorted((ROOT / 'hormuz').rglob('*.py')):
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
@@ -88,6 +99,9 @@ def main():
         if module != 'hormuz.__main__':
             importlib.import_module(module)
     from hormuz import __version__
+    import koto
+    if koto.__version__ != __version__ or koto.GatewayConfig is not importlib.import_module('hormuz.config').GatewayConfig:
+        raise SystemExit('Koto entry point differs from the shared implementation')
     if __version__ != metadata['project']['version']:
         raise SystemExit('Package version mismatch')
     example = json.loads((ROOT / 'config.example.json').read_text())

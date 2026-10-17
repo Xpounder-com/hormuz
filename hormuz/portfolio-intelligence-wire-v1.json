@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:hormuz:portfolio-intelligence-wire:v1",
-  "title": "Planned Hormuz v1.1.0 portfolio wire contracts",
+  "title": "Planned Koto v1.1.0 portfolio wire contracts",
   "description": "Field-level version-1 contracts supporting ADR 0010 and issue #212. Planned schemas are not registered runtime endpoints. Every object is closed and every unbounded-domain scalar/array is bounded. JSON Schema assertions cover serialized structure; the normative domain rules below remain implementation and authorization gates.",
   "x-hormuz-schema-ids": [
     "hormuz.connector-ingest-receipt",
@@ -136,7 +136,7 @@
     "collection_order": "event_at or created_at/generated_at as appropriate, then immutable opaque ID; descending; as_of is fixed on the first page",
     "body_identity": "organization_id, actor_id, roles, and authorization scope are server-owned; request references may only narrow existing authorized scope",
     "schema_markers": "JSON mutation and response envelopes carry schema_id and integer schema_version; GET queries carry no schema markers",
-    "connector_input": "GitHub and Linear signature-verified raw provider bytes are not Hormuz request schemas; normalize through the closed work-outcome-event only",
+    "connector_input": "GitHub and Linear signature-verified raw provider bytes are not Koto request schemas; normalize through the closed work-outcome-event only",
     "planned_only": "No handler, migration, provider call, schema registration, or activation is enabled by this catalogue"
   },
   "x-hormuz-domain-rules": {
@@ -1269,7 +1269,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-scope-create-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -1328,7 +1328,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-scope-version-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -1412,7 +1412,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.external-work-binding-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -1478,7 +1478,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.governed-run-attribution-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -1547,7 +1547,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-budget-plan-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -1663,7 +1663,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-budget-plan-activation-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -1715,7 +1715,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.policy-recommendation-decision-request",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -1771,7 +1771,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-scope-version",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -1899,7 +1899,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.external-work-binding-event",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -1989,7 +1989,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.governed-run-attribution-event",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -2102,7 +2102,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-budget-plan",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -2272,7 +2272,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-outcome-event",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -2432,7 +2432,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.run-outcome-association-event",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -2560,7 +2560,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.model-scorecard",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -2705,7 +2705,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.policy-recommendation",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -2861,7 +2861,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.connector-ingest-receipt",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -2922,7 +2922,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.portfolio-error",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -3001,7 +3001,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-scope-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -3059,7 +3059,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.external-work-binding-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -3117,7 +3117,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.governed-run-attribution-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -3175,7 +3175,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-budget-plan-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -3233,7 +3233,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.work-outcome-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -3291,7 +3291,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.run-outcome-association-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -3349,7 +3349,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.model-scorecard-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -3407,7 +3407,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.policy-recommendation-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",

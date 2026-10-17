@@ -1,6 +1,6 @@
 # Support and qualification
 
-Hormuz is experimental source software with best-effort community support. The
+Koto is experimental source software with best-effort community support. The
 current direction is [a local router for existing coding clients](docs/ROUTER_SCOPE.md).
 No uptime, support, security certification or broad compatibility SLA is offered.
 

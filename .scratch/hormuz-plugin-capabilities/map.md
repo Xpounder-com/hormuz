@@ -1,14 +1,14 @@
-# Find the way to Hormuz’s next plugin release
+# Find the way to Koto’s next plugin release
 
 Labels: wayfinder:map
 
 ## Destination
 
-Produce an implementation-ready specification for Hormuz’s next plugin release: user workflows, capability boundaries, evidence requirements, and release criteria. Finish when implementation can proceed without unresolved product decisions.
+Produce an implementation-ready specification for Koto’s next plugin release: user workflows, capability boundaries, evidence requirements, and release criteria. Finish when implementation can proceed without unresolved product decisions.
 
 ## Notes
 
-- Conversation synthesis: [Hormuz plugin capabilities specification](spec.md). The spec does not resolve the open decision tickets or change this map's completion criteria.
+- Conversation synthesis: [Koto plugin capabilities specification](spec.md). The spec does not resolve the open decision tickets or change this map's completion criteria.
 - Planning only. Charting does not resolve decision tickets or authorize implementation. Resolve at most one non-research ticket per session.
 - User approved considering all seven capabilities: diagnosis, request explanations, model selection, model qualification, usage insights, privacy and budget controls, maintenance and restoration. Their release placement is still a decision.
 - First audience: individual developers using Codex CLI on macOS. Additional client routing adapters and team administration are later work.

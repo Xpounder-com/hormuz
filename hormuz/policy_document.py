@@ -116,7 +116,7 @@ class PolicyDocument:
         if organization_id not in config.organization_ids:
             raise PolicyDocumentError(
                 "policy document organization_id is not configured",
-                hint="Use an organization_id already present in the Hormuz identity configuration.",
+                hint="Use an organization_id already present in the Koto identity configuration.",
             )
 
         policies = _mapping(value.get("policies"), "policies")
@@ -292,13 +292,13 @@ class PolicyDocument:
                 if alias not in config.model_routes:
                     raise PolicyDocumentError(
                         "policy document references an unknown model alias",
-                        hint="Use only model aliases declared under model_routes in the Hormuz configuration.",
+                        hint="Use only model aliases declared under model_routes in the Koto configuration.",
                     )
             if policy.fallback_model is not None:
                 if policy.fallback_model not in config.model_routes:
                     raise PolicyDocumentError(
                         "policy document references an unknown fallback model",
-                        hint="Use a fallback alias declared under model_routes in the Hormuz configuration.",
+                        hint="Use a fallback alias declared under model_routes in the Koto configuration.",
                     )
             for protocol, alias in (policy.fallback_models or {}).items():
                 route = config.model_routes.get(alias)

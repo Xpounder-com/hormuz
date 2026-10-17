@@ -8,7 +8,7 @@ use this same setup operation.
 
 Use the command and preview in [shared setup](SHARED_LOCAL_SETUP.md). The
 version-2 setup receipt reports `configuration.authentication: managed_local`.
-An installed Hormuz package and the qualified Codex CLI executable remain
+An installed Koto package and the qualified Codex CLI executable remain
 required. Plugin activation and Codex desktop integration need their own
 qualification.
 
@@ -34,7 +34,7 @@ of the generated high-entropy credential to its generation. The helper validates
 that generation, connected phase, installed settings, unchanged configuration,
 live owned router and credential digest before returning a token.
 
-`hormuz auth local-token` is a machine-only helper: its successful stdout is a
+`koto auth local-token` is a machine-only helper: its successful stdout is a
 credential for Codex, not a status receipt or troubleshooting command. Its
 arguments, errors and ordinary setup/status receipts contain no token. Keep
 helper stdout out of transcripts and logs. The secret remains accessible to

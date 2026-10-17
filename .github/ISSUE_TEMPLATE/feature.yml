@@ -1,6 +1,6 @@
 {
   "name": "Feature request",
-  "description": "Propose a bounded Hormuz gateway, policy, evidence, or operator outcome.",
+  "description": "Propose a bounded Koto gateway, policy, evidence, or operator outcome.",
   "title": "[Feature]: ",
   "labels": [
     "enhancement"
@@ -39,7 +39,7 @@
       "id": "boundary",
       "attributes": {
         "label": "Policy, evidence, and data boundary",
-        "description": "What data would cross Hormuz, what durable metadata is needed, and what must remain out of scope?"
+        "description": "What data would cross Koto, what durable metadata is needed, and what must remain out of scope?"
       },
       "validations": {
         "required": true

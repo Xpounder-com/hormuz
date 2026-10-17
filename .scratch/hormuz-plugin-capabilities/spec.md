@@ -1,4 +1,4 @@
-# Hormuz plugin capabilities
+# Koto plugin capabilities
 
 Status: ready-for-agent
 Labels: ready-for-agent
@@ -7,7 +7,7 @@ Labels: ready-for-agent
 
 An individual developer connecting a coding client to local models needs more than a successful setup command. They need to know whether the connection works, whether a model can perform their task, where an observed request ran, which policy applied, what usage was measured, and how to recover or restore their settings. Unclear coverage, estimated prices, and an untested model can otherwise look like verified privacy, savings, or quality.
 
-Hormuz already has a shared connection workflow and optional local history. Its plugin entry point needs focused workflows that make those underlying capabilities understandable and expose useful evidence without taking over the coding client's agent loop.
+Koto already has a shared connection workflow and optional local history. Its plugin entry point needs focused workflows that make those underlying capabilities understandable and expose useful evidence without taking over the coding client's agent loop.
 
 ## Solution
 
@@ -19,12 +19,12 @@ Define release readiness through five demonstrated user outcomes: connect succes
 
 ## User Stories
 
-1. As an individual developer, I want Hormuz to identify the target coding client and its compatibility, so that I know whether my setup is supported.
+1. As an individual developer, I want Koto to identify the target coding client and its compatibility, so that I know whether my setup is supported.
 2. As an individual developer, I want clear prerequisite checks, so that missing software, credentials, or model assets have concrete recovery steps.
 3. As an individual developer, I want to preview connection changes, so that I understand what my setup request will change.
 4. As an individual developer, I want matching authorized changes applied without repeated approval requests, so that setup requires little manual intervention.
 5. As an individual developer, I want connection readiness distinguished from model readiness and task completion, so that a successful setup is not mistaken for successful work.
-6. As an individual developer, I want to see the connected-client scope, so that I know which model requests Hormuz can observe and govern.
+6. As an individual developer, I want to see the connected-client scope, so that I know which model requests Koto can observe and govern.
 7. As an individual developer, I want relevant read-only diagnosis, so that I can understand a failure without changing my configuration.
 8. As an individual developer, I want configuration conflicts and overrides identified, so that I can understand why expected routing did not occur.
 9. As an individual developer, I want router failures distinguished from model failures, so that I can take an appropriate recovery action.
@@ -40,7 +40,7 @@ Define release readiness through five demonstrated user outcomes: connect succes
 19. As an individual developer, I want bounded qualification checks for tool use, structured output, and representative task quality, so that local-route suitability has evidence.
 20. As an individual developer, I want qualification results to identify the tested model, runtime, client, and task envelope, so that their applicability is clear.
 21. As an individual developer, I want relevant setup changes to invalidate stale qualification, so that historical success does not silently authorize a changed setup.
-22. As an individual developer, I want unsupported tasks and unqualified routes handled explicitly, so that Hormuz does not invent suitability.
+22. As an individual developer, I want unsupported tasks and unqualified routes handled explicitly, so that Koto does not invent suitability.
 23. As an individual developer, I want evaluations bounded by resource and time limits, so that qualification does not become a load test.
 24. As an individual developer, I want paid evaluations separately scoped, so that qualification cannot silently incur charges.
 25. As an individual developer, I want local-only policy enforced for intercepted requests, including helpers, so that unavailable local execution cannot silently become cloud execution.
@@ -55,7 +55,7 @@ Define release readiness through five demonstrated user outcomes: connect succes
 34. As an individual developer, I want retained text kept out of ordinary agent results, so that local history is not inadvertently forwarded to a remote model.
 35. As an individual developer, I want compatibility checked before maintenance changes, so that updates do not silently break a working connection.
 36. As an individual developer, I want disconnect to restore owned configuration while preserving my newer edits, so that cleanup does not destroy unrelated preferences.
-37. As an individual developer, I want cleanup to distinguish owned and externally managed processes, so that Hormuz stops only resources it owns.
+37. As an individual developer, I want cleanup to distinguish owned and externally managed processes, so that Koto stops only resources it owns.
 38. As an individual developer, I want incomplete recovery and shutdown reported as pending, so that I am not told cleanup succeeded prematurely.
 39. As an individual developer, I want focused plugin workflows using the same operations as the CLI, so that behavior is consistent across entry points.
 40. As an individual developer, I want installation distinguished from active routing, so that merely loading a skill does not imply interception is enabled.

@@ -4,7 +4,7 @@ Work against [the customer-local router scope](docs/ROUTER_SCOPE.md). Use an
 isolated checkout and preserve unrelated dirty work. New product work must
 advance the approved public workflow: connect, submit through the real router,
 inspect result/status, disconnect. CLI and plugin callers share the connection
-implementation. Do not add a Hormuz coding UI or duplicate the host's agent loop.
+implementation. Do not add a Koto coding UI or duplicate the host's agent loop.
 
 Use Python 3.11–3.14. Install the source in a virtual environment, then run:
 
@@ -12,7 +12,7 @@ Use Python 3.11–3.14. Install the source in a virtual environment, then run:
 python tools/verify_router_scope.py
 python -m unittest discover -s tests -p 'test_*workflow.py'
 python -m build
-python tools/verify_router_wheel.py dist/hormuz-*.whl
+python tools/verify_router_wheel.py dist/koto_router-*.whl
 ```
 
 Install the pinned build frontend with `python -m pip install build==1.3.0` if

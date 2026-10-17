@@ -47,6 +47,7 @@ class ManagedLlamaProfile:
     port: int
     alias: str
     output_tokens: int
+    schema_version: int = 1
 
     def verification_timeout_seconds(self):
         budget = 30  # Archive expansion and extracted-file verification.
@@ -272,7 +273,7 @@ def build_managed_llama(raw, routes, upstreams, admission):
         return None
     fields = {"schema_version", "route", "executable", "runtime_archive", "runtime_sha256", "model_file", "model_sha256", "startup_timeout_seconds"}
     try:
-        if type(value) is not dict or set(value) != fields or type(value["schema_version"]) is not int or value["schema_version"] != 1:
+        if type(value) is not dict or set(value) != fields or type(value["schema_version"]) is not int or value["schema_version"] not in {1, 2}:
             raise ValueError()
         for key in ("executable", "runtime_archive", "model_file"):
             if type(value[key]) is not str or not 1 <= len(value[key]) <= 4096 or not Path(value[key]).is_absolute():
@@ -290,10 +291,12 @@ def build_managed_llama(raw, routes, upstreams, admission):
                 or destination.locality != "local" or destination.authentication != "none" or route.protocol != "openai"
                 or endpoint.scheme != "http" or endpoint.hostname != "127.0.0.1" or endpoint.port is None
                 or endpoint.path not in {"", "/", "/v1"} or endpoint.query or endpoint.fragment or endpoint.username
-                or route.model_revision != "sha256:" + value["model_sha256"] or qualification.max_output_tokens > 512):
+                or route.model_revision != "sha256:" + value["model_sha256"]
+                or qualification.max_output_tokens > (8192 if value["schema_version"] == 2 else 512)):
             raise ValueError()
         return ManagedLlamaProfile(**{key: value[key] for key in fields - {"schema_version"}},
-            port=endpoint.port, alias=route.upstream_model, output_tokens=qualification.max_output_tokens)
+            port=endpoint.port, alias=route.upstream_model, output_tokens=qualification.max_output_tokens,
+            schema_version=value["schema_version"])
     except (ValueError, KeyError, TypeError, AttributeError):
         raise ConfigError("managed_llama_invalid") from None
 
@@ -376,8 +379,13 @@ def _guardian(owner, lease, profile):
             return
         args = [profile.executable, "-m", profile.model_file, "--offline", "--host", "127.0.0.1", "--port", str(profile.port),
             "--alias", profile.alias, "--parallel", "1", "--threads", "4", "--threads-batch", "4", "--threads-http", "2",
-            "--ctx-size", "32768", "--n-predict", str(profile.output_tokens), "--jinja", "--chat-template-kwargs", '{"enable_thinking":false}',
+            "--ctx-size", "32768", "--n-predict", str(profile.output_tokens), "--jinja", "--chat-template-kwargs",
+            '{"enable_thinking":true}' if profile.schema_version == 2 else '{"enable_thinking":false}',
             "--no-webui", "--no-agent", "--no-slots", "--temp", "0.7", "--top-p", "0.8", "--top-k", "20", "--min-p", "0", "--presence-penalty", "1.5"]
+        if profile.schema_version == 2:
+            # A positive thinking budget keeps reasoning enabled and leaves
+            # output capacity for tool calls and answers within the deadline.
+            args.extend(["--reasoning-budget", "1024"])
         process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         deadline = time.monotonic() + profile.startup_timeout_seconds
         ready, bound, next_probe, observations, log = False, False, 0, 0, b""

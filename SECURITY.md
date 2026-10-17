@@ -1,6 +1,6 @@
 # Security policy
 
-Hormuz is experimental and has not received an independent security audit. Keep
+Koto is experimental and has not received an independent security audit. Keep
 the local router on loopback. Do not expose it as an internet service or infer
 production certification from routine tests.
 

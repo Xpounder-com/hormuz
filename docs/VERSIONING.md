@@ -13,6 +13,8 @@ automatically require a release bump, and merging a PR does not publish a releas
 | Skills plugin | `version` in [plugin.json](../plugin.json) | [.claude-plugin/plugin.json](../.claude-plugin/plugin.json), [gemini-extension.json](../gemini-extension.json) |
 
 Use the version tool to update a release stream's source and mirrors together.
+The public `koto.__version__` export shares the runtime version from `hormuz`;
+it does not declare another release number.
 `check` validates both streams' formats and agreement. Every bump checks both
 streams before writing; fix inconsistent metadata before requesting a bump.
 

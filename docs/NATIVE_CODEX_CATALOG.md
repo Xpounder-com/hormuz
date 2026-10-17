@@ -1,7 +1,7 @@
 # Native Codex model discovery
 
 The router has an opt-in discovery endpoint for the documented native Codex
-gateway path. It consumes a separate Hormuz gateway credential and forwards
+gateway path. It consumes a separate Koto gateway credential and forwards
 the coding client's native ChatGPT credential only to the fixed ChatGPT
 backend. [Native Responses](NATIVE_CODEX_RESPONSES.md) adds separately enabled
 HTTP/SSE inference. Workspace-managed client setup, supported host/build
@@ -54,10 +54,10 @@ persisting an exploration route.
 ## Request boundary
 
 `GET /backend-api/codex/models` requires one `X-Gateway-Key` for an existing
-Hormuz identity and one `Authorization: Bearer ...` for native ChatGPT auth.
+Koto identity and one `Authorization: Bearer ...` for native ChatGPT auth.
 An optional `ChatGPT-Account-ID` is forwarded unchanged. The client owns native
-sign-in and refresh; Hormuz does not read a login cache or persist these native
-headers. Duplicate/ambiguous headers and known Hormuz/API credentials presented
+sign-in and refresh; Koto does not read a login cache or persist these native
+headers. Duplicate/ambiguous headers and known Koto/API credentials presented
 as native tokens fail. The backend remains authoritative for native grants.
 
 The only supported query is an optional numeric `client_version`, such as

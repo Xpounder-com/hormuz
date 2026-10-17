@@ -1,10 +1,12 @@
 {
-  "name": "hormuz",
-  "owner": {"name": "mehrdadxzaker"},
+  "name": "koto",
+  "owner": {
+    "name": "mehrdadxzaker"
+  },
   "plugins": [
     {
-      "name": "hormuz",
-      "description": "Manage a customer-local Hormuz router through its shared CLI.",
+      "name": "koto",
+      "description": "Manage a customer-local Koto router through its shared CLI.",
       "source": "./"
     }
   ]

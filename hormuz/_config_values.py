@@ -1,4 +1,4 @@
-"""Shared scalar parsers for typed Hormuz configuration construction."""
+"""Shared scalar parsers for typed Koto configuration construction."""
 
 from __future__ import annotations
 
