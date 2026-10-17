@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 from hormuz.config import GatewayConfig
 from hormuz.contracts import validate_contract
-from hormuz.server import GatewayServer, serve_in_thread
+from hormuz.server import GatewayServer
 
 
 CLIENT = r'''
@@ -167,7 +167,9 @@ def provider(answer, *, status=200, health_status=200, hold_first=None, event_st
                         observe_close.set()
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    # Keep real HTTP handling while bounding idle shutdown latency in fixtures.
+    thread = threading.Thread(target=server.serve_forever,
+                              kwargs={"poll_interval": 0.05}, daemon=False)
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_port}", received
@@ -213,7 +215,10 @@ class ExecutionDestinationWorkflowTests(unittest.TestCase):
         with patch.dict(os.environ, self.environment):
             gateway = GatewayServer(GatewayConfig.load(path) if gateway_config is None else gateway_config,
                                     environ=self.environment if server_environ is None else server_environ)
-            thread = serve_in_thread(gateway)
+            thread = threading.Thread(target=gateway.serve_forever,
+                                      kwargs={"poll_interval": 0.05},
+                                      name="hormuz-test-gateway", daemon=False)
+            thread.start()
             try:
                 setup = subprocess.run([sys.executable, "-m", "hormuz", "--config", str(path),
                                         "client", "config", "codex"],

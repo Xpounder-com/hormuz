@@ -43,7 +43,7 @@ jobs:
           name: koto-router-distributions
           path: dist/
       - run: python -m pip install dist/*.whl
-      - name: Test the installed wheel and profile slow workflows
+      - name: Test fast rules and critical workflows from the installed wheel
         run: python tools/verify_router_wheel.py dist/*.whl
 
   package:

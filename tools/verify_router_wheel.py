@@ -55,12 +55,14 @@ def main():
         # unittest timings include setup and cleanup. Python 3.11 runs the same
         # complete suite without the duration flag introduced in Python 3.12.
         durations = ['--durations', '20'] if sys.version_info >= (3, 12) else []
-        subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
-                        '-p', 'test_*workflow.py', '-f', '-v', *durations],
-                       # Retain main's finite twenty-five-minute suite budget,
-                       # leaving two minutes for installation and job cleanup.
-                       cwd=temporary, env=environment, check=True, timeout=1500)
-    print('Installed-wheel workflow passed outside the source checkout')
+        for pattern, timeout in (('test_*fast.py', 60), ('test_*workflow.py', 1500)):
+            print(f'Running installed-wheel tests: {pattern}', flush=True)
+            subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
+                            '-p', pattern, '-f', '-v', *durations],
+                           # Both layers must pass; retain a finite deadline for
+                           # each and main's encompassing 27-minute job cap.
+                           cwd=temporary, env=environment, check=True, timeout=timeout)
+    print('Installed-wheel fast tests and workflows passed outside the source checkout')
 
 
 if __name__ == '__main__':

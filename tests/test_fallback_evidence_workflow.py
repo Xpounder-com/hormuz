@@ -91,7 +91,7 @@ class FallbackEvidenceWorkflowTests(unittest.TestCase):
     def test_legacy_entry_without_evidence_keeps_fallback_unobserved(self):
         from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-        with workflow.provider("LEGACY") as (endpoint, received):
+        with workflow.provider("LEGACY_PRIVATE") as (endpoint, received):
             with self.fixture.connected_client(self.fixture.configuration(endpoint, endpoint)) as submit:
                 self.command("history", "enable")
                 self.assertEqual(submit()["status"], 200)
@@ -113,6 +113,7 @@ class FallbackEvidenceWorkflowTests(unittest.TestCase):
                 explanation = self.command("request", "explain", entry["id"])
                 self.assertEqual(explanation["fallback"], "unobserved")
                 self.assertEqual(explanation["policy_decision"], "unobserved")
+                self.assertNotIn("LEGACY_PRIVATE", json.dumps(explanation))
                 self.assertEqual(self.command("history", "show", entry["id"])["entry"]["schema_version"], 1)
             self.assertEqual(len(received), 1)
 
