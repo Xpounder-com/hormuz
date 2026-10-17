@@ -28,7 +28,7 @@ The Hormuz skill is a single explicit chat entry. Its task command delegates
 the supplied task to a qualified local route or configured router default.
 The native host model, account, tools, approvals and reasoning remain in Codex.
 There is no startup hook, native model-picker injection or second tool loop.
-See [the chat workflow](../HORMUZ_CHAT.md).
+See [the chat workflow](../KOTO_CHAT.md).
 
 The first real task exposed a four-second response-header timeout. It failed
 inside Hormuz, was not retried and its owner was stopped. A delayed-header

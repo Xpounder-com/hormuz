@@ -414,7 +414,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.run-outcome-association-event",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",
@@ -542,7 +542,7 @@
         "schema_id": {
           "type": "string",
           "const": "hormuz.run-outcome-association-page",
-          "description": "Immutable Hormuz schema identity."
+          "description": "Immutable Koto schema identity."
         },
         "schema_version": {
           "type": "integer",

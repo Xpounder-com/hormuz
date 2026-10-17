@@ -1,6 +1,8 @@
-# Hormuz
+# Koto
 
-Hormuz is a customer-local model router for existing coding clients. Its entry
+<img src="assets/koto-logo.png" alt="Koto wooden K logo" width="160" height="160" />
+
+Koto is a customer-local model router for existing coding clients. Its entry
 points are a terminal CLI and a skills-only plugin that calls the same
 setup, status and disconnect implementation. Coding clients retain their editor,
 tools, permissions and agent loop.
@@ -69,11 +71,11 @@ Installation remains subject to each coding client's plugin support and review.
 
 ```sh
 codex plugin marketplace add mehrdadxzaker/hormuz
-codex plugin add hormuz@hormuz
+codex plugin add koto@koto
 ```
 
 Use a CLI with `codex plugin add` (checked on 0.160.0). Alternatively, after adding
-the marketplace, select Hormuz in your client's plugin browser and install it.
+the marketplace, select Koto in your client's plugin browser and install it.
 
 ### Gemini CLI
 
@@ -87,14 +89,14 @@ Restart the Gemini CLI session after installation.
 
 ```sh
 copilot plugin marketplace add mehrdadxzaker/hormuz
-copilot plugin install hormuz@hormuz
+copilot plugin install koto@koto
 ```
 
 ### Claude Code
 
 ```sh
 claude plugin marketplace add mehrdadxzaker/hormuz
-claude plugin install hormuz@hormuz
+claude plugin install koto@koto
 ```
 
 Inside Claude Code, the equivalent commands start with `/plugin` instead of
@@ -106,13 +108,13 @@ Use the [open Agent Skills installer](https://github.com/vercel-labs/skills)
 (requires Node.js/npm). Choose your agent when prompted:
 
 ```sh
-npx skills add mehrdadxzaker/hormuz --skill hormuz
+npx skills add mehrdadxzaker/hormuz --skill koto
 ```
 
 Or select it explicitly with `--agent cursor` or `--agent opencode`.
 
-After installation, ask: **“Use Hormuz in this chat. Let me choose the configured
-router or a qualified local model.”** Follow the [explicit chat workflow](docs/HORMUZ_CHAT.md)
+After installation, ask: **“Use Koto in this chat. Let me choose the configured
+router or a qualified local model.”** Follow the [explicit chat workflow](docs/KOTO_CHAT.md)
 to preserve the native model, account, plugins, MCP and reasoning. Normal-app
 startup bridge activation is disabled. For an explicitly requested persistent
 CLI connection, the skill checks the router, client version and qualification
@@ -130,25 +132,28 @@ are not implemented. See [installation, updates, removal and compatibility](docs
 Use Python 3.11 or later in a virtual environment:
 
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
+python3 -m venv .venv-koto
+. .venv-koto/bin/activate
 python -m pip install .
-python -m hormuz --help
+python -m koto --help
 python -m unittest tests.test_execution_destination_workflow tests.test_connected_client_lifetime_workflow
 ```
+
+For an existing installation, follow the [Koto migration notes](docs/KOTO_REBRAND.md)
+before replacing the former Python distribution or plugin.
 
 Installation may download Python dependencies. Tests require loopback access;
 they use temporary files and processes with synthetic credentials. They do not
 contact external model providers or change your active coding-client settings.
 
-For deliberate setup, copy `config.example.json` to `hormuz.json`, set the
+For deliberate setup, copy `config.example.json` to `koto.json`, set the
 environment token named by its local identity, and review:
 
 ```sh
-hormuz --config hormuz.json client connect codex --dry-run
-hormuz --config hormuz.json client connect codex
-hormuz client status codex
-hormuz client disconnect codex
+koto --config koto.json client connect codex --dry-run
+koto --config koto.json client connect codex
+koto client status codex
+koto client disconnect codex
 ```
 
 The example is deliberately unqualified and blocks inference until a real local
@@ -168,7 +173,7 @@ Codex subscription access is not established by login or these tests. There is
 no automatic fallback to billable API usage. Unknown costs remain unknown.
 
 Inspect [cloud authorization readiness](docs/CLOUD_READINESS.md) before changing
-settings with `hormuz --config hormuz.json client cloud-readiness codex`.
+settings with `koto --config koto.json client cloud-readiness codex`.
 The opt-in [native Codex catalog](docs/NATIVE_CODEX_CATALOG.md) adds separate
 gateway/native authentication for discovery. Separately enabled
 [native Responses](docs/NATIVE_CODEX_RESPONSES.md) adds bounded HTTP/SSE inference,
@@ -178,7 +183,7 @@ authorized ChatGPT plan paths and reports their remaining blockers.
 
 [Optional local history](docs/LOCAL_HISTORY.md) adds encrypted, redacted text
 review and spending estimates on your device. Collection starts disabled;
-`hormuz --config hormuz.json history enable` opts in for future intercepted
+`koto --config koto.json history enable` opts in for future intercepted
 requests. Use `history list`, `history show`, `history insights`, `history export`,
 `history delete` and `history disable` to control retained data. No training or
 cloud upload is part of this feature; exports are explicitly decrypted files.
@@ -197,4 +202,4 @@ Use [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md),
 The skills-only plugin now offers focused diagnosis, observed request explanations,
 bounded local model probes, advisory recommendations, privacy/budget staging,
 usage insights and safe restoration. See the [capability contract](docs/PLUGIN_CAPABILITIES.md)
-and [command workflow](skills/hormuz/references/capabilities.md) for coverage and limits.
+and [command workflow](skills/koto/references/capabilities.md) for coverage and limits.

@@ -1,19 +1,19 @@
-# Shared Hormuz workflow
+# Shared Koto workflow
 
 All agent packages use these commands. The host agent retains its tools,
-permissions and conversation. Hormuz owns only its connected-client lifetime.
+permissions and conversation. Koto owns only its connected-client lifetime.
 
 ## Prerequisites
 
-Use an installed Hormuz 2.0 development CLI. If the binary is missing, install a user-selected,
-reviewed Hormuz 2.0 source checkout in a dedicated Python 3.11+ virtual
+Use an installed Koto 2.0 development CLI. If the binary is missing, install a user-selected,
+reviewed Koto 2.0 source checkout in a dedicated Python 3.11+ virtual
 environment. Select unused absolute paths and use the installed executable
 for subsequent commands:
 
 ```sh
-python3 -m venv /path/to/hormuz-venv
-/path/to/hormuz-venv/bin/python -m pip install /path/to/reviewed-hormuz-checkout
-/path/to/hormuz-venv/bin/hormuz --version
+python3 -m venv /path/to/koto-venv
+/path/to/koto-venv/bin/python -m pip install /path/to/reviewed-koto-checkout
+/path/to/koto-venv/bin/koto --version
 ```
 
 The skills bundle's version is independent of the router package version. Do not
@@ -45,13 +45,13 @@ login caches as entitlement, or introduce billable fallback.
 
 Let shared setup manage its local caller credential. For an existing
 environment-backed configuration, check variable presence without printing
-values. Do not run `hormuz auth token` or `hormuz auth local-token` into the conversation,
+values. Do not run `koto auth token` or `koto auth local-token` into the conversation,
 read authentication caches, or include private config/prompt content in reports.
 
 ## Generate local setup from existing files
 
 Use the shared operation when the user requests local-only setup and has
-existing verified assets. Check `hormuz client setup --help` first: development
+existing verified assets. Check `koto client setup --help` first: development
 builds share a version number, so a version string alone cannot establish this
 command. If it is missing, use the reviewed source-install path above and
 check again before proceeding. The bundled profile pins the documented Codex
@@ -62,7 +62,7 @@ file may be passed with `--qualification`; use existing evidence and trusted
 digests rather than manufacturing qualification declarations.
 
 ```sh
-hormuz --config /path/to/new-hormuz.json client setup codex \
+koto --config /path/to/new-koto.json client setup codex \
   --executable /path/to/codex --client-home /path/to/codex-home \
   --runtime-archive /path/to/existing-runtime.tar.gz \
   --llama-executable /path/to/extracted/llama-server \
@@ -84,7 +84,7 @@ downloads occur. Startup failure keeps the generated configuration for retry
 and restores owned client settings through the existing lifetime.
 An explicitly selected `--credential-env NAME` retains the older environment
 mode and version-1 setup receipt; only that mode requires the variable in both
-Hormuz and Codex. Preserve existing configurations instead of converting them.
+Koto and Codex. Preserve existing configurations instead of converting them.
 For missing, changed or unsafe managed credentials, follow
 [credential recovery](../../../docs/LOCAL_CREDENTIAL_SETUP.md) and the public
 error action. Preserve the credential file and journal; a helper failure is not
@@ -101,12 +101,12 @@ no live learned routing or cloud/subscription permission.
 ## Inspect cloud readiness
 
 When the user asks about cloud authorization or readiness, check
-`hormuz client cloud-readiness --help` and use the reviewed source-install path
+`koto client cloud-readiness --help` and use the reviewed source-install path
 above if the command is unavailable. Select the existing router configuration,
 client home and target executable, then run the shared read-only operation:
 
 ```sh
-hormuz --config /path/to/hormuz.json client cloud-readiness codex \
+koto --config /path/to/koto.json client cloud-readiness codex \
   --executable /path/to/codex --client-home /path/to/codex-home
 ```
 
@@ -147,7 +147,7 @@ follow [override inspection](capabilities.md#diagnose-and-explain). See
    paths and quote them for the user's shell:
 
    ```sh
-   hormuz --config /path/to/hormuz.json client connect codex \
+   koto --config /path/to/koto.json client connect codex \
      --executable /path/to/codex --client-home /path/to/codex-home --dry-run
    ```
 
@@ -158,7 +158,7 @@ follow [override inspection](capabilities.md#diagnose-and-explain). See
 3. Run the identical command without `--dry-run`, then inspect:
 
    ```sh
-   hormuz client status codex --client-home /path/to/codex-home
+   koto client status codex --client-home /path/to/codex-home
    ```
 
    Connection success requires a public receipt for the owned generation with
@@ -173,10 +173,10 @@ follow [override inspection](capabilities.md#diagnose-and-explain). See
 
 ### Codex app profile
 
-Use [the explicit chat workflow](../../../docs/HORMUZ_CHAT.md): one Hormuz
+Use [the explicit chat workflow](../../../docs/KOTO_CHAT.md): one Koto
 entry, with a configured router or local model selected inside the chat.
 The native host keeps its model, account, plugins, tools and reasoning.
-Use a separate control home for Hormuz's router. Normal-app startup bridge
+Use a separate control home for Koto's router. Normal-app startup bridge
 activation is disabled after a reported organization-policy startup failure.
 A passing app-server test does not qualify app startup or the visible picker.
 See [the retired adapter experiment](../../../docs/CODEX_APP_BRIDGE.md) for
@@ -209,25 +209,25 @@ for native evidence, model-catalog compatibility and rollback.
 Run the status command for the same client home. Report `phase`, `router`,
 `configuration`, `retained_settings` names and content-free error/action codes.
 For coding readiness, check `client status --help` for `--routing`, then run
-`hormuz client status codex --client-home /path/to/codex-home --routing`.
+`koto client status codex --client-home /path/to/codex-home --routing`.
 Report its `coding_readiness` and `automatic_task_types` separately from engine
 health. The bundled experiment has unknown coding readiness and blocks automatic
 coding. For reviewed outcome receipts, read [coding qualification](../../../docs/LOCAL_CODING_QUALIFICATION.md).
 Keep router readiness separate from model readiness and task completion. A
 local-only admission rejection is a blocked request, not permission to change
 privacy mode. Follow the CLI's recovery action; never delete its journal,
-retry an ambiguous model request or stop a process that Hormuz does not own.
+retry an ambiguous model request or stop a process that Koto does not own.
 
 ## Disconnect and restore
 
-For the app-server adapter, `hormuz off` disables its launch overlay and
+For the app-server adapter, `koto off` disables its launch overlay and
 disconnects the separate router owner while preserving normal ChatGPT settings.
 Use it before removing its CLI or plugin. The commands below manage a selected
 user-default connection directly.
 
 ```sh
-hormuz client disconnect codex --client-home /path/to/codex-home
-hormuz client status codex --client-home /path/to/codex-home
+koto client disconnect codex --client-home /path/to/codex-home
+koto client status codex --client-home /path/to/codex-home
 ```
 
 Use `--generation GENERATION` on disconnect when acting for a specific receipt.
@@ -244,7 +244,7 @@ instructions alone does not restore a connected client's configuration.
 
 ## Device-local history and spending
 
-Use `hormuz --config /path/to/hormuz.json history --help` for the installed
+Use `koto --config /path/to/koto.json history --help` for the installed
 command surface. History is separate from connection ownership and starts
 disabled. The user must explicitly request enabling capture; connecting a
 client does not grant history consent. Enabling retains future redacted text

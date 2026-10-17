@@ -5,9 +5,9 @@ the blockers for three distinct authorization paths. It does not activate a
 connection, read credential values or call a model provider.
 
 ```sh
-hormuz --config hormuz.json client cloud-readiness codex
-hormuz --config hormuz.json client cloud-readiness codex --actor developer
-hormuz --config hormuz.json client cloud-readiness codex --surface desktop
+koto --config koto.json client cloud-readiness codex
+koto --config koto.json client cloud-readiness codex --actor developer
+koto --config koto.json client cloud-readiness codex --surface desktop
 ```
 
 Terminal and skill callers use the same command and
@@ -63,7 +63,7 @@ router, model, download, sign-in or registration flow.
 ## Contract and rollback
 
 `hormuz.cloud-readiness` version 1 is an additive CLI receipt listed by
-`hormuz contract manifest`. Its strict validator accepts only the three known
+`koto contract manifest`. Its strict validator accepts only the three known
 paths, fixed billing/documentation facts, known blocker/action pairs,
 configuration-only scope and zero-effect assertions. It rejects readiness
 claims, missing consent blockers, private fields and inconsistent eligibility.
@@ -96,4 +96,4 @@ provider requirements. The
 requires its own registration, stable host identity and plan consent. Existing
 [API/provider gateway compatibility](https://learn.chatgpt.com/docs/enterprise/gateway-compatibility)
 does not establish either subscription capability. These sources describe
-available paths, not Hormuz implementation or this user's entitlement.
+available paths, not Koto implementation or this user's entitlement.

@@ -240,7 +240,7 @@ class Bridge:
             provider = (self.provider_id if model in self.local_aliases else self.default_provider
                         if model in self.native_aliases else thread['provider'])
             if provider == self.provider_id and not self.enabled:
-                raise RuntimeError('Hormuz is disabled; select a native account model')
+                raise RuntimeError('Koto is disabled; select a native account model')
             if provider != thread['provider']:
                 if thread['busy'] or thread['params'].get('ephemeral'):
                     raise RuntimeError('Provider changes require an idle persistent chat')
@@ -277,14 +277,14 @@ class Bridge:
             if method in {'config/batchWrite', 'config/value/write'}:
                 edits = params.get('edits', [params])
                 if not self.enabled and any(edit.get('keyPath') == 'model' and edit.get('value') in self.local_aliases for edit in edits):
-                    raise RuntimeError('Hormuz is disabled; the ChatGPT default was preserved')
+                    raise RuntimeError('Koto is disabled; the ChatGPT default was preserved')
                 if self.enabled:
                     method, params, selection = self.filter_selection_write(method, params)
             if self.enabled and method == 'thread/start' and params.get('model') is None and self.selection:
                 params = {**params, 'model': self.selection['model']}
             if method in {'thread/start', 'thread/resume', 'thread/fork'} and params.get('model') in self.local_aliases:
                 if not self.enabled:
-                    raise RuntimeError('Hormuz is disabled; select a native account model')
+                    raise RuntimeError('Koto is disabled; select a native account model')
                 params = self.selected_params(params, params['model'], self.provider_id)
             if method == 'turn/start':
                 params = await self.prepare_turn(params)
@@ -325,7 +325,7 @@ class Bridge:
             await self.emit({**response, 'id': identifier})
         except (OSError, ValueError, KeyError, subprocess.SubprocessError, asyncio.TimeoutError, RuntimeError):
             await self.emit({'id': identifier, 'error': {'code': -32000,
-                'message': 'Hormuz app bridge could not complete this request; no model request was retried.'}})
+                'message': 'Koto app bridge could not complete this request; no model request was retried.'}})
         finally:
             if delivered is not None and not delivered.done():
                 delivered.set_result(None)
@@ -430,7 +430,7 @@ def main(argv=None):
         asyncio.run(run())
         return 0
     except (OSError, ValueError, KeyError, RuntimeError, asyncio.IncompleteReadError):
-        print('Hormuz app bridge unavailable; use hormuz off to restore the native Codex setup.', file=sys.stderr)
+        print('Koto app bridge unavailable; use koto off to restore the native Codex setup.', file=sys.stderr)
         return 2
 
 

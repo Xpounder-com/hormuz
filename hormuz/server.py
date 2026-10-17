@@ -364,7 +364,7 @@ class GatewayServer(ThreadingHTTPServer):
     block_on_close = True
     allow_reuse_address = True
     # ``TCPServer`` defaults to a five-connection accept backlog. That can
-    # reset otherwise bounded concurrent requests before Hormuz reaches its
+    # reset otherwise bounded concurrent requests before Koto reaches its
     # governed PostgreSQL pool and returns the stable storage-unavailable
     # response. Keep the listener queue bounded, but large enough for the
     # runtime's explicitly bounded backpressure path.
@@ -529,7 +529,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.close_connection = True
         self._send_error(
             "unauthorized",
-            "Missing or invalid Hormuz ingress credential",
+            "Missing or invalid Koto ingress credential",
             HTTPStatus.UNAUTHORIZED,
         )
         return False
@@ -942,7 +942,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             self._send_protocol_error(
                 protocol,
-                "Request blocked because Hormuz detected protected secret material.",
+                "Request blocked because Koto detected protected secret material.",
                 HTTPStatus.FORBIDDEN,
                 code="hormuz_secret_detected",
             )
@@ -1882,7 +1882,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     self._send_error("hormuz_storage_unavailable", "Session authentication is unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                     return None
                 LOGGER.info("authentication_denied reason=%s", error.code)
-        self._send_error("unauthorized", "Missing or invalid Hormuz identity credential", HTTPStatus.UNAUTHORIZED)
+        self._send_error("unauthorized", "Missing or invalid Koto identity credential", HTTPStatus.UNAUTHORIZED)
         return None
 
     def _read_json_body(self, *, strict=False) -> dict[str, Any] | None:
@@ -1939,7 +1939,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         headers = {
             "Content-Type": "application/json",
             "Accept": self.headers.get("Accept", "application/json"),
-            "User-Agent": self.headers.get("User-Agent", f"Hormuz/{__version__}"),
+            "User-Agent": self.headers.get("User-Agent", f"Koto/{__version__}"),
         }
         if protocol == "openai":
             headers["Authorization"] = f"Bearer {upstream_key}"
@@ -2004,7 +2004,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.close_connection = True
         if getattr(self, "_response_started", False):
             return
-        message = "Hormuz durable policy storage is temporarily unavailable."
+        message = "Koto durable policy storage is temporarily unavailable."
         if protocol is None:
             self._send_error("hormuz_storage_unavailable", message, HTTPStatus.SERVICE_UNAVAILABLE)
             return

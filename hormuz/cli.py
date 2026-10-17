@@ -24,14 +24,18 @@ from .store import StorageSchemaError
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="hormuz", description="Local routing for existing coding clients.")
+    parser = argparse.ArgumentParser(prog="koto", description="Koto: local routing for existing coding clients.")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("--config", default=os.environ.get("HORMUZ_CONFIG", "hormuz.json"),
-                        help="Router JSON configuration path (or HORMUZ_CONFIG)")
+    default_config = (os.environ.get("KOTO_CONFIG") or os.environ.get("HORMUZ_CONFIG")
+                      or ("hormuz.json" if not os.path.lexists("koto.json")
+                          and os.path.exists("hormuz.json")
+                          else "koto.json"))
+    parser.add_argument("--config", default=default_config,
+                        help="Router JSON configuration path (default: koto.json or KOTO_CONFIG)")
     parser.add_argument("--verbose", action="store_true", help="Enable content-free request logs")
     commands = parser.add_subparsers(dest="command")
     commands.add_parser("serve", help="Run the customer-local router")
-    disable = commands.add_parser("off", help="Disable Hormuz and restore the connected Codex settings")
+    disable = commands.add_parser("off", help="Disable Koto and restore the connected Codex settings")
     disable.add_argument("--client-home", help="Codex home (default CODEX_HOME or ~/.codex)")
     disable.add_argument("--generation", help="Disconnect only the receipt generation that you own")
     disable.set_defaults(client="codex", client_command="disconnect")
@@ -104,7 +108,7 @@ def _serve(config: GatewayConfig) -> int:
     previous_term = signal.signal(signal.SIGTERM, stop)
     previous_int = signal.signal(signal.SIGINT, stop)
     try:
-        print(f"Hormuz router listening on http://{config.listen.host}:{config.listen.port}", flush=True)
+        print(f"Koto router listening on http://{config.listen.host}:{config.listen.port}", flush=True)
         server.serve_forever()
     finally:
         signal.signal(signal.SIGTERM, previous_term)

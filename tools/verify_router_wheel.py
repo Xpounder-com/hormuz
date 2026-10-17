@@ -18,11 +18,12 @@ def main():
     wheel = args.wheel.resolve()
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
-        required = {'hormuz/codex-0160-base-instructions.json', 'hormuz/codex-0160-LICENSE.txt',
+        required = {'koto/__init__.py', 'koto/__main__.py',
+                    'hormuz/codex-0160-base-instructions.json', 'hormuz/codex-0160-LICENSE.txt',
                     'hormuz/local-setup-codex-0160-llama-b11617-qwen3-4b-v1.json',
                     'hormuz/local-setup-codex-app-0162-llama-b11617-qwen3-4b-v3.json'}
         if not required <= set(names):
-            raise SystemExit('Wheel is missing Codex CLI/app compatibility assets')
+            raise SystemExit('Wheel is missing Koto entry points or Codex CLI/app compatibility assets')
         if any('/migrations/postgresql/' in name or name.startswith(('clients/', 'apps/', 'deploy/'))
                or name.endswith('.css') or name in {'hormuz/postgres.py', 'hormuz/work_billing.py',
                'hormuz/hosted.py', 'hormuz/commands/agent.py'} for name in names):
@@ -35,9 +36,18 @@ def main():
         environment = {**os.environ, 'PYTHONPATH': str(site), 'PYTHONDONTWRITEBYTECODE': '1'}
         shutil.copytree(ROOT / 'tests', temporary / 'tests', ignore=shutil.ignore_patterns('__pycache__'))
         subprocess.run([sys.executable, '-c',
-                        'from pathlib import Path; import hormuz; '
-                        'assert Path(hormuz.__file__).resolve().is_relative_to(Path("installed").resolve())'],
+                        'from pathlib import Path; import koto, hormuz; '
+                        'assert koto.GatewayConfig is hormuz.GatewayConfig; '
+                        'assert all(Path(module.__file__).resolve().is_relative_to(Path("installed").resolve()) '
+                        'for module in (koto, hormuz))'],
                        cwd=temporary, env=environment, check=True, timeout=10)
+        scripts = site / ('Scripts' if os.name == 'nt' else 'bin')
+        for name in ('koto', 'hormuz'):
+            executable = scripts / (name + '.exe' if os.name == 'nt' else name)
+            help_result = subprocess.run([str(executable), '--help'], cwd=temporary, env=environment,
+                                         capture_output=True, text=True, check=True, timeout=10)
+            if 'usage: koto ' not in help_result.stdout:
+                raise SystemExit('Installed CLI does not expose the Koto identity: ' + name)
         subprocess.run([sys.executable, '-m', 'unittest', 'discover', '-s', 'tests',
                         '-p', 'test_*workflow.py', '-f', '-v'],
                        # The 408-test main job on 2026-10-16 took 1118 seconds.

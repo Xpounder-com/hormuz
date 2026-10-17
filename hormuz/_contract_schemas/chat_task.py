@@ -1,4 +1,4 @@
-"""V1 receipts for explicit, local-only Hormuz tasks in an existing chat."""
+"""V1 receipts for explicit, local-only Koto tasks in an existing chat."""
 import re
 from pathlib import Path
 from .common import ContractValidationError, _exact_keys

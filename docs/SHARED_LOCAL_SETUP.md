@@ -3,12 +3,12 @@
 `client setup codex` generates a local-only router configuration from existing
 verified llama.cpp and model files, then connects through the existing
 [connected-client lifetime](CONNECTED_CLIENT_LIFETIME.md). The terminal and
-[Hormuz skill](../skills/hormuz/references/workflow.md) call this same command.
+[Koto skill](../skills/koto/references/workflow.md) call this same command.
 This implements the next setup slice of [#523](https://github.com/Xpounder-com/hormuz/issues/523).
 
 ## Use
 
-Use an installed Hormuz development CLI and a supported Codex CLI executable.
+Use an installed Koto development CLI and a supported Codex CLI executable.
 Setup creates or reuses a private local caller credential and configures a
 generation-bound Codex auth helper. No manual token export or cloud account is
 needed. See [credential ownership and recovery](LOCAL_CREDENTIAL_SETUP.md).
@@ -20,11 +20,11 @@ Its read-only preview shows the pinned sources, licenses, sizes and storage
 requirement. Explicit `--download` obtains the assets and returns the arguments
 for this existing setup command; it does not connect the client itself.
 
-Check `hormuz client setup --help` when updating a development installation;
+Check `koto client setup --help` when updating a development installation;
 the development version string alone does not establish command availability.
 
 ```sh
-hormuz --config /absolute/private/hormuz.json client setup codex \
+koto --config /absolute/private/koto.json client setup codex \
   --client-home /absolute/codex-home --executable /absolute/codex \
   --runtime-archive /absolute/llama-b11617-bin-macos-arm64.tar.gz \
   --llama-executable /absolute/runtime/llama-server \
@@ -35,15 +35,15 @@ Review the configuration's operation, local-only mode, model, qualification,
 managed authentication and proposed loopback ports, plus the nested connection
 preview. Run the identical command without `--dry-run` to create and connect.
 Use `--credential-env NAME` to explicitly retain environment-backed authentication.
-That mode still requires the variable in both Hormuz and Codex. Existing
+That mode still requires the variable in both Koto and Codex. Existing
 environment-backed configurations are preserved; reconnect with `client connect`
 or use their original `--credential-env` rather than implicitly migrating them.
 Generated configurations use actor `local-user`; other configured identities
 remain available through the existing `client connect` workflow.
 
 ```sh
-hormuz client status codex --client-home /absolute/codex-home
-hormuz client disconnect codex --client-home /absolute/codex-home
+koto client status codex --client-home /absolute/codex-home
+koto client disconnect codex --client-home /absolute/codex-home
 ```
 
 Setup success requires the nested connection receipt to report `connected`,

@@ -23,11 +23,11 @@ class ChatTaskError(RuntimeError):
 
 
 def add_commands(commands):
-    chat = commands.add_parser('chat', help='Use Hormuz for an explicit task without changing the Codex model')
+    chat = commands.add_parser('chat', help='Use Koto for an explicit task without changing the Codex model')
     operations = chat.add_subparsers(dest='chat_command', required=True)
     for name in ('models', 'ask'):
         command = operations.add_parser(name)
-        command.add_argument('--router-home', required=True, help='Separate, already connected Hormuz control home')
+        command.add_argument('--router-home', required=True, help='Separate, already connected Koto control home')
         if name == 'ask':
             command.add_argument('--model', help='Qualified local alias; omit to use the configured router default')
             command.add_argument('--prompt-file', required=True, help='UTF-8 task file, or - for standard input')
@@ -77,7 +77,7 @@ def run(args):
             if remaining <= 0:
                 raise TimeoutError('chat_deadline')
             headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
-                       'User-Agent': 'Hormuz explicit-chat-task', 'X-Hormuz-Routing-Mode': 'local_only'}
+                       'User-Agent': 'Koto explicit-chat-task', 'X-Hormuz-Routing-Mode': 'local_only'}
             if payload is not None:
                 headers['X-Hormuz-Task-Selection'] = 'model' if args.model else 'router'
             message = Request(provider['base_url'] + path, headers=headers,

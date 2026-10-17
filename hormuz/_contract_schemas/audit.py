@@ -58,7 +58,7 @@ def validate_audit_event(value: Mapping[str, Any]) -> None:
         if event_type == "security.secret":
             _validate_audit_security_v2(value)
             return
-    raise ContractValidationError(f"unsupported Hormuz audit event: {event_type} v{version}")
+    raise ContractValidationError(f"unsupported Koto audit event: {event_type} v{version}")
 
 
 def validate_audit_anchor(value: Mapping[str, Any]) -> None:

@@ -1,6 +1,6 @@
 # Codex app local transport
 
-For the normal Codex app, use the [explicit Hormuz chat workflow](HORMUZ_CHAT.md).
+For the normal Codex app, use the [explicit Koto chat workflow](KOTO_CHAT.md).
 It keeps the native model, account and startup path intact. Normal-app bridge
 activation is disabled. The pinned transport qualification below is historical
 and is exercised only in separate control homes; it does not authorize replacing
@@ -75,7 +75,7 @@ Provider edits block authentication. Disconnect preserves newer user edits.
 
 Normal-app activation of the [app-server adapter experiment](CODEX_APP_BRIDGE.md)
 is disabled after a reported organization-policy startup failure. Use the
-[explicit Hormuz chat workflow](HORMUZ_CHAT.md), which leaves native startup,
+[explicit Koto chat workflow](KOTO_CHAT.md), which leaves native startup,
 authentication and model selection intact. The following describes the stock
 app's provider-binding limits, not a verified combined desktop picker.
 
@@ -84,7 +84,7 @@ The installed app engine binds one provider when a thread starts. Its
 provider; `turn/start` can change the model but has no provider override.
 Selecting Qwen in an existing OpenAI-backed thread therefore sends Qwen to the
 ChatGPT provider and returns `The 'Qwen3-4B-Q4_K_M' model is not supported when
-using Codex with a ChatGPT account.` The model label alone cannot select Hormuz.
+using Codex with a ChatGPT account.` The model label alone cannot select Koto.
 
 For local routing, require an active shared connection, reload the app's
 configuration and create a new chat using the connected provider. Keep existing
@@ -94,7 +94,7 @@ appears in `model/list` with `includeHidden: false`. That establishes normal
 catalog visibility, not its exact placement in the desktop menu.
 
 The observed desktop picker changes the model and effort, leaving the thread's
-provider unchanged. Mixing usable ChatGPT-plan models and Hormuz local models
+provider unchanged. Mixing usable ChatGPT-plan models and Koto local models
 in one picker requires the app to retain a provider identity for each model and
 select that provider when starting a chat. A plugin or a catalog-only change
 cannot supply that missing app behavior. Report this UI requirement separately

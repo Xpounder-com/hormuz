@@ -11,22 +11,22 @@ Use an existing gateway configuration with local ingress bound to `127.0.0.1`, a
 Review the proposed user-default changes before activation:
 
 ```sh
-hormuz --config /path/to/hormuz.json client connect codex \
+koto --config /path/to/koto.json client connect codex \
   --executable /path/to/codex --actor developer --dry-run
 ```
 
 Activate the same connection:
 
 ```sh
-hormuz --config /path/to/hormuz.json client connect codex \
+koto --config /path/to/koto.json client connect codex \
   --executable /path/to/codex --actor developer
 ```
 
 The default client home is `CODEX_HOME`, or `~/.codex` when that variable is absent. `--client-home /path/to/disposable-codex-home` selects an explicit home for every lifecycle command. Routine tests use that explicit disposable path and never modify the active user's configuration.
 
-Setup checks the executable version, known local managed-configuration files, gateway settings and safe file ownership before changing user defaults. The preview lists the settings and provider-table change without starting the router or activating routing. Connect modifies `model`, `model_provider` and `web_search`, adds a unique Hormuz provider table and starts an owned local router. Environment-backed provider tables contain the credential variable name. Default shared setup instead uses [managed local credentials](LOCAL_CREDENTIAL_SETUP.md) and a generation-bound auth command; neither table contains a credential value. For an environment-backed configuration, the runtime and Codex must receive the appropriate gateway token through their ordinary environment; provider credentials remain governed by the gateway configuration. Existing Codex authentication files are not imported or repurposed.
+Setup checks the executable version, known local managed-configuration files, gateway settings and safe file ownership before changing user defaults. The preview lists the settings and provider-table change without starting the router or activating routing. Connect modifies `model`, `model_provider` and `web_search`, adds a unique Koto provider table and starts an owned local router. Environment-backed provider tables contain the credential variable name. Default shared setup instead uses [managed local credentials](LOCAL_CREDENTIAL_SETUP.md) and a generation-bound auth command; neither table contains a credential value. For an environment-backed configuration, the runtime and Codex must receive the appropriate gateway token through their ordinary environment; provider credentials remain governed by the gateway configuration. Existing Codex authentication files are not imported or repurposed.
 
-Keep the existing coding app. Run the qualified Codex CLI normally after connect. An already-running client may require a restart to reload its user defaults. Trusted project configuration, profiles and command-line overrides can select other settings; this connection does not guarantee that every Codex request traverses Hormuz. Hard local-only applies to the model request paths that actually reach the configured router. Other tools, plugins and app connections retain their own network behavior.
+Keep the existing coding app. Run the qualified Codex CLI normally after connect. An already-running client may require a restart to reload its user defaults. Trusted project configuration, profiles and command-line overrides can select other settings; this connection does not guarantee that every Codex request traverses Koto. Hard local-only applies to the model request paths that actually reach the configured router. Other tools, plugins and app connections retain their own network behavior.
 
 With AI Work enabled, the router can [bind a recognized native conversation](CONVERSATION_WORK_BINDING.md)
 without a per-process work-ID override. The binding belongs to the connected
@@ -35,8 +35,8 @@ router epoch; after disconnect/reconnect, start with fresh conversation state.
 ## Status and disconnect
 
 ```sh
-hormuz client status codex
-hormuz client disconnect codex
+koto client status codex
+koto client disconnect codex
 ```
 
 Lifecycle commands emit strictly validated JSON with `schema_id` and `schema_version: 1`. Status separates the durable setup phase from the owned router's current response. A `connected` journal phase alone does not prove that the router is reachable, that a local model is ready or that a task completed. Inspect [router state](LOCAL_ROUTE_ADMISSION.md#status-compatibility-and-rollback) and request receipts for admission, destination and request outcomes.
@@ -44,15 +44,15 @@ Lifecycle commands emit strictly validated JSON with `schema_id` and `schema_ver
 The connection receipt includes its opaque `generation`. Automation retaining a receipt can guard cleanup:
 
 ```sh
-hormuz client disconnect codex --generation RECEIPT_GENERATION
+koto client disconnect codex --generation RECEIPT_GENERATION
 ```
 
 A mismatched generation cannot remove a newer connection. Repeated connect with the same active setup reuses the owner; changed setup requires an explicit disconnect/reconnect. Repeated disconnect is safe. Removing plugin instruction files does not disconnect the router; invoke the disconnect command before assuming the connection is removed.
 
-Disconnect restores each owned setting only when its current value still equals the value Hormuz installed. Later user edits remain intact and appear in `retained_settings`. An edited provider table is retained rather than overwritten or deleted. Unrelated preferences and provider tables remain in place. This is value restoration, not a whole-document backup replay or a promise to reproduce every original byte.
+Disconnect restores each owned setting only when its current value still equals the value Koto installed. Later user edits remain intact and appear in `retained_settings`. An edited provider table is retained rather than overwritten or deleted. Unrelated preferences and provider tables remain in place. This is value restoration, not a whole-document backup replay or a promise to reproduce every original byte.
 
 Native Codex may append a project trust table after connecting. A blank separator
-before that table does not make the unchanged Hormuz provider user-owned:
+before that table does not make the unchanged Koto provider user-owned:
 disconnect removes its exact installed bytes and preserves the appended settings.
 
 Disconnect also requests shutdown over the generation-owned private control socket and waits for the kernel-held runtime lease to release. Cleanup drains the router, cancels owned client sockets and closes owned resources. A bounded shutdown watchdog may exit only that owned host after five seconds; it does not search for or terminate unrelated processes. Existing conservative accounting and recovery for ambiguous provider work remain authoritative.
@@ -110,7 +110,7 @@ Preview output instead has `schema_id: "hormuz.connected-client-preview"`,
 changes. Preview rejects pending recovery without performing it. An error exits
 2 and emits `{"schema_id":"hormuz.connected-client-error","schema_version":1,"error":{"code":"connected_client_...","action":"..."}}`
 on stderr. `action` describes the next safe operation; no credential or private
-source path is returned. `hormuz contract manifest` discovers all three public
+source path is returned. `koto contract manifest` discovers all three public
 contracts and the finite lifecycle error codes. Validators reject unknown fields,
 unsupported versions, invalid states and mismatched error recovery actions.
 The workflow's [status](../tests/fixtures/connected-client-status-v1.json),

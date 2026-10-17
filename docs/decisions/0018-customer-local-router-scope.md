@@ -6,7 +6,7 @@
   “Keep operational cleanup; close unrelated product issues.”
 - Specification: [#523](https://github.com/Xpounder-com/hormuz/issues/523)
 
-Hormuz is a customer-local router for existing coding clients, with CLI and
+Koto is a customer-local router for existing coding clients, with CLI and
 skills-only plugin entry points. The approved public test seam is connect →
 coding-client request through the router → result/status → disconnect. Existing
 clients retain their execution, permissions and agent loop. MCP is optional for

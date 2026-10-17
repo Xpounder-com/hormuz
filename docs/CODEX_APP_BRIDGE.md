@@ -25,7 +25,7 @@ retries a submitted model request or silently moves local work to the cloud.
 ## Recover the normal app
 
 ```sh
-hormuz off
+koto off
 ```
 
 This disables the saved bridge, restores the previous launch setting when
@@ -34,7 +34,7 @@ receipt reports the router and any owned model process stopped. Current normal
 settings remain intact; no app reinstall or sign-out is required by this command.
 Existing files remain available for inspection and recovery.
 
-Use [the explicit chat workflow](HORMUZ_CHAT.md) for local tasks. It leaves the
+Use [the explicit chat workflow](KOTO_CHAT.md) for local tasks. It leaves the
 native application startup and selected host model intact.
 
 ## Isolated experiment only
@@ -53,6 +53,6 @@ home remain rejected even with this flag. No test activates the user's app.
 python -m unittest tests.test_codex_startup_workflow tests.test_codex_app_bridge_workflow -v
 ```
 
-A future native Hormuz picker entry needs supported per-selection app routing
+A future native Koto picker entry needs supported per-selection app routing
 and a complete isolated desktop startup, organization-policy, login, menu and
 restoration qualification before any daily-app activation.

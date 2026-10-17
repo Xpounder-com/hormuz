@@ -1,11 +1,19 @@
 {
-  "name": "hormuz",
-  "interface": {"displayName": "Hormuz"},
+  "name": "koto",
+  "interface": {
+    "displayName": "Koto"
+  },
   "plugins": [
     {
-      "name": "hormuz",
-      "source": {"source": "local", "path": "./"},
-      "policy": {"installation": "AVAILABLE", "authentication": "ON_USE"},
+      "name": "koto",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
       "category": "Developer Tools"
     }
   ]

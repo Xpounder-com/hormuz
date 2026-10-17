@@ -23,7 +23,7 @@ The [qualification criteria](LOCAL_CODING_QUALIFICATION.md) still govern readine
 4. Explicitly authorize that case over the existing private owner channel:
 
    ```sh
-   hormuz client qualify codex --client-home /absolute/private/codex-home \
+   koto client qualify codex --client-home /absolute/private/codex-home \
      --plan /absolute/private/probe-plan.json
    ```
 

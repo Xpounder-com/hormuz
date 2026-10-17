@@ -14,7 +14,7 @@ DNS/trust stores and the coding-client executable.
 
 - Default-off GET `/backend-api/codex/models`, with only an optional numeric
   `client_version` query. Never accept an upstream URL from the caller.
-- Separate `X-Gateway-Key` authenticates the Hormuz identity. A single native
+- Separate `X-Gateway-Key` authenticates the Koto identity. A single native
   bearer token and optional single `ChatGPT-Account-ID` go only to the fixed,
   certificate-verified `https://chatgpt.com/backend-api/codex/models` endpoint.
   Reject missing, malformed, duplicate or known gateway/API credentials used

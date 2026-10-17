@@ -1,6 +1,6 @@
 # Codex 0.160.0 routing profile
 
-Hormuz supports exact CLI versions 0.147.0 and 0.160.0. The connection owner
+Koto supports exact CLI versions 0.147.0 and 0.160.0. The connection owner
 detects the actual executable and records that version in previews, status and
 the private journal. Keep an installed 0.160.0 executable; a downgrade is not
 required. Other versions remain blocked. This terminal-CLI qualification does
@@ -28,7 +28,7 @@ The same settings can accompany an interactive Codex invocation. Keep the
 project, task and permissions selected by the user. The adapter preserves the
 coding client's agent loop; it does not execute tools itself. Namespaced and
 freeform tools remain unsupported by this runtime profile. In particular,
-llama.cpp b11617 skips non-function Responses tool declarations, so Hormuz
+llama.cpp b11617 skips non-function Responses tool declarations, so Koto
 blocks those requests instead of silently losing available tools. Reasoning
 execution controls remain blocked. The qualified empty object or explicit
 `{"effort":"none"}` disables request reasoning. The launch override takes
@@ -61,7 +61,7 @@ without claiming a tokenizer context window or coding quality.
 
 The catalog embeds the exact upstream 0.160.0 fallback instructions so that
 valid metadata does not replace Codex's tool/permission guidance with a new
-Hormuz prompt. The bundled JSON records its origin and SHA-256; the upstream
+Koto prompt. The bundled JSON records its origin and SHA-256; the upstream
 Apache-2.0 license is distributed beside it. Native custom credentials remain
 generation-bound local commands; personal authentication caches are unused.
 
@@ -69,7 +69,7 @@ The additive catalog contract is version 1, frozen by
 [`codex-model-catalog-0.160-v1.json`](../tests/fixtures/codex-model-catalog-0.160-v1.json).
 Earlier OpenAI consumers may ignore the extra `models` member. No stored
 ledger or credential is migrated. Existing 0.147.0 provider blocks and journals
-remain readable. Before running an older Hormuz binary, disconnect a 0.160.0
+remain readable. Before running an older Koto binary, disconnect a 0.160.0
 lifetime with this binary: older versions do not understand the new provider
 block. Preserve the current binary until owned cleanup succeeds.
 

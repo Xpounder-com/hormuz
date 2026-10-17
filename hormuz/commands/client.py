@@ -27,7 +27,7 @@ def add_client_commands(
     bridge = client_subparsers.add_parser("bridge", help="Isolated app-adapter experiment; normal app activation is disabled")
     bridge.add_argument("client", choices=["codex"])
     bridge.add_argument("--client-home", help="Normal Codex home (default CODEX_HOME or ~/.codex)")
-    bridge.add_argument("--router-home", required=True, help="Separate home with a ready shared Hormuz connection")
+    bridge.add_argument("--router-home", required=True, help="Separate home with a ready shared Koto connection")
     bridge.add_argument("--directory", required=True, help="New private directory for the reversible app adapter")
     bridge.add_argument("--executable", required=True, help="Unchanged native Codex app engine")
     bridge.add_argument("--launchctl", default="/bin/launchctl", help="Launch environment controller")
@@ -88,7 +88,9 @@ def add_client_commands(
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
     auth_token = auth_subparsers.add_parser("token", help="Print a credential from an environment variable")
-    auth_token.add_argument("--env", default="HORMUZ_GATEWAY_TOKEN", help="Credential environment variable")
+    auth_token.add_argument("--env", default=("HORMUZ_GATEWAY_TOKEN" if "KOTO_GATEWAY_TOKEN" not in os.environ
+                                             and "HORMUZ_GATEWAY_TOKEN" in os.environ else "KOTO_GATEWAY_TOKEN"),
+                            help="Credential environment variable (default: KOTO_GATEWAY_TOKEN)")
     local_token = auth_subparsers.add_parser("local-token", help="Generation-bound credential helper for Codex")
     local_token.add_argument("--client-home", required=True)
     local_token.add_argument("--generation", required=True)
@@ -181,11 +183,11 @@ def _client_config(
         lines = [
             "# Put this in the user-level ~/.codex/config.toml",
             f"model = {json.dumps(default_model)}",
-            'model_provider = "hormuz"',
+            'model_provider = "koto"',
             *(['web_search = "disabled"'] if work_headers else []),
             "",
-            "[model_providers.hormuz]",
-            'name = "Hormuz"',
+            "[model_providers.koto]",
+            'name = "Koto"',
             f"base_url = {json.dumps(base_url + '/v1')}",
             'wire_api = "responses"',
         ]

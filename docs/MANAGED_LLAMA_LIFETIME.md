@@ -9,7 +9,7 @@ and [ADR 0020](decisions/0020-managed-llama-lifetime.md).
 
 The files must already exist. This slice does not acquire, extract, convert or
 select models or runtime archives. A healthy externally started engine remains
-external; Hormuz neither adopts it nor stops it.
+external; Koto neither adopts it nor stops it.
 
 ## Profile and activation
 
@@ -59,16 +59,16 @@ Use the existing lifecycle commands with an explicit disposable client home
 while evaluating a profile:
 
 ```sh
-hormuz --config /absolute/hormuz.json client connect codex \
+koto --config /absolute/koto.json client connect codex \
   --executable /absolute/codex --actor developer \
   --client-home /absolute/disposable-codex-home --dry-run
 
-hormuz --config /absolute/hormuz.json client connect codex \
+koto --config /absolute/koto.json client connect codex \
   --executable /absolute/codex --actor developer \
   --client-home /absolute/disposable-codex-home
 
-hormuz client status codex --client-home /absolute/disposable-codex-home
-hormuz client disconnect codex --client-home /absolute/disposable-codex-home
+koto client status codex --client-home /absolute/disposable-codex-home
+koto client disconnect codex --client-home /absolute/disposable-codex-home
 ```
 
 Preview verifies the files and requires the target engine endpoint to be free.
@@ -233,7 +233,7 @@ model, plugin installation, subscription authentication or paid cloud fallback.
 
 ## Bounded real managed-lifetime qualification — October 15, 2026
 
-One real Codex → Hormuz → llama.cpp supplied-script case passed on clean source
+One real Codex → Koto → llama.cpp supplied-script case passed on clean source
 `d41eac453dbab7d1cc49f13409d9be62937a22f4`. Acceptance, the driver and a manifest
 pinning every runtime Python file were frozen before execution. The driver
 required that explicit clean commit and an exclusive started marker permitted
